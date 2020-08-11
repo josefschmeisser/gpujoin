@@ -1,0 +1,5 @@
+build*
+compile_commands.json
+.kdev4
+.vscode
+
