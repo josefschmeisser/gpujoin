@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 
 project(SimpleConcurrentGPUHashTable LANGUAGES CXX CUDA)
 
+set(CMAKE_CXX_STANDARD 17)
+
 # put predefined cmake projects in their own solution folder
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -13,3 +15,4 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 
 add_executable(gpujoin ${SOURCE_FILES})
 
+add_subdirectory(src/tpch)

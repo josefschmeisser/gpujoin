@@ -1,9 +1,11 @@
+#include <bits/stdint-intn.h>
 #include <cstring>
 #include <iostream>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <cassert>
 
 #include "common.hpp"
 #include "thirdparty/parser.hpp"
@@ -45,14 +47,23 @@ static int64_t to_numeric(std::string_view s, size_t scale) {
     return value;
 }
 
+// source:
+// https://stason.org/TULARC/society/calendars/2-15-1-Is-there-a-formula-for-calculating-the-Julian-day-nu.html
+constexpr uint32_t to_julian_day(uint32_t day, uint32_t month, uint32_t year) {
+    uint32_t a = (14 - month) / 12;
+    uint32_t y = year + 4800 - a;
+    uint32_t m = month + 12 * a - 3;
+    return day + (153 * m + 2) / 5 + y * 365 + y / 4 - y / 100 + y / 400 -
+           32045;
+}
+
 static uint32_t to_julian_day(const std::string& date) {
     uint32_t day, month, year;
     sscanf(date.c_str(), "%4d-%2d-%2d", &year, &month, &day);
     return to_julian_day(day, month, year);
 }
 
-static void load_lineitem_table(const std::string& file_name) {
-    auto& table = get_lineitem_table();
+static void load_lineitem_table(const std::string& file_name, lineitem_table_t& table) {
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
 
@@ -81,9 +92,7 @@ static void load_lineitem_table(const std::string& file_name) {
     }
 }
 
-static void load_part_table(const std::string& file_name) {
-    auto& table = get_part_table();
-
+static void load_part_table(const std::string& file_name, part_table_t& table) {
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
 
@@ -111,48 +120,9 @@ static void load_part_table(const std::string& file_name) {
     }
 }
 
-void load_local_tables(const std::string& lineitem_file, const std::string& part_file) {
-    load_lineitem_table(lineitem_file);
-    load_part_table(part_file);
-}
-
-lineitem_table_t& get_lineitem_table() {
-    static lineitem_table_t table;
-    return table;
-}
-
-part_table_t& get_part_table() {
-    static part_table_t table;
-    return table;
-}
-
-void distribute_lineitem(QueryContext& context) {
-    auto& part_table = get_part_table();
-    if (part_table.p_partkey.empty()) {
-        std::cout << "warning: empty lineitem table" << std::endl;
-        return;
-    }
-    const auto some_partkey = *part_table.p_partkey.begin();
-
-    std::vector<std::thread> threads;
-    for (auto& host : context.hosts) {
-        auto& desc = host->get_description();
-
-        // just check if the first tuple is part of the current partition
-        if (some_partkey >= desc.lower_partkey &&
-            some_partkey < desc.upper_partkey) {
-            throw std::runtime_error("wrong partitioning");
-        }
-
-        threads.push_back(std::thread([&host]() {
-            auto& desc = host->get_description();
-            std::cout << "distribution_worker for: " << desc.host_name << ":"
-                      << desc.port << std::endl;
-            host->pushLineitemTuples();
-        }));
-    }
-    std::for_each(threads.begin(), threads.end(),
-                  [](auto& thread) { thread.join(); });
+void load_tables(Database& db, const std::string& path) {
+    load_lineitem_table(path + "lineitem.tbl", db.lineitem);
+    load_part_table(path + "part.tbl", db.part);
 }
 
 static inline uint64_t ilog2(uint64_t num) {
@@ -180,57 +150,45 @@ where
         and l_shipdate >= date '1995-09-01'
         and l_shipdate < date '1995-10-01'
 */
-template <bool filtered>
-static std::pair<int64_t, int64_t> execute_query(
-    const lineitem_table_t& lineitem_table, int64_t value = 2) {
+void query_14(Database& db) {
+    int64_t value = 2;
     int64_t sum1 = 0;
     int64_t sum2 = 0;
 
-    //-- TODO exercise ?.?
     // your code goes here
     constexpr std::string_view prefix = "PROMO";
-    auto& part_table = get_part_table();
+    auto& part = db.part;
+    auto& lineitem = db.lineitem;
 
     // aggregation loop
-    for (size_t i = 0; i < lineitem_table.l_partkey.size(); ++i) {
-        if (!filtered) {
-            constexpr auto lower_shipdate =
-                to_julian_day(1, 9, 1995);  // 1995-09-01
-            constexpr auto upper_shipdate =
-                to_julian_day(1, 10, 1995);  // 1995-10-01
-            if (lineitem_table.l_shipdate[i] < lower_shipdate ||
-                lineitem_table.l_shipdate[i] >= upper_shipdate) {
-                continue;
-            }
+    for (size_t i = 0; i < lineitem.l_partkey.size(); ++i) {
+        constexpr auto lower_shipdate =
+            to_julian_day(1, 9, 1995);  // 1995-09-01
+        constexpr auto upper_shipdate =
+            to_julian_day(1, 10, 1995);  // 1995-10-01
+        if (lineitem.l_shipdate[i] < lower_shipdate ||
+            lineitem.l_shipdate[i] >= upper_shipdate) {
+            continue;
         }
 
         // probe
-        auto it = part_partkey_index.find(lineitem_table.l_partkey[i]);
+        auto it = part_partkey_index.find(lineitem.l_partkey[i]);
         if (it == part_partkey_index.end()) {
             continue;
         }
         size_t j = it->second;
 
-        auto extendedprice = lineitem_table.l_extendedprice[i];
-        auto discount = lineitem_table.l_discount[i];
+        auto extendedprice = lineitem.l_extendedprice[i];
+        auto discount = lineitem.l_discount[i];
         auto summand = extendedprice * func(discount, value);
         sum2 += summand;
 
-        auto& type = part_table.p_type[j];
+        auto& type = part.p_type[j];
         if (type.compare(0, prefix.size(), prefix) == 0) {
             sum1 += summand;
         }
     }
-    //--
 
-    return std::make_pair(sum1, sum2);
-}
-
-std::pair<int64_t, int64_t> execute_query(QueryContext& context) {
-    int64_t local_sum1, local_sum2, remote_sum1, remote_sum2;
-    std::tie(local_sum1, local_sum2) =
-        execute_query<false>(get_lineitem_table(), context.secret_value);
-    std::tie(remote_sum1, remote_sum2) =
-        execute_query<true>(context.received_lineitem_table, context.secret_value);
-    return std::make_pair(local_sum1 + remote_sum1, local_sum2 + remote_sum2);
+    int64_t result = 100*sum1/sum2;
+    printf("%ld\n", result);
 }

@@ -3,7 +3,6 @@
 #include <array>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -26,6 +25,25 @@ struct lineitem_table_t {
     std::vector<std::string> l_comment;
 };
 
+struct lineitem_table_mgd_t {
+    uint32_t* l_orderkey;
+    uint32_t* l_partkey;
+    uint32_t* l_suppkey;
+    uint32_t* l_linenumber;
+    int64_t* l_quantity;
+    int64_t* l_extendedprice;
+    int64_t* l_discount;
+    int64_t* l_tax;
+    char* l_returnflag;
+    char* l_linestatus;
+    uint32_t* l_shipdate;
+    uint32_t* l_commitdate;
+    uint32_t* l_receiptdate;
+    std::array<char, 25> l_shipinstruct;
+    std::array<char, 10> l_shipmode;
+    std::string l_comment;
+};
+
 struct part_table_t {
     std::vector<uint32_t> p_partkey;
     std::vector<std::string> p_name;
@@ -38,26 +56,23 @@ struct part_table_t {
     std::vector<std::string> p_comment;
 };
 
-struct QueryContext {
-    
+struct part_table_mgd_t {
+    uint32_t* p_partkey;
+    std::string p_name;
+    std::array<char, 25> p_mfgr;
+    std::array<char, 10> p_brand;
+    std::string p_type;
+    int32_t* p_size;
+    std::array<char, 10> p_container;
+    int64_t* p_retailprice;
+    std::string p_comment;
 };
 
-lineitem_table_t& get_lineitem_table();
+struct Database {
+    lineitem_table_t lineitem;
+    part_table_t part;
+};
 
-part_table_t& get_part_table();
+void load_tables(Database& db, const std::string& path);
 
-void load_local_tables(const std::string& lineitem_file, const std::string& part_file);
-
-void distribute_lineitem(QueryContext& context);
-
-std::pair<int64_t, int64_t> execute_query(QueryContext& context);
-
-// source:
-// https://stason.org/TULARC/society/calendars/2-15-1-Is-there-a-formula-for-calculating-the-Julian-day-nu.html
-constexpr uint32_t to_julian_day(uint32_t day, uint32_t month, uint32_t year) {
-    uint32_t a = (14 - month) / 12;
-    uint32_t y = year + 4800 - a;
-    uint32_t m = month + 12 * a - 3;
-    return day + (153 * m + 2) / 5 + y * 365 + y / 4 - y / 100 + y / 400 -
-           32045;
-}
+void query_14(Database& db);
