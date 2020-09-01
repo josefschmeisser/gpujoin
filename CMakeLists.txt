@@ -9,10 +9,11 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 string(APPEND CMAKE_CUDA_FLAGS " -gencode arch=compute_60,code=sm_60")
 
-set(SOURCE_FILES src/gpujoin.cu)
-
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
+set(SOURCE_FILES src/gpujoin.cu)
 add_executable(gpujoin ${SOURCE_FILES})
+
+add_executable(add_grid src/add_grid.cu)
 
 add_subdirectory(src/tpch)
