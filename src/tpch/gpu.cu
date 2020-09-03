@@ -96,6 +96,7 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
             if (groupPtr->l_returnflag != l_returnflag[i] || groupPtr->l_linestatus != l_linestatus[i]) {
                 // TODO handle collisions
                 __threadfence();
+                printf("trap\n");
                 asm("trap;");
             }
         } else {
@@ -103,7 +104,13 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
             groupPtr = createGroup();
             groupPtr->l_returnflag = l_returnflag[i];
             groupPtr->l_linestatus = l_linestatus[i];
-            ht[h] = groupPtr; // FIXME may already be set; use CAS
+
+            // atomicCAS(int* address, int compare, int val);
+            auto stored = atomicCAS((unsigned long long int*)&ht[h], 0ull, (unsigned long long int)groupPtr);
+            if (stored != 0ull) {
+                free(groupPtr);
+                groupPtr = ht[h];
+            }
         }
 /*
         auto current_l_extendedprice = l_extendedprice[i];
@@ -111,14 +118,45 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
         auto current_l_quantity = l_quantity[i];
 
         atomicAdd((unsigned long long int*)&groupPtr->sum_qty, (unsigned long long int)current_l_quantity);
+
+        atomicAdd((unsigned long long int*)&groupPtr->count_order, 1ull);
     }
 
   //  __sync
   //  printf("done\n");
+
 /*
+struct group {
+    uint64_t sum_qty;
+    uint64_t sum_base_price;
+    uint64_t sum_disc_price;
+    uint64_t sum_charge;
+    uint64_t avg_qty;
+    uint64_t avg_price;
+    uint64_t avg_disc;
+    uint64_t count_order;
+*/
     for (int i = threadIdx.x; i < 16; i += blockDim.x) {
-        group* groupPtr = ht[i];
-    }*/
+        group* localGroup = ht[i];
+        group* globalGroup = globalHT[i];
+
+        if (globalGroup == nullptr) {
+            auto stored = atomicCAS((unsigned long long int*)&globalHT[i], 0ull, (unsigned long long int)localGroup);
+            if (stored != 0ull) {
+                globalGroup = globalHT[i];
+            }
+        }
+
+        if (localGroup != globalGroup) {
+            atomicAdd((unsigned long long int*)&globalGroup->sum_qty, (unsigned long long int)localGroup->sum_qty);
+
+            atomicAdd((unsigned long long int*)&globalGroup->count_order, (unsigned long long int)localGroup->count_order);
+        }
+
+    }
+
+
+    printf("%d\n", index);
 }
 
 __global__ void mallocTest()
@@ -263,11 +301,20 @@ int main(int argc, char** argv) {
     cudaFree(y);
 #endif
 
+    std::memset(globalHT, 0, 16*sizeof(void*));
+
     int blockSize = 256;
     int numBlocks = (N + blockSize - 1) / blockSize;
     // char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate
     query_1_kernel<<<numBlocks, blockSize>>>(N,
         lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_shipdate);
+
+    cudaDeviceSynchronize();
+    for (unsigned i = 0; i < 16; i++) {
+        if (globalHT[i] != nullptr) {
+            printf("group %d - count: %lu\n", i, globalHT[i]->count_order);
+        }
+    }
 
     return 0;
 }
