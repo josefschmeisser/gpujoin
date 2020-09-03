@@ -15,5 +15,6 @@ set(SOURCE_FILES src/gpujoin.cu)
 add_executable(gpujoin ${SOURCE_FILES})
 
 add_executable(add_grid src/add_grid.cu)
+add_executable(bitonic_sort src/bitonic_sort.cu)
 
 add_subdirectory(src/tpch)
