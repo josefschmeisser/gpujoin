@@ -38,10 +38,10 @@ struct lineitem_table_mgd_t {
     char* l_linestatus;
     uint32_t* l_shipdate;
     uint32_t* l_commitdate;
-    uint32_t* l_receiptdate;
+    uint32_t* l_receiptdate;/*
     std::array<char, 25> l_shipinstruct;
     std::array<char, 10> l_shipmode;
-    std::string l_comment;
+    std::string l_comment;*/
 };
 
 struct part_table_t {
@@ -78,3 +78,13 @@ void load_tables(Database& db, const std::string& path);
 void query_1(Database& db);
 
 void query_14(Database& db);
+
+// source:
+// https://stason.org/TULARC/society/calendars/2-15-1-Is-there-a-formula-for-calculating-the-Julian-day-nu.html
+constexpr uint32_t to_julian_day(uint32_t day, uint32_t month, uint32_t year) {
+    uint32_t a = (14 - month) / 12;
+    uint32_t y = year + 4800 - a;
+    uint32_t m = month + 12 * a - 3;
+    return day + (153 * m + 2) / 5 + y * 365 + y / 4 - y / 100 + y / 400 -
+           32045;
+}

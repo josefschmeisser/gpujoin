@@ -53,16 +53,6 @@ static int64_t to_numeric(std::string_view s, size_t scale) {
     return value;
 }
 
-// source:
-// https://stason.org/TULARC/society/calendars/2-15-1-Is-there-a-formula-for-calculating-the-Julian-day-nu.html
-constexpr uint32_t to_julian_day(uint32_t day, uint32_t month, uint32_t year) {
-    uint32_t a = (14 - month) / 12;
-    uint32_t y = year + 4800 - a;
-    uint32_t m = month + 12 * a - 3;
-    return day + (153 * m + 2) / 5 + y * 365 + y / 4 - y / 100 + y / 400 -
-           32045;
-}
-
 static uint32_t to_julian_day(const std::string& date) {
     uint32_t day, month, year;
     sscanf(date.c_str(), "%4d-%2d-%2d", &year, &month, &day);
@@ -182,7 +172,7 @@ struct lineitem_table_t {
 */
 void query_1(Database& db) {
     constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
-
+printf("ship: %lu\n", threshold_date);
     struct group {
         char l_returnflag;
         char l_linestatus;
@@ -199,6 +189,8 @@ void query_1(Database& db) {
 
     auto& lineitem = db.lineitem;
     for (size_t i = 0; i < lineitem.l_returnflag.size(); ++i) {
+        if (lineitem.l_shipdate[i] > threshold_date) continue;
+
         uint16_t k = static_cast<uint16_t>(lineitem.l_returnflag[i]) << 8;
         k |= lineitem.l_linestatus[i];
 

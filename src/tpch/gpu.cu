@@ -1,7 +1,10 @@
 #include <bits/stdint-intn.h>
 #include <bits/stdint-uintn.h>
+#include <cstddef>
 #include <iostream>
 #include <math.h>
+#include <cassert>
+#include <cstring>
 
 #include "common.hpp"
 
@@ -111,7 +114,11 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
     }
 
   //  __sync
-    printf("done\n");
+  //  printf("done\n");
+/*
+    for (int i = threadIdx.x; i < 16; i += blockDim.x) {
+        group* groupPtr = ht[i];
+    }*/
 }
 
 __global__ void mallocTest()
@@ -121,11 +128,105 @@ __global__ void mallocTest()
     free(ptr);
 }
 
-int main(void)
-{
+/*
+struct lineitem_table_t {
+    std::vector<uint32_t> l_orderkey;
+    std::vector<uint32_t> l_partkey;
+    std::vector<uint32_t> l_suppkey;
+    std::vector<uint32_t> l_linenumber;
+    std::vector<int64_t> l_quantity;
+    std::vector<int64_t> l_extendedprice;
+    std::vector<int64_t> l_discount;
+    std::vector<int64_t> l_tax;
+    std::vector<char> l_returnflag;
+    std::vector<char> l_linestatus;
+    std::vector<uint32_t> l_shipdate;
+    std::vector<uint32_t> l_commitdate;
+    std::vector<uint32_t> l_receiptdate;
+    std::vector<std::array<char, 25>> l_shipinstruct;
+    std::vector<std::array<char, 10>> l_shipmode;
+    std::vector<std::string> l_comment;
+};
+*/
+
+int main(int argc, char** argv) {
+    assert(argc > 1);
+    Database db;
+    load_tables(db, argv[1]);
+
+
+    const auto N = db.lineitem.l_commitdate.size();
+    lineitem_table_mgd_t lineitem;
+
+    size_t columnSize = N*sizeof(decltype(db.lineitem.l_orderkey)::value_type);
+    cudaMallocManaged(&lineitem.l_orderkey, columnSize);
+    std::memcpy(lineitem.l_orderkey, db.lineitem.l_orderkey.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_partkey)::value_type);
+    cudaMallocManaged(&lineitem.l_partkey, columnSize);
+    std::memcpy(lineitem.l_partkey, db.lineitem.l_partkey.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_suppkey)::value_type);
+    cudaMallocManaged(&lineitem.l_suppkey, columnSize);
+    std::memcpy(lineitem.l_suppkey, db.lineitem.l_suppkey.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_linenumber)::value_type);
+    cudaMallocManaged(&lineitem.l_linenumber, columnSize);
+    std::memcpy(lineitem.l_linenumber, db.lineitem.l_linenumber.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_quantity)::value_type);
+    cudaMallocManaged(&lineitem.l_quantity, columnSize);
+    std::memcpy(lineitem.l_quantity, db.lineitem.l_quantity.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_extendedprice)::value_type);
+    cudaMallocManaged(&lineitem.l_extendedprice, columnSize);
+    std::memcpy(lineitem.l_extendedprice, db.lineitem.l_extendedprice.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_discount)::value_type);
+    cudaMallocManaged(&lineitem.l_discount, columnSize);
+    std::memcpy(lineitem.l_discount, db.lineitem.l_discount.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_tax)::value_type);
+    cudaMallocManaged(&lineitem.l_tax, columnSize);
+    std::memcpy(lineitem.l_tax, db.lineitem.l_tax.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_returnflag)::value_type);
+    cudaMallocManaged(&lineitem.l_returnflag, columnSize);
+    std::memcpy(lineitem.l_returnflag, db.lineitem.l_returnflag.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_linestatus)::value_type);
+    cudaMallocManaged(&lineitem.l_linestatus, columnSize);
+    std::memcpy(lineitem.l_linestatus, db.lineitem.l_linestatus.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_shipdate)::value_type);
+    cudaMallocManaged(&lineitem.l_shipdate, columnSize);
+    std::memcpy(lineitem.l_shipdate, db.lineitem.l_shipdate.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_commitdate)::value_type);
+    cudaMallocManaged(&lineitem.l_commitdate, columnSize);
+    std::memcpy(lineitem.l_commitdate, db.lineitem.l_commitdate.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_receiptdate)::value_type);
+    cudaMallocManaged(&lineitem.l_receiptdate, columnSize);
+    std::memcpy(lineitem.l_receiptdate, db.lineitem.l_receiptdate.data(), columnSize);
+/*
+    columnSize = N*sizeof(decltype(db.lineitem.l_shipinstruct)::value_type);
+    cudaMallocManaged(&lineitem.l_shipinstruct, columnSize);
+    std::memcpy(lineitem.l_shipinstruct, db.lineitem.l_shipinstruct.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_shipmode)::value_type);
+    cudaMallocManaged(&lineitem.l_shipmode, columnSize);
+    std::memcpy(lineitem.l_shipmode, db.lineitem.l_shipmode.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(db.lineitem.l_comment)::value_type);
+    cudaMallocManaged(&lineitem.l_comment, columnSize);
+    std::memcpy(lineitem.l_comment, db.lineitem.l_comment.data(), columnSize);
+*/
+
     // Set a heap size of 128 megabytes. Note that this must
     // be done before any kernel is launched.
     cudaThreadSetLimit(cudaLimitMallocHeapSize, 128*1024*1024);
+#if 0
     mallocTest<<<1, 5>>>();
     cudaThreadSynchronize();
     return 0;
@@ -160,6 +261,13 @@ int main(void)
     // Free memory
     cudaFree(x);
     cudaFree(y);
+#endif
+
+    int blockSize = 256;
+    int numBlocks = (N + blockSize - 1) / blockSize;
+    // char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate
+    query_1_kernel<<<numBlocks, blockSize>>>(N,
+        lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_shipdate);
 
     return 0;
 }
