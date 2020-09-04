@@ -19,6 +19,7 @@ struct group {
     uint64_t count_order;
     char l_returnflag;
     char l_linestatus;
+    int used;
 };
 
 // CUDA kernel to add elements of two arrays
@@ -75,15 +76,18 @@ __managed__ group* globalHT[16];
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
 
+//__managed__ uint8_t buffer[1024*1024];
+__managed__ int tupleCount;
+
 __global__
 void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate)
 {
     //constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
     uint32_t threshold_date = 2451059;
-//printf("gridDim.x %d\n", gridDim.x);
-    __shared__ group* ht[16];
+
+    __shared__ group localGroups[16];
     for (int i = threadIdx.x; i < 16; i += blockDim.x) {
-        ht[i] = nullptr;
+        std::memset(&localGroups[i], 0, sizeof(group));
     }
     __syncthreads();
 
@@ -95,30 +99,27 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
         uint16_t h = static_cast<uint16_t>(l_returnflag[i]) << 8;
         h |= l_linestatus[i];
         h &= 0b0111;
-        group* groupPtr = ht[h];
-        if (groupPtr != nullptr) {
-        
-            if (groupPtr->l_returnflag != l_returnflag[i] || groupPtr->l_linestatus != l_linestatus[i]) {
-                // TODO handle collisions
+        group* groupPtr = &localGroups[h];
+
+        if (!groupPtr->used) {
+            //int atomicCAS(int* address, int compare, int val);
+            int stored = atomicCAS(&groupPtr->used, 0, 1);
+            if (stored == 0) {
+                groupPtr->l_returnflag = l_returnflag[i];
+                groupPtr->l_linestatus = l_linestatus[i];
                 __threadfence();
-                printf("trap\n");
-            //    asm("trap;");
             }
-        } else {
-            // create new group
-            groupPtr = createGroup();
-            groupPtr->l_returnflag = l_returnflag[i];
-            groupPtr->l_linestatus = l_linestatus[i];
-
-            // atomicCAS(int* address, int compare, int val);
-            auto stored = atomicCAS((unsigned long long int*)&ht[h], 0ull, (unsigned long long int)groupPtr);
-            if (stored != 0ull) {
-                free(groupPtr);
-                groupPtr = ht[h];
-            }*/
-            ht[h] =  groupPtr;
         }
-
+/*
+        __syncthreads();
+        if (groupPtr->l_returnflag != l_returnflag[i] || groupPtr->l_linestatus != l_linestatus[i]) {
+            // TODO handle collisions; spill to global hashtable
+            __threadfence();
+            printf("first trap\n");
+            asm("trap;");
+        }
+*/
+/*
         auto current_l_extendedprice = l_extendedprice[i];
         auto current_l_discount = l_discount[i];*/
         auto current_l_quantity = l_quantity[i];
@@ -142,40 +143,64 @@ struct group {
     uint64_t avg_disc;
     uint64_t count_order;
 */
+
+#if 1
+__syncthreads();
     for (int i = threadIdx.x; i < 16; i += blockDim.x) {
-        group* localGroup = ht[i];
+        group* localGroup = &localGroups[i];
+        if (!localGroup->used) continue;
+
         group* globalGroup = globalHT[i];
 
         if (globalGroup == nullptr) {
-            auto stored = atomicCAS((unsigned long long int*)&globalHT[i], 0ull, (unsigned long long int)localGroup);
+            group* groupPtr = createGroup();
+            groupPtr->l_returnflag = localGroup->l_returnflag;
+            groupPtr->l_linestatus = localGroup->l_linestatus;
+            auto stored = atomicCAS((unsigned long long int*)&globalHT[i], 0ull, (unsigned long long int)groupPtr);
             if (stored != 0ull) {
+                free(groupPtr);
                 globalGroup = globalHT[i];
+            } else {
+                globalGroup = groupPtr;
             }
         }
-
-        if (localGroup != globalGroup) {
-            atomicAdd((unsigned long long int*)&globalGroup->sum_qty, (unsigned long long int)localGroup->sum_qty);
-
-            atomicAdd((unsigned long long int*)&globalGroup->count_order, (unsigned long long int)localGroup->count_order);
+/*
+        if (localGroup->l_returnflag != globalGroup->l_returnflag || localGroup->l_linestatus != globalGroup->l_linestatus) {
+            // TODO
+            __threadfence();
+            printf("second trap\n");
+            asm("trap;");
         }
+*/
 
+        atomicAdd((unsigned long long int*)&globalGroup->sum_qty, (unsigned long long int)localGroup->sum_qty);
+
+        atomicAdd((unsigned long long int*)&globalGroup->count_order, (unsigned long long int)localGroup->count_order);
     }
-
+#endif
     __threadfence();
 
     if (threadIdx.x == 0) {
         // Thread 0 signals that it is done.
         unsigned int value = atomicInc(&count, gridDim.x);
-        printf("value: %d\n", value);
         // Thread 0 determines if its block is the last
         // block to be done.
         isLastBlockDone = (value == (gridDim.x - 1));
     }
 
     __syncthreads();
-if (isLastBlockDone) printf("last block done\n");
+
     if (isLastBlockDone && threadIdx.x == 0) {
         printf("last\n");
+
+        tupleCount = 0;
+
+        for (int i = 0; i < 16; i += ++i) {
+            group* globalGroup = globalHT[i];
+            if (globalGroup == nullptr) { continue; }
+
+            tupleCount += globalGroup->count_order;
+        }
 
         count = 0;
     }
@@ -323,7 +348,7 @@ int main(int argc, char** argv) {
     cudaFree(y);
 #endif
 
-    std::memset(globalHT, 0, 16*sizeof(void*));
+    std::memset(globalHT, 0, 16*sizeof(void*)); // FIXME
 
     int blockSize = 256;
     int numBlocks = (N + blockSize - 1) / blockSize;
@@ -338,6 +363,7 @@ int main(int argc, char** argv) {
             printf("group %d\n", i);
         }
     }
+    printf("tupleCount: %d\n", tupleCount);
 
     return 0;
 }
