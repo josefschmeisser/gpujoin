@@ -38,6 +38,7 @@ __device__ void ht_insert(int32_t k)
 
 __device__ group* createGroup() {
     group* ptr = (group*)malloc(sizeof(group));
+    assert(ptr);
     printf("Thread %d got pointer: %p\n", threadIdx.x, ptr);
     memset(ptr, 0, sizeof(group));
     return ptr;
@@ -71,12 +72,15 @@ order by
 
 __managed__ group* globalHT[16];
 
+__device__ unsigned int count = 0;
+__shared__ bool isLastBlockDone;
+
 __global__
 void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate)
 {
     //constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
     uint32_t threshold_date = 2451059;
-
+//printf("gridDim.x %d\n", gridDim.x);
     __shared__ group* ht[16];
     for (int i = threadIdx.x; i < 16; i += blockDim.x) {
         ht[i] = nullptr;
@@ -93,11 +97,12 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
         h &= 0b0111;
         group* groupPtr = ht[h];
         if (groupPtr != nullptr) {
+        
             if (groupPtr->l_returnflag != l_returnflag[i] || groupPtr->l_linestatus != l_linestatus[i]) {
                 // TODO handle collisions
                 __threadfence();
                 printf("trap\n");
-                asm("trap;");
+            //    asm("trap;");
             }
         } else {
             // create new group
@@ -110,9 +115,10 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
             if (stored != 0ull) {
                 free(groupPtr);
                 groupPtr = ht[h];
-            }
+            }*/
+            ht[h] =  groupPtr;
         }
-/*
+
         auto current_l_extendedprice = l_extendedprice[i];
         auto current_l_discount = l_discount[i];*/
         auto current_l_quantity = l_quantity[i];
@@ -155,8 +161,24 @@ struct group {
 
     }
 
+    __threadfence();
 
-    printf("%d\n", index);
+    if (threadIdx.x == 0) {
+        // Thread 0 signals that it is done.
+        unsigned int value = atomicInc(&count, gridDim.x);
+        printf("value: %d\n", value);
+        // Thread 0 determines if its block is the last
+        // block to be done.
+        isLastBlockDone = (value == (gridDim.x - 1));
+    }
+
+    __syncthreads();
+if (isLastBlockDone) printf("last block done\n");
+    if (isLastBlockDone && threadIdx.x == 0) {
+        printf("last\n");
+
+        count = 0;
+    }
 }
 
 __global__ void mallocTest()
@@ -263,7 +285,7 @@ int main(int argc, char** argv) {
 
     // Set a heap size of 128 megabytes. Note that this must
     // be done before any kernel is launched.
-    cudaThreadSetLimit(cudaLimitMallocHeapSize, 128*1024*1024);
+    cudaThreadSetLimit(cudaLimitMallocHeapSize, 1024*1024*1024);
 #if 0
     mallocTest<<<1, 5>>>();
     cudaThreadSynchronize();
@@ -305,6 +327,7 @@ int main(int argc, char** argv) {
 
     int blockSize = 256;
     int numBlocks = (N + blockSize - 1) / blockSize;
+    printf("numblocks: %d\n", numBlocks);
     // char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate
     query_1_kernel<<<numBlocks, blockSize>>>(N,
         lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_shipdate);
@@ -312,7 +335,7 @@ int main(int argc, char** argv) {
     cudaDeviceSynchronize();
     for (unsigned i = 0; i < 16; i++) {
         if (globalHT[i] != nullptr) {
-            printf("group %d - count: %lu\n", i, globalHT[i]->count_order);
+            printf("group %d\n", i);
         }
     }
 
