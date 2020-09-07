@@ -17,9 +17,9 @@ struct group {
     uint64_t avg_price;
     uint64_t avg_disc;
     uint64_t count_order;
-    int in_use;
     char l_returnflag;
     char l_linestatus;
+    int in_use;
 };
 
 // CUDA kernel to add elements of two arrays
@@ -120,29 +120,19 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
             asm("trap;");
         }
 */
-/*
+
         auto current_l_extendedprice = l_extendedprice[i];
-        auto current_l_discount = l_discount[i];*/
+        auto current_l_discount = l_discount[i];
         auto current_l_quantity = l_quantity[i];
-
         atomicAdd((unsigned long long int*)&groupPtr->sum_qty, (unsigned long long int)current_l_quantity);
-
+        atomicAdd((unsigned long long int*)&groupPtr->sum_base_price, (unsigned long long int)current_l_extendedprice);
+        atomicAdd((unsigned long long int*)&groupPtr->sum_disc_price, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount)));
+        atomicAdd((unsigned long long int*)&groupPtr->sum_charge, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount) * (100 + l_tax[i])));
+        atomicAdd((unsigned long long int*)&groupPtr->avg_qty, (unsigned long long int)current_l_quantity);
+        atomicAdd((unsigned long long int*)&groupPtr->avg_price, (unsigned long long int)current_l_extendedprice);
+        atomicAdd((unsigned long long int*)&groupPtr->avg_disc, (unsigned long long int)current_l_discount);
         atomicAdd((unsigned long long int*)&groupPtr->count_order, 1ull);
     }
-
-
-/*
-struct group {
-    uint64_t sum_qty;
-    uint64_t sum_base_price;
-    uint64_t sum_disc_price;
-    uint64_t sum_charge;
-    uint64_t avg_qty;
-    uint64_t avg_price;
-    uint64_t avg_disc;
-    uint64_t count_order;
-*/
-
 
     __syncthreads();
     for (int i = threadIdx.x; i < 16; i += blockDim.x) {
@@ -173,8 +163,28 @@ struct group {
         }
 */
 
+/*
+struct group {
+    uint64_t sum_qty;
+    uint64_t sum_base_price;
+    uint64_t sum_disc_price;
+    uint64_t sum_charge;
+    uint64_t avg_qty;
+    uint64_t avg_price;
+    uint64_t avg_disc;
+    uint64_t count_order;
+    char l_returnflag;
+    char l_linestatus;
+    int in_use;
+};
+*/
         atomicAdd((unsigned long long int*)&globalGroup->sum_qty, (unsigned long long int)localGroup->sum_qty);
-
+        atomicAdd((unsigned long long int*)&globalGroup->sum_base_price, (unsigned long long int)localGroup->sum_base_price);
+        atomicAdd((unsigned long long int*)&globalGroup->sum_disc_price, (unsigned long long int)localGroup->sum_disc_price);
+        atomicAdd((unsigned long long int*)&globalGroup->sum_charge, (unsigned long long int)localGroup->sum_charge);
+        atomicAdd((unsigned long long int*)&globalGroup->avg_qty, (unsigned long long int)localGroup->avg_qty);
+        atomicAdd((unsigned long long int*)&globalGroup->avg_price, (unsigned long long int)localGroup->avg_price);
+        atomicAdd((unsigned long long int*)&globalGroup->avg_disc, (unsigned long long int)localGroup->avg_disc);
         atomicAdd((unsigned long long int*)&globalGroup->count_order, (unsigned long long int)localGroup->count_order);
     }
 
