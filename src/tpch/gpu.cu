@@ -17,9 +17,9 @@ struct group {
     uint64_t avg_price;
     uint64_t avg_disc;
     uint64_t count_order;
+    int in_use;
     char l_returnflag;
     char l_linestatus;
-    int used;
 };
 
 // CUDA kernel to add elements of two arrays
@@ -101,16 +101,17 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
         h &= 0b0111;
         group* groupPtr = &localGroups[h];
 
-        if (!groupPtr->used) {
+        if (!groupPtr->in_use) {
             //int atomicCAS(int* address, int compare, int val);
-            int stored = atomicCAS(&groupPtr->used, 0, 1);
+            int stored = atomicCAS(&groupPtr->in_use, 0, 1);
             if (stored == 0) {
                 groupPtr->l_returnflag = l_returnflag[i];
                 groupPtr->l_linestatus = l_linestatus[i];
                 __threadfence();
             }
         }
-/*
+
+/* TODO: collision handling
         __syncthreads();
         if (groupPtr->l_returnflag != l_returnflag[i] || groupPtr->l_linestatus != l_linestatus[i]) {
             // TODO handle collisions; spill to global hashtable
@@ -129,8 +130,6 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
         atomicAdd((unsigned long long int*)&groupPtr->count_order, 1ull);
     }
 
-  //  __sync
-  //  printf("done\n");
 
 /*
 struct group {
@@ -144,11 +143,11 @@ struct group {
     uint64_t count_order;
 */
 
-#if 1
-__syncthreads();
+
+    __syncthreads();
     for (int i = threadIdx.x; i < 16; i += blockDim.x) {
         group* localGroup = &localGroups[i];
-        if (!localGroup->used) continue;
+        if (!localGroup->in_use) continue;
 
         group* globalGroup = globalHT[i];
 
@@ -164,7 +163,8 @@ __syncthreads();
                 globalGroup = groupPtr;
             }
         }
-/*
+
+/* TODO: collision handling
         if (localGroup->l_returnflag != globalGroup->l_returnflag || localGroup->l_linestatus != globalGroup->l_linestatus) {
             // TODO
             __threadfence();
@@ -177,9 +177,10 @@ __syncthreads();
 
         atomicAdd((unsigned long long int*)&globalGroup->count_order, (unsigned long long int)localGroup->count_order);
     }
-#endif
+
     __threadfence();
 
+    // see CUDA guide: B.5. Memory Fence Functions
     if (threadIdx.x == 0) {
         // Thread 0 signals that it is done.
         unsigned int value = atomicInc(&count, gridDim.x);
@@ -348,7 +349,7 @@ int main(int argc, char** argv) {
     cudaFree(y);
 #endif
 
-    std::memset(globalHT, 0, 16*sizeof(void*)); // FIXME
+    std::memset(globalHT, 0, 16*sizeof(void*));
 
     int blockSize = 256;
     int numBlocks = (N + blockSize - 1) / blockSize;
