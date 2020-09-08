@@ -25,7 +25,7 @@ struct lineitem_table_t {
     std::vector<std::string> l_comment;
 };
 
-struct lineitem_table_mgd_t {
+struct lineitem_table_device_t {
     uint32_t* l_orderkey;
     uint32_t* l_partkey;
     uint32_t* l_suppkey;

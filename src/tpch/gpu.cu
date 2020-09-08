@@ -297,81 +297,85 @@ struct lineitem_table_t {
 };
 */
 
+void prepareManaged(lineitem_table_t& src, lineitem_table_device_t& dst) {
+    const auto N = src.l_commitdate.size();
+
+    size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);
+    cudaMallocManaged(&dst.l_orderkey, columnSize);
+    std::memcpy(dst.l_orderkey, src.l_orderkey.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_partkey)::value_type);
+    cudaMallocManaged(&dst.l_partkey, columnSize);
+    std::memcpy(dst.l_partkey, src.l_partkey.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_suppkey)::value_type);
+    cudaMallocManaged(&dst.l_suppkey, columnSize);
+    std::memcpy(dst.l_suppkey, src.l_suppkey.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_linenumber)::value_type);
+    cudaMallocManaged(&dst.l_linenumber, columnSize);
+    std::memcpy(dst.l_linenumber, src.l_linenumber.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_quantity)::value_type);
+    cudaMallocManaged(&dst.l_quantity, columnSize);
+    std::memcpy(dst.l_quantity, src.l_quantity.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_extendedprice)::value_type);
+    cudaMallocManaged(&dst.l_extendedprice, columnSize);
+    std::memcpy(dst.l_extendedprice, src.l_extendedprice.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_discount)::value_type);
+    cudaMallocManaged(&dst.l_discount, columnSize);
+    std::memcpy(dst.l_discount, src.l_discount.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_tax)::value_type);
+    cudaMallocManaged(&dst.l_tax, columnSize);
+    std::memcpy(dst.l_tax, src.l_tax.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_returnflag)::value_type);
+    cudaMallocManaged(&dst.l_returnflag, columnSize);
+    std::memcpy(dst.l_returnflag, src.l_returnflag.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_linestatus)::value_type);
+    cudaMallocManaged(&dst.l_linestatus, columnSize);
+    std::memcpy(dst.l_linestatus, src.l_linestatus.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_shipdate)::value_type);
+    cudaMallocManaged(&dst.l_shipdate, columnSize);
+    std::memcpy(dst.l_shipdate, src.l_shipdate.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_commitdate)::value_type);
+    cudaMallocManaged(&dst.l_commitdate, columnSize);
+    std::memcpy(dst.l_commitdate, src.l_commitdate.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_receiptdate)::value_type);
+    cudaMallocManaged(&dst.l_receiptdate, columnSize);
+    std::memcpy(dst.l_receiptdate, src.l_receiptdate.data(), columnSize);
+/*
+    columnSize = N*sizeof(decltype(src.l_shipinstruct)::value_type);
+    cudaMallocManaged(&dst.l_shipinstruct, columnSize);
+    std::memcpy(dst.l_shipinstruct, src.l_shipinstruct.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_shipmode)::value_type);
+    cudaMallocManaged(&dst.l_shipmode, columnSize);
+    std::memcpy(dst.l_shipmode, src.l_shipmode.data(), columnSize);
+
+    columnSize = N*sizeof(decltype(src.l_comment)::value_type);
+    cudaMallocManaged(&dst.l_comment, columnSize);
+    std::memcpy(dst.l_comment, src.l_comment.data(), columnSize);
+*/
+}
+
 int main(int argc, char** argv) {
     using namespace std;
 
     assert(argc > 1);
     Database db;
     load_tables(db, argv[1]);
-
-
     const auto N = db.lineitem.l_commitdate.size();
-    lineitem_table_mgd_t lineitem;
 
-    size_t columnSize = N*sizeof(decltype(db.lineitem.l_orderkey)::value_type);
-    cudaMallocManaged(&lineitem.l_orderkey, columnSize);
-    std::memcpy(lineitem.l_orderkey, db.lineitem.l_orderkey.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_partkey)::value_type);
-    cudaMallocManaged(&lineitem.l_partkey, columnSize);
-    std::memcpy(lineitem.l_partkey, db.lineitem.l_partkey.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_suppkey)::value_type);
-    cudaMallocManaged(&lineitem.l_suppkey, columnSize);
-    std::memcpy(lineitem.l_suppkey, db.lineitem.l_suppkey.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_linenumber)::value_type);
-    cudaMallocManaged(&lineitem.l_linenumber, columnSize);
-    std::memcpy(lineitem.l_linenumber, db.lineitem.l_linenumber.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_quantity)::value_type);
-    cudaMallocManaged(&lineitem.l_quantity, columnSize);
-    std::memcpy(lineitem.l_quantity, db.lineitem.l_quantity.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_extendedprice)::value_type);
-    cudaMallocManaged(&lineitem.l_extendedprice, columnSize);
-    std::memcpy(lineitem.l_extendedprice, db.lineitem.l_extendedprice.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_discount)::value_type);
-    cudaMallocManaged(&lineitem.l_discount, columnSize);
-    std::memcpy(lineitem.l_discount, db.lineitem.l_discount.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_tax)::value_type);
-    cudaMallocManaged(&lineitem.l_tax, columnSize);
-    std::memcpy(lineitem.l_tax, db.lineitem.l_tax.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_returnflag)::value_type);
-    cudaMallocManaged(&lineitem.l_returnflag, columnSize);
-    std::memcpy(lineitem.l_returnflag, db.lineitem.l_returnflag.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_linestatus)::value_type);
-    cudaMallocManaged(&lineitem.l_linestatus, columnSize);
-    std::memcpy(lineitem.l_linestatus, db.lineitem.l_linestatus.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_shipdate)::value_type);
-    cudaMallocManaged(&lineitem.l_shipdate, columnSize);
-    std::memcpy(lineitem.l_shipdate, db.lineitem.l_shipdate.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_commitdate)::value_type);
-    cudaMallocManaged(&lineitem.l_commitdate, columnSize);
-    std::memcpy(lineitem.l_commitdate, db.lineitem.l_commitdate.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_receiptdate)::value_type);
-    cudaMallocManaged(&lineitem.l_receiptdate, columnSize);
-    std::memcpy(lineitem.l_receiptdate, db.lineitem.l_receiptdate.data(), columnSize);
-/*
-    columnSize = N*sizeof(decltype(db.lineitem.l_shipinstruct)::value_type);
-    cudaMallocManaged(&lineitem.l_shipinstruct, columnSize);
-    std::memcpy(lineitem.l_shipinstruct, db.lineitem.l_shipinstruct.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_shipmode)::value_type);
-    cudaMallocManaged(&lineitem.l_shipmode, columnSize);
-    std::memcpy(lineitem.l_shipmode, db.lineitem.l_shipmode.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(db.lineitem.l_comment)::value_type);
-    cudaMallocManaged(&lineitem.l_comment, columnSize);
-    std::memcpy(lineitem.l_comment, db.lineitem.l_comment.data(), columnSize);
-*/
+    lineitem_table_device_t lineitem;
+    prepareManaged(db.lineitem, lineitem);
 
     // Set a heap size of 128 megabytes. Note that this must
     // be done before any kernel is launched.
