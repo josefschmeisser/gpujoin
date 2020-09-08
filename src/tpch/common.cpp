@@ -172,7 +172,8 @@ struct lineitem_table_t {
 */
 void query_1(Database& db) {
     constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
-printf("ship: %lu\n", threshold_date);
+    //printf("ship: %d\n", threshold_date);
+
     struct group {
         char l_returnflag;
         char l_linestatus;
@@ -203,6 +204,8 @@ printf("ship: %lu\n", threshold_date);
             auto g = std::make_unique<group>();
             groupPtr = g.get();
             groupBy[k] = std::move(g);
+            groupPtr->l_returnflag = lineitem.l_returnflag[i];
+            groupPtr->l_linestatus = lineitem.l_linestatus[i];
         }
 
         auto l_extendedprice = lineitem.l_extendedprice[i];
@@ -236,9 +239,14 @@ printf("ship: %lu\n", threshold_date);
         return a->l_returnflag > b->l_returnflag && a->l_linestatus > b->l_linestatus;
     });
 
+    size_t tupleCount = 0;
     for (size_t i = 0; i < sorted.size(); i++) {
-        printf("%p\n", sorted[i]);
+        //printf("%p\n", sorted[i]);
+        auto& t = *sorted[i];
+        cout << t.l_returnflag << "\t" << t.l_linestatus << "\t" << t.count_order << endl;
+        tupleCount += t.count_order;
     }
+    printf("tupleCount: %lu\n", tupleCount);
 }
 
 static inline uint64_t ilog2(uint64_t num) {
