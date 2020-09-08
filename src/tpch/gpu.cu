@@ -366,6 +366,70 @@ void prepareManaged(lineitem_table_t& src, lineitem_table_device_t& dst) {
 */
 }
 
+void prepareDeviceResident(lineitem_table_t& src, lineitem_table_device_t& dst) {
+    const auto N = src.l_commitdate.size();
+
+    size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);
+    cudaMalloc((void**)&dst.l_orderkey, columnSize);
+    cudaMemcpy(dst.l_orderkey, src.l_orderkey.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_partkey)::value_type);
+    cudaMalloc((void**)&dst.l_partkey, columnSize);
+    cudaMemcpy(dst.l_partkey, src.l_partkey.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_suppkey)::value_type);
+    cudaMalloc((void**)&dst.l_suppkey, columnSize);
+    cudaMemcpy(dst.l_suppkey, src.l_suppkey.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_linenumber)::value_type);
+    cudaMalloc((void**)&dst.l_linenumber, columnSize);
+    cudaMemcpy(dst.l_linenumber, src.l_linenumber.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_quantity)::value_type);
+    cudaMalloc((void**)&dst.l_quantity, columnSize);
+    cudaMemcpy(dst.l_quantity, src.l_quantity.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_extendedprice)::value_type);
+    cudaMalloc((void**)&dst.l_extendedprice, columnSize);
+    cudaMemcpy(dst.l_extendedprice, src.l_extendedprice.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_discount)::value_type);
+    cudaMalloc((void**)&dst.l_discount, columnSize);
+    cudaMemcpy(dst.l_discount, src.l_discount.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_tax)::value_type);
+    cudaMalloc((void**)&dst.l_tax, columnSize);
+    cudaMemcpy(dst.l_tax, src.l_tax.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_returnflag)::value_type);
+    cudaMalloc((void**)&dst.l_returnflag, columnSize);
+    cudaMemcpy(dst.l_returnflag, src.l_returnflag.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_linestatus)::value_type);
+    cudaMalloc((void**)&dst.l_linestatus, columnSize);
+    cudaMemcpy(dst.l_linestatus, src.l_linestatus.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_shipdate)::value_type);
+    cudaMalloc((void**)&dst.l_shipdate, columnSize);
+    cudaMemcpy(dst.l_shipdate, src.l_shipdate.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_commitdate)::value_type);
+    cudaMalloc((void**)&dst.l_commitdate, columnSize);
+    cudaMemcpy(dst.l_commitdate, src.l_commitdate.data(), columnSize, cudaMemcpyHostToDevice);
+
+    columnSize = N*sizeof(decltype(src.l_receiptdate)::value_type);
+    cudaMalloc((void**)&dst.l_receiptdate, columnSize);
+    cudaMemcpy(dst.l_receiptdate, src.l_receiptdate.data(), columnSize, cudaMemcpyHostToDevice);
+
+/*
+    columnSize = N*sizeof(decltype(src.l_shipinstruct)::value_type);
+
+    columnSize = N*sizeof(decltype(src.l_shipmode)::value_type);
+
+    columnSize = N*sizeof(decltype(src.l_comment)::value_type);
+*/
+}
+
 int main(int argc, char** argv) {
     using namespace std;
 
@@ -375,7 +439,8 @@ int main(int argc, char** argv) {
     const auto N = db.lineitem.l_commitdate.size();
 
     lineitem_table_device_t lineitem;
-    prepareManaged(db.lineitem, lineitem);
+    //prepareManaged(db.lineitem, lineitem);
+    prepareDeviceResident(db.lineitem, lineitem);
 
     // Set a heap size of 128 megabytes. Note that this must
     // be done before any kernel is launched.
