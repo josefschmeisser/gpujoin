@@ -8,7 +8,7 @@ int main(int argc, char** argv) {
     load_tables(db, argv[1]);
 
     PerfEvents e;
-    e.timeAndProfile("tpch1", 1,
+    e.timeAndProfile("tpch1", db.lineitem.l_linestatus.size(),
         [&]() {
             query_1(db);
         },

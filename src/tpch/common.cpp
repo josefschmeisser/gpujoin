@@ -246,7 +246,7 @@ void query_1(Database& db) {
         cout << t.l_returnflag << "\t" << t.l_linestatus << "\t" << t.count_order << endl;
         tupleCount += t.count_order;
     }
-    printf("tupleCount: %lu\n", tupleCount);
+    //printf("tupleCount: %lu\n", tupleCount);
 }
 
 static inline uint64_t ilog2(uint64_t num) {

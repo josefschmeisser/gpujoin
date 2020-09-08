@@ -7,6 +7,7 @@
 #include <math.h>
 #include <cassert>
 #include <cstring>
+#include <chrono>
 
 #include "common.hpp"
 
@@ -203,7 +204,7 @@ __global__ void query_1_kernel(
             groupPtr->l_linestatus = localGroup->l_linestatus;
             auto stored = atomicCAS((unsigned long long int*)&globalHT[i], 0ull, (unsigned long long int)groupPtr);
             if (stored != 0ull) {
-//                free(groupPtr); // TODO
+                //free(groupPtr); // TODO
                 globalGroup = globalHT[i];
             } else {
                 globalGroup = groupPtr;
@@ -243,7 +244,7 @@ __global__ void query_1_kernel(
     __syncthreads();
 
     if (isLastBlockDone && threadIdx.x == 0) {
-        printf("last\n");
+        //printf("last\n");
 
         tupleCount = 0;
         unsigned groupCount = 0;
@@ -297,6 +298,8 @@ struct lineitem_table_t {
 */
 
 int main(int argc, char** argv) {
+    using namespace std;
+
     assert(argc > 1);
     Database db;
     load_tables(db, argv[1]);
@@ -417,11 +420,15 @@ int main(int argc, char** argv) {
     int blockSize = 256;
     int numBlocks = (N + blockSize - 1) / blockSize;
     printf("numblocks: %d\n", numBlocks);
+
+    auto start = std::chrono::high_resolution_clock::now();
+
     // char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate
     query_1_kernel<<<numBlocks, blockSize>>>(N,
         lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_shipdate);
-
     cudaDeviceSynchronize();
+
+#ifndef NDEBUG
     for (unsigned i = 0; i < 16; i++) {
         if (globalHT[i] != nullptr) {
             printf("group %d\n", i);
@@ -429,7 +436,6 @@ int main(int argc, char** argv) {
     }
     printf("device tupleCount: %d\n", tupleCount);
 
-    using namespace std;
     size_t hostTupleCount = 0;
     for (unsigned i = 0; i < 16; i++) {
         if (globalHT[i] == nullptr) continue;
@@ -440,6 +446,7 @@ int main(int argc, char** argv) {
         hostTupleCount += t.count_order;
     }
     printf("hostTupleCount: %lu\n", hostTupleCount);
+#endif
 
     for (unsigned i = 0; i < 16; i++) {
         if (sorted[i] == nullptr) break;
@@ -447,6 +454,10 @@ int main(int argc, char** argv) {
         auto& t = *sorted[i];
         cout << t.l_returnflag << "\t" << t.l_linestatus << "\t" << t.count_order << endl;
     }
+
+    auto finish = std::chrono::high_resolution_clock::now();
+    auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+    std::cout << "Elapsed time with printf: " << d << " ms\n";
 
     return 0;
 }
