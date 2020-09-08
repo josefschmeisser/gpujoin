@@ -236,7 +236,7 @@ void query_1(Database& db) {
         sorted.push_back(t.second.get());
     }
     std::sort(sorted.begin(), sorted.end(), [](group* a, group* b) {
-        return a->l_returnflag > b->l_returnflag && a->l_linestatus > b->l_linestatus;
+        return a->l_returnflag < b->l_returnflag || (a->l_returnflag == b->l_returnflag && a->l_linestatus < b->l_linestatus);
     });
 
     size_t tupleCount = 0;

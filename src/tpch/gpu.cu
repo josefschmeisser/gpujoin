@@ -103,6 +103,30 @@ __device__ group* createGroup() {
     return ptr;
 }
 
+__device__ bool compare(group* a, group* b) {
+    return a->l_returnflag < b->l_returnflag || (a->l_returnflag == b->l_returnflag && a->l_linestatus < b->l_linestatus);
+}
+
+__device__ void sortGroups(unsigned groupCount) {
+    unsigned k = 0;
+    for (unsigned i = 0; i < groupCount; ++i) {
+        for (; k < 16; ++k) {
+            if (globalHT[k] != nullptr) break;
+        }
+
+        group* current = globalHT[k++];
+        int j = i - 1;
+
+        /* Move elements of sorted[0..i-1], that are greater than key, to one position ahead of their current position */
+        while (j >= 0 && compare(current, sorted[j])) // sorted[j] > key)
+        {
+            sorted[j + 1] = sorted[j];
+            j = j - 1;
+        }
+        sorted[j + 1] = current;
+    }
+}
+
 __global__
 void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate)
 {
@@ -230,6 +254,7 @@ struct group {
         printf("last\n");
 
         tupleCount = 0;
+        unsigned groupCount = 0;
 
         for (int i = 0; i < 16; ++i) {
             group* globalGroup = globalHT[i];
@@ -242,7 +267,10 @@ struct group {
             globalGroup->avg_disc /= globalGroup->count_order;
 
             tupleCount += globalGroup->count_order;
+            groupCount++;
         }
+
+        sortGroups(groupCount);
 
         count = 0;
     }
@@ -420,6 +448,13 @@ int main(int argc, char** argv) {
         hostTupleCount += t.count_order;
     }
     printf("hostTupleCount: %lu\n", hostTupleCount);
+
+    for (unsigned i = 0; i < 16; i++) {
+        if (sorted[i] == nullptr) break;
+
+        auto& t = *sorted[i];
+        cout << t.l_returnflag << "\t" << t.l_linestatus << "\t" << t.count_order << endl;
+    }
 
     return 0;
 }
