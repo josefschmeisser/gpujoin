@@ -212,21 +212,6 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
         }
 */
 
-/*
-struct group {
-    uint64_t sum_qty;
-    uint64_t sum_base_price;
-    uint64_t sum_disc_price;
-    uint64_t sum_charge;
-    uint64_t avg_qty;
-    uint64_t avg_price;
-    uint64_t avg_disc;
-    uint64_t count_order;
-    char l_returnflag;
-    char l_linestatus;
-    int in_use;
-};
-*/
         atomicAdd((unsigned long long int*)&globalGroup->sum_qty, (unsigned long long int)localGroup->sum_qty);
         atomicAdd((unsigned long long int*)&globalGroup->sum_base_price, (unsigned long long int)localGroup->sum_base_price);
         atomicAdd((unsigned long long int*)&globalGroup->sum_disc_price, (unsigned long long int)localGroup->sum_disc_price);

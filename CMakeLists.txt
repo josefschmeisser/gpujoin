@@ -9,6 +9,8 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 string(APPEND CMAKE_CUDA_FLAGS " -gencode arch=compute_60,code=sm_60")
 
+include(lib/jevents.cmake)
+
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 set(SOURCE_FILES src/gpujoin.cu)
