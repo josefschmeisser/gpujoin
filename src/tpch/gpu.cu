@@ -78,6 +78,7 @@ order by
 */
 
 __managed__ group* globalHT[16];
+__managed__ group* sorted[16];
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
@@ -98,7 +99,7 @@ __device__ group* createGroup() {
 
     auto old = atomicInc(&groupCount, 0xffffffff);
     group* ptr = reinterpret_cast<group*>(&buffer[old*group_size_with_padding]);
-    printf("Thread %d got pointer: %p\n", threadIdx.x, ptr);
+    //printf("Thread %d got pointer: %p\n", threadIdx.x, ptr);
     return ptr;
 }
 
@@ -230,9 +231,10 @@ struct group {
 
         tupleCount = 0;
 
-        for (int i = 0; i < 16; i += ++i) {
+        for (int i = 0; i < 16; ++i) {
             group* globalGroup = globalHT[i];
             if (globalGroup == nullptr) { continue; }
+            //printf("group: %p\n", globalGroup);
 
             // TODO adjust decimal point
             globalGroup->avg_qty /= globalGroup->count_order;
@@ -389,6 +391,7 @@ int main(int argc, char** argv) {
 #endif
 
     std::memset(globalHT, 0, 16*sizeof(void*));
+    std::memset(sorted, 0, 16*sizeof(void*));
     std::memset(buffer, 0, sizeof(buffer));
 
     int blockSize = 256;
