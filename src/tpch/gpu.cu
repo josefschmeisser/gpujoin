@@ -127,8 +127,15 @@ __device__ void sortGroups(unsigned groupCount) {
     }
 }
 
-__global__
-void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate)
+__global__ void query_1_kernel(
+    int n,
+    char* __restrict__ l_returnflag,
+    char* __restrict__ l_linestatus,
+    int64_t* __restrict__ l_quantity,
+    int64_t* __restrict__ l_extendedprice,
+    int64_t* __restrict__ l_discount,
+    int64_t* __restrict__ l_tax,
+    uint32_t* __restrict__ l_shipdate)
 {
     //constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
     uint32_t threshold_date = 2451059;
