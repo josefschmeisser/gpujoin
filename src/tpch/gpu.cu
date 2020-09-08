@@ -1,7 +1,9 @@
 #include <bits/stdint-intn.h>
 #include <bits/stdint-uintn.h>
 #include <cstddef>
+#include <device_atomic_functions.h>
 #include <iostream>
+#include <limits>
 #include <math.h>
 #include <cassert>
 #include <cstring>
@@ -22,6 +24,8 @@ struct group {
     int in_use;
 };
 
+constexpr auto group_size_with_padding = (sizeof(group) + 15) & ~(15);
+
 // CUDA kernel to add elements of two arrays
 __global__
 void add(int n, float *x, float *y)
@@ -32,17 +36,19 @@ void add(int n, float *x, float *y)
         y[i] = x[i] + y[i];
 }
 
+// 32 bit Murmur3 hash
+__device__ uint32_t hash(uint32_t k)
+{
+    k ^= k >> 16;
+    k *= 0x85ebca6b;
+    k ^= k >> 13;
+    k *= 0xc2b2ae35;
+    k ^= k >> 16;
+    return k;
+}
 
 __device__ void ht_insert(int32_t k)
 {
-}
-
-__device__ group* createGroup() {
-    group* ptr = (group*)malloc(sizeof(group));
-    assert(ptr);
-    printf("Thread %d got pointer: %p\n", threadIdx.x, ptr);
-    memset(ptr, 0, sizeof(group));
-    return ptr;
 }
 
 /*
@@ -76,8 +82,25 @@ __managed__ group* globalHT[16];
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
 
-//__managed__ uint8_t buffer[1024*1024];
+__managed__ uint8_t buffer[1024*1024];
+__device__ unsigned int groupCount = 0;
+
 __managed__ int tupleCount;
+
+__device__ group* createGroup() {
+/*
+    group* ptr = (group*)malloc(sizeof(group));
+    assert(ptr);
+    printf("Thread %d got pointer: %p\n", threadIdx.x, ptr);
+    memset(ptr, 0, sizeof(group));
+    return ptr;
+*/
+
+    auto old = atomicInc(&groupCount, 0xffffffff);
+    group* ptr = reinterpret_cast<group*>(&buffer[old*group_size_with_padding]);
+    printf("Thread %d got pointer: %p\n", threadIdx.x, ptr);
+    return ptr;
+}
 
 __global__
 void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate)
@@ -96,8 +119,9 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
     for (int i = index; i < n; i += stride) {
         if (l_shipdate[i] > threshold_date) continue;
 
-        uint16_t h = static_cast<uint16_t>(l_returnflag[i]) << 8;
+        uint32_t h = static_cast<uint32_t>(l_returnflag[i]) << 8;
         h |= l_linestatus[i];
+        h = hash(h);
         h &= 0b0111;
         group* groupPtr = &localGroups[h];
 
@@ -147,7 +171,7 @@ void query_1_kernel(int n, char* l_returnflag, char* l_linestatus, int64_t* l_qu
             groupPtr->l_linestatus = localGroup->l_linestatus;
             auto stored = atomicCAS((unsigned long long int*)&globalHT[i], 0ull, (unsigned long long int)groupPtr);
             if (stored != 0ull) {
-                free(groupPtr);
+//                free(groupPtr); // TODO
                 globalGroup = globalHT[i];
             } else {
                 globalGroup = groupPtr;
@@ -209,6 +233,11 @@ struct group {
         for (int i = 0; i < 16; i += ++i) {
             group* globalGroup = globalHT[i];
             if (globalGroup == nullptr) { continue; }
+
+            // TODO adjust decimal point
+            globalGroup->avg_qty /= globalGroup->count_order;
+            globalGroup->avg_price /= globalGroup->count_order;
+            globalGroup->avg_disc /= globalGroup->count_order;
 
             tupleCount += globalGroup->count_order;
         }
@@ -360,6 +389,7 @@ int main(int argc, char** argv) {
 #endif
 
     std::memset(globalHT, 0, 16*sizeof(void*));
+    std::memset(buffer, 0, sizeof(buffer));
 
     int blockSize = 256;
     int numBlocks = (N + blockSize - 1) / blockSize;
@@ -374,7 +404,19 @@ int main(int argc, char** argv) {
             printf("group %d\n", i);
         }
     }
-    printf("tupleCount: %d\n", tupleCount);
+    printf("device tupleCount: %d\n", tupleCount);
+
+    using namespace std;
+    size_t hostTupleCount = 0;
+    for (unsigned i = 0; i < 16; i++) {
+        if (globalHT[i] == nullptr) continue;
+
+        //printf("%p\n", sorted[i]);
+        auto& t = *globalHT[i];
+        cout << t.l_returnflag << "\t" << t.l_linestatus << "\t" << t.count_order << endl;
+        hostTupleCount += t.count_order;
+    }
+    printf("hostTupleCount: %lu\n", hostTupleCount);
 
     return 0;
 }
