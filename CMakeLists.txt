@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD 17)
 # put predefined cmake projects in their own solution folder
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-string(APPEND CMAKE_CUDA_FLAGS " -gencode arch=compute_60,code=sm_60")
+#string(APPEND CMAKE_CUDA_FLAGS " -gencode arch=compute_60,code=sm_60")
+set(CMAKE_CUDA_ARCHITECTURES 52 60 61 75 CACHE STRING "CUDA architectures")
 
 include(lib/jevents.cmake)
 
