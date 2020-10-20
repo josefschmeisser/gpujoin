@@ -460,7 +460,10 @@ int main(int argc, char** argv) {
     std::memset(buffer, 0, sizeof(buffer));
 
     int blockSize = 256;
-    int numBlocks = (N + blockSize - 1) / blockSize;
+//    int numBlocks = (N + blockSize - 1) / blockSize;
+    int numSMs;
+    cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);// devId);
+    int numBlocks = 32*numSMs;
     printf("numblocks: %d\n", numBlocks);
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -469,6 +472,9 @@ int main(int argc, char** argv) {
     query_1_kernel<<<numBlocks, blockSize>>>(N,
         lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_shipdate);
     cudaDeviceSynchronize();
+
+    auto kernelStop = std::chrono::high_resolution_clock::now();
+    auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start).count()/1000.;
 
 #ifndef NDEBUG
     for (unsigned i = 0; i < 16; i++) {
@@ -498,7 +504,8 @@ int main(int argc, char** argv) {
     }
 
     auto finish = std::chrono::high_resolution_clock::now();
-    auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+    auto d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
+    std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "Elapsed time with printf: " << d << " ms\n";
 
     return 0;
