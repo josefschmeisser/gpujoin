@@ -15,7 +15,8 @@ namespace btree {
 
 Node* create_node(bool isLeaf) {
     Node* node;
-    cudaMallocManaged(&node, Node::pageSize);
+    void** dst = reinterpret_cast<void**>(&node);
+    cudaMallocManaged(dst, Node::pageSize);
     return node;
 }
 
@@ -42,7 +43,7 @@ Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
         bool full = node->count >= Node::maxEntries;
         full = full || static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) > loadFactor;
         if (full) {
-            node->upper_or_next = curr;
+            node->upperOrNext = curr;
             currentLevel.push_back(node);
             node = create_node(false);
         } else {
@@ -50,7 +51,7 @@ Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
             assert(appended);
         }
     }
-    node->upper_or_next = lowerLevel[lowerLevel.size() - 1];
+    node->upperOrNext = lowerLevel[lowerLevel.size() - 1];
     currentLevel.push_back(node);
     cout << "countPerNode:" << lowerLevel.size() / currentLevel.size() << endl;
 
@@ -74,7 +75,7 @@ Node* construct_tree(const vector<key_t>& keys, float loadFactor) {
             bool inserted = append_into(node, k, value);
             (void)inserted;
             assert(inserted);
-            leaves.back()->upper_or_next = node;
+            leaves.back()->upperOrNext = node;
         } else {
             bool appended = append_into(node, k, value);
             assert(appended);

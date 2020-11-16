@@ -11,7 +11,7 @@ using payload_t = void*;
 struct NodeBase {
     bool isLeaf;
     uint16_t count;
-    NodeBase* upper_or_next;
+    NodeBase* upperOrNext;
 };
 
 struct Node : public NodeBase {
