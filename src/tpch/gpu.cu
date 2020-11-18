@@ -459,7 +459,7 @@ int main(int argc, char** argv) {
     std::memset(sorted, 0, 16*sizeof(void*));
     std::memset(buffer, 0, sizeof(buffer));
 
-    int blockSize = 256;
+    int blockSize = 32;
 //    int numBlocks = (N + blockSize - 1) / blockSize;
     int numSMs;
     cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);// devId);

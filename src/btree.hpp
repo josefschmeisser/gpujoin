@@ -2,6 +2,7 @@
 
 #include <bits/stdint-uintn.h>
 #include <cstdint>
+#include <vector>
 
 namespace btree {
 
@@ -22,6 +23,10 @@ struct Node : public NodeBase {
     payload_t payloads[maxEntries];
 };
 
+Node* construct(const std::vector<uint32_t>& keys, float loadFactor);
+
 Node* construct_dense(uint32_t numElem, float loadFactor);
+
+bool lookup(Node* tree, key_t key, payload_t& result);
 
 };
