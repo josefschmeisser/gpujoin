@@ -30,6 +30,13 @@ bool append_into(Node* dst, key_t key, payload_t value) {
     return true;
 }
 
+static key_t max_key(Node* tree) {
+    if (tree->isLeaf) {
+        return tree->keys[tree->count - 1];
+    }
+    return max_key(reinterpret_cast<Node*>(tree->payloads[tree->count]));
+}
+
 Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
     if (lowerLevel.size() == 1) {
         return lowerLevel.front();
@@ -39,12 +46,12 @@ Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
     Node* node = create_node(false);
     for (unsigned i = 0; i < lowerLevel.size() - 1; i++) {
         Node* curr = lowerLevel[i];
-        Node* next = lowerLevel[i + 1];
-        key_t sep = next->keys[0];
+        key_t sep = max_key(curr);
         bool full = node->count >= Node::maxEntries;
         full = full || static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) > loadFactor;
         if (full) {
-            node->upperOrNext = curr;
+            //node->upperOrNext = curr;
+            node->payloads[node->count] = curr;
             currentLevel.push_back(node);
             node = create_node(false);
         } else {
@@ -53,7 +60,8 @@ Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
             assert(appended);
         }
     }
-    node->upperOrNext = lowerLevel[lowerLevel.size() - 1];
+    //node->upperOrNext = lowerLevel[lowerLevel.size() - 1];
+    node->payloads[node->count] = lowerLevel[lowerLevel.size() - 1];
     currentLevel.push_back(node);
     cout << "count per inner node: " << lowerLevel.size() / currentLevel.size() << endl;
 
@@ -77,7 +85,7 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
             bool inserted = append_into(node, k, value);
             (void)inserted;
             assert(inserted);
-            leaves.back()->upperOrNext = node;
+            //leaves.back()->upperOrNext = node;
         } else {
             bool appended = append_into(node, k, value);
             (void)appended;
@@ -119,6 +127,7 @@ bool lookup(Node* tree, key_t key, payload_t& result) {
     Node* node = tree;
     while (!node->isLeaf) {
         unsigned pos = lower_bound(node, key);
+        cout << "inner pos: " << pos << endl;
         node = reinterpret_cast<Node*>(node->payloads[pos]);
         if (node == nullptr) {
             return false;
