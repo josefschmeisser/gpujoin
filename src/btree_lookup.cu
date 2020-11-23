@@ -8,10 +8,11 @@
 #include <limits>
 #include <numeric>
 #include <sys/types.h>
+#include <chrono>
 
 using namespace std;
 
-static constexpr unsigned numElements = 1e2;
+static constexpr unsigned numElements = 1e8;
 static constexpr btree::payload_t invalidTid = std::numeric_limits<btree::payload_t>::max();
 
 namespace gpu {
@@ -98,13 +99,30 @@ int main() {
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
 
+    auto start = std::chrono::high_resolution_clock::now();
     gpu::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
     cudaDeviceSynchronize();
+    auto kernelStop = std::chrono::high_resolution_clock::now();
+    auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start).count()/1000.;
+    std::cout << "Kernel time: " << kernelTime << " ms\n";
+    std::cout << "GPU MOps: " << (numElements/1e6)/(kernelTime/1e3) << endl;
 
+/*
     for (unsigned i = 0; i < numElements; ++i) {
         printf("tid: %lu\n", reinterpret_cast<uint64_t>(tids[i]));
     }
+*/
 
+    start = std::chrono::high_resolution_clock::now();
+    for (unsigned i = 0; i < numElements; ++i) {
+        btree::payload_t value;
+        bool found = btree::lookup(tree, keys[i], value);
+        if (!found) throw 0;
+    }
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto cpuTime = chrono::duration_cast<chrono::microseconds>(stop - start).count()/1000.;
+    std::cout << "CPU time: " << cpuTime << " ms\n";
+    std::cout << "CPU MOps: " << (numElements/1e6)/(cpuTime/1e3) << endl;
 
     return 0;
 }
