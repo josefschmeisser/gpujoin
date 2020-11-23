@@ -107,7 +107,7 @@ Node* construct_dense(uint32_t numElements, float loadFactor) {
 }
 
 static unsigned lower_bound(Node* node, key_t key) {
-    cout << "search key: " << key << " in [" << node->keys[0] << ", " << node->keys[node->count - 1] << "]" << endl;
+    //cout << "search key: " << key << " in [" << node->keys[0] << ", " << node->keys[node->count - 1] << "]" << endl;
     unsigned lower = 0;
     unsigned upper = node->count;
     do {
@@ -127,7 +127,7 @@ bool lookup(Node* tree, key_t key, payload_t& result) {
     Node* node = tree;
     while (!node->isLeaf) {
         unsigned pos = lower_bound(node, key);
-        cout << "inner pos: " << pos << endl;
+        //cout << "inner pos: " << pos << endl;
         node = reinterpret_cast<Node*>(node->payloads[pos]);
         if (node == nullptr) {
             return false;
@@ -135,7 +135,7 @@ bool lookup(Node* tree, key_t key, payload_t& result) {
     }
 
     unsigned pos = lower_bound(node, key);
-    cout << "pos: " << pos << endl;
+    //cout << "pos: " << pos << endl;
     if ((pos < node->count) && (node->keys[pos] == key)) {
         result = node->payloads[pos];
         return true;
