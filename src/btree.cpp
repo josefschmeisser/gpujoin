@@ -144,4 +144,21 @@ bool lookup(Node* tree, key_t key, payload_t& result) {
     return false;
 }
 
+void prefetchTree(Node* tree, int device) {
+    cudaGetDevice(&device);
+
+    const auto prefetchNode = [&](const auto& self, Node* node) -> void {
+        cudaMemAdvise(node, Node::pageSize, cudaMemAdviseSetReadMostly, device);
+        cudaMemPrefetchAsync(node, btree::Node::pageSize, device);
+
+        if (node->isLeaf) return;
+        for (unsigned i = 0; i <= node->count; ++i) {
+            Node* child = reinterpret_cast<Node*>(node->payloads[i]);
+            assert(child);
+            self(self, child);
+        }
+    };
+    prefetchNode(prefetchNode, tree);
+}
+
 };

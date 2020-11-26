@@ -28,4 +28,6 @@ Node* construct_dense(uint32_t numElem, float loadFactor);
 
 bool lookup(Node* tree, key_t key, payload_t& result);
 
+void prefetchTree(Node* tree, int device = -1);
+
 };

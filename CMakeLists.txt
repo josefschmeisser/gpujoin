@@ -16,8 +16,6 @@ find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
 include(lib/jevents.cmake)
 include(lib/RadixSpline.cmake)
 
-message(WARNING ${RADIXSPLINE_INCLUDE_DIR})
-
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
     ${RADIXSPLINE_INCLUDE_DIR}

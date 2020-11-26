@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cuda_runtime.h>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -57,6 +58,10 @@ __device__ payload_t btree_lookup(Node* tree, key_t key) {
     return invalidTid;
 }
 
+__device__ unsigned lower_bound_with_hint(Node* node, key_t key, float hint) {
+    return 0;
+}
+
 __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
@@ -69,7 +74,6 @@ __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payloa
 }
 
 }
-
 
 int main() {
 
@@ -98,6 +102,8 @@ int main() {
     cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(key_t), cudaMemcpyHostToDevice);
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
+
+    btree::prefetchTree(tree);
 
     auto start = std::chrono::high_resolution_clock::now();
     gpu::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);

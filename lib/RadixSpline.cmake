@@ -8,7 +8,6 @@ ExternalProject_Add(
     RadixSpline
     PREFIX ${RADIXSPLINE_PREFIX}
     GIT_REPOSITORY "https://github.com/learnedsystems/RadixSpline.git"
-    #GIT_TAG release-1.8.0
     TIMEOUT 10
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
