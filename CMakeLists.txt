@@ -14,8 +14,14 @@ set(CMAKE_CUDA_ARCHITECTURES 52 60 61 75 CACHE STRING "CUDA architectures")
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
 
 include(lib/jevents.cmake)
+include(lib/RadixSpline.cmake)
 
-include_directories(${CMAKE_SOURCE_DIR}/src)
+message(WARNING ${RADIXSPLINE_INCLUDE_DIR})
+
+include_directories(
+    ${CMAKE_SOURCE_DIR}/src
+    ${RADIXSPLINE_INCLUDE_DIR}
+)
 
 set(SOURCE_FILES src/gpujoin.cu)
 add_executable(gpujoin ${SOURCE_FILES})
@@ -33,5 +39,7 @@ target_link_libraries(
     btree_lookup
     ${CUDART_LIBRARY}
 )
+
+add_executable(rs_lookup src/rs_lookup.cu)
 
 add_subdirectory(src/tpch)
