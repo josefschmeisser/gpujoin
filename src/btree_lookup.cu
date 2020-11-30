@@ -99,6 +99,7 @@ int main() {
 
     btree::key_t* lookupKeys;
     cudaMalloc(&lookupKeys, numElements*sizeof(key_t));
+    // TODO shuffle keys/Zipfian lookup patterns
     cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(key_t), cudaMemcpyHostToDevice);
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
