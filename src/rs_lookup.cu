@@ -1,5 +1,7 @@
 #include <cstdint>
 #include <cstdio>
+#include <bits/c++config.h>
+#include <bits/stdint-uintn.h>
 #include <cuda_runtime.h>
 #include <iostream>
 #include <limits>
@@ -17,8 +19,14 @@ using rs_rt_entry_t = uint32_t;
 using rs_spline_point_t = rs::Coord<rs_key_t>;
 using payload_t = btree::payload_t;
 
-static constexpr unsigned numElements = 1e1;
+static constexpr unsigned numElements = 1e2;
 static constexpr payload_t invalidTid = std::numeric_limits<payload_t>::max();
+
+struct Relation {
+    size_t count;
+    rs_key_t* pk;
+    uint64_t* payload;
+};
 
 struct RawRadixSpline {
     rs_key_t min_key_;
@@ -178,67 +186,86 @@ printf("point: %f\n", down.x);
     return SearchBound{begin, end};
   }
 */
-__device__ payload_t rs_lookup(ManagedRadixSpline* rs, const rs_key_t key) {
+__device__ payload_t rs_lookup(ManagedRadixSpline* rs, const rs_key_t key, const Relation& rel) {
     printf("key: %lu\n", key);
     const unsigned estimate = get_estimate(rs, key);
-    printf("key: %lu\n estimate: %u", key, estimate);
+    printf("key: %lu estimate: %u\n", key, estimate);
     const unsigned begin = (estimate < rs->max_error_) ? 0 : (estimate - rs->max_error_);
     const unsigned end = (estimate + rs->max_error_ + 2 > rs->num_keys_) ? rs->num_keys_ : (estimate + rs->max_error_ + 2);
     printf("search bound [%u, %u)\n", begin, end);
 
-    return invalidTid; 
+
+    const auto bound_size = end - begin;
+    const unsigned pos = lower_bound(key, rel.pk + begin, bound_size, [] (const rs_key_t& a, const rs_key_t& b) {
+        return a < b;
+    });
+
+    printf("key: %lu pos: %u\n", pos);
+    return (pos < rel.count) ? reinterpret_cast<payload_t>(pos) : invalidTid;
 }
 
-__global__ void rs_bulk_lookup(ManagedRadixSpline* rs, unsigned n, rs_key_t* keys, payload_t* tids) {
+__global__ void rs_bulk_lookup(ManagedRadixSpline* rs, unsigned n, rs_key_t* keys, Relation rel, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     printf("index %d\n", index);
     for (int i = index; i < n; i += stride) {
-        tids[i] = rs_lookup(rs, keys[i]);
+        tids[i] = rs_lookup(rs, keys[i], rel);
     }
 }
 
 };
 
 int main(int argc, char** argv) {
-    // Create random keys.
-    vector<rs_key_t> keys(numElements - 1);
-    generate(keys.begin(), keys.end(), rand);
-    keys.push_back(8128);
-    sort(keys.begin(), keys.end());
 
-    auto rs = builRadixSpline(keys);
-
-/*
-    // Search using RadixSpline.
-    rs::SearchBound bound = rs.GetSearchBound(8128);
-    cout << "The search key is in the range: ["
-        << bound.begin << ", " << bound.end << ")" << endl;
-    auto start = begin(keys) + bound.begin, last = begin(keys) + bound.end;
-    cout << "The key is at position: " << std::lower_bound(start, last, 8128) - begin(keys) << endl;
-*/
-
-    RawRadixSpline* rrs = reinterpret_cast<RawRadixSpline*>(&rs);
-    ManagedRadixSpline* mrs;
-    cudaMallocManaged(&mrs, sizeof(ManagedRadixSpline));
-    std::memcpy(mrs, &rs, sizeof(ManagedRadixSpline));
-    // copy radix table
-    const auto rs_table_size = sizeof(rs_rt_entry_t)*rrs->radix_table_.size();
-    cudaMallocManaged(&mrs->radix_table_, rs_table_size);
-    std::memcpy(mrs->radix_table_, rrs->radix_table_.data(), rs_table_size);
-    // copy spline points
-    const auto rs_spline_points_size = sizeof(rs_spline_point_t)*rrs->spline_points_.size();
-    cudaMallocManaged(&mrs->spline_points_, rs_spline_points_size);
-    std::memcpy(mrs->spline_points_, rrs->spline_points_.data(), rs_spline_points_size);
-
-printf("radix table size: %lu\n", rrs->radix_table_.size());
-
+    Relation rel;
     rs_key_t* lookupKeys;
-    cudaMalloc(&lookupKeys, numElements*sizeof(rs_key_t));
-    // TODO shuffle keys/Zipfian lookup patterns
-    cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(rs_key_t), cudaMemcpyHostToDevice);
+    ManagedRadixSpline* mrs;
+
+    {
+        // Create random keys.
+        vector<rs_key_t> keys(numElements - 1);
+        generate(keys.begin(), keys.end(), rand);
+        keys.push_back(8128);
+        sort(keys.begin(), keys.end());
+
+        auto rs = builRadixSpline(keys);
+
+    /*
+        // Search using RadixSpline.
+        rs::SearchBound bound = rs.GetSearchBound(8128);
+        cout << "The search key is in the range: ["
+            << bound.begin << ", " << bound.end << ")" << endl;
+        auto start = begin(keys) + bound.begin, last = begin(keys) + bound.end;
+        cout << "The key is at position: " << std::lower_bound(start, last, 8128) - begin(keys) << endl;
+    */
+
+        RawRadixSpline* rrs = reinterpret_cast<RawRadixSpline*>(&rs);
+        cudaMallocManaged(&mrs, sizeof(ManagedRadixSpline));
+        std::memcpy(mrs, &rs, sizeof(ManagedRadixSpline));
+        // copy radix table
+        const auto rs_table_size = sizeof(rs_rt_entry_t)*rrs->radix_table_.size();
+        cudaMallocManaged(&mrs->radix_table_, rs_table_size);
+        std::memcpy(mrs->radix_table_, rrs->radix_table_.data(), rs_table_size);
+        // copy spline points
+        const auto rs_spline_points_size = sizeof(rs_spline_point_t)*rrs->spline_points_.size();
+        cudaMallocManaged(&mrs->spline_points_, rs_spline_points_size);
+        std::memcpy(mrs->spline_points_, rrs->spline_points_.data(), rs_spline_points_size);
+
+        const auto keys_size = sizeof(rs_key_t)*keys.size();
+        cudaMallocManaged(&rel.pk, keys_size);
+        std::memcpy(rel.pk, keys.data(), keys_size);
+        rel.count = keys.size();
+
+        printf("radix table size: %lu\n", rrs->radix_table_.size());
+
+        cudaMalloc(&lookupKeys, numElements*sizeof(rs_key_t));
+        // TODO shuffle keys/Zipfian lookup patterns
+        cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(rs_key_t), cudaMemcpyHostToDevice);
+    }
+
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
+
 
 
     int blockSize = 32;
@@ -246,7 +273,7 @@ printf("radix table size: %lu\n", rrs->radix_table_.size());
     printf("numblocks: %d\n", numBlocks);
 
     auto startTs = std::chrono::high_resolution_clock::now();
-    gpu::rs_bulk_lookup<<<numBlocks, blockSize>>>(mrs, numElements, lookupKeys, tids);
+    gpu::rs_bulk_lookup<<<numBlocks, blockSize>>>(mrs, numElements, lookupKeys, rel, tids);
     cudaDeviceSynchronize();
     auto kernelStopTs = std::chrono::high_resolution_clock::now();
     auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStopTs - startTs).count()/1000.;
