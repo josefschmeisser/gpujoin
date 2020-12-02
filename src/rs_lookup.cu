@@ -63,21 +63,45 @@ auto builRadixSpline(const vector<rs_key_t>& keys) {
 
 namespace gpu {
 
-template<typename T1, typename T2, typename P>
-__device__ unsigned lower_bound(const T1& key, const T2* arr, const unsigned size, P cmp) {
+template<typename T, typename P>
+__device__ unsigned lower_bound(const T& key, const T* arr, const unsigned size) {
     unsigned lower = 0;
     unsigned upper = size;
     do {
         unsigned mid = ((upper - lower) / 2) + lower;
-        int c = cmp(arr[mid], key);
-        if (c < 0) {
+        int c = cmp(arr[mid], key); // a < b
+        if (key < arr[mid]) {
             upper = mid;
-        } else if (c > 0) {
+        } else if (key > arr[mid]) {
             lower = mid + 1;
         } else {
             return mid;
         }
     } while (lower < upper);
+    return lower;
+}
+
+template<typename T1, typename T2, typename P>
+__device__ unsigned lower_bound(const T1& key, const T2* arr, const unsigned size, P cmp) {
+    unsigned lower = 0;
+    unsigned count = size;
+    while (count > 0) {/*
+        unsigned mid = count / 2;
+        if (cmp(arr[mid], key)) {
+            lower = mid + 1;
+            count -= mid + 1;
+        } else {
+            count = mid;
+        }*/
+        unsigned step = count / 2;
+        unsigned mid = lower + step;
+        if (cmp(arr[mid], key)) {
+            lower = mid + 1;
+            count -= step + 1;
+        } else {
+            count = step;
+        }
+    }
     return lower;
 }
 
@@ -162,10 +186,10 @@ __device__ double get_estimate(ManagedRadixSpline* rs, const rs_key_t key) {
 
     // find spline segment
     const unsigned index = get_spline_segment(rs, key);
-printf("index: %u\n", index);
+//printf("index: %u\n", index);
     const rs_spline_point_t& down = rs->spline_points_[index - 1];
     const rs_spline_point_t& up = rs->spline_points_[index];
-printf("point: %f\n", down.x);
+//printf("point: %f\n", down.x);
     // slope
     const double x_diff = up.x - down.x;
     const double y_diff = up.y - down.y;
@@ -187,27 +211,30 @@ printf("point: %f\n", down.x);
   }
 */
 __device__ payload_t rs_lookup(ManagedRadixSpline* rs, const rs_key_t key, const Relation& rel) {
-    printf("key: %lu\n", key);
+//    printf("key: %lu\n", key);
     const unsigned estimate = get_estimate(rs, key);
     printf("key: %lu estimate: %u\n", key, estimate);
     const unsigned begin = (estimate < rs->max_error_) ? 0 : (estimate - rs->max_error_);
     const unsigned end = (estimate + rs->max_error_ + 2 > rs->num_keys_) ? rs->num_keys_ : (estimate + rs->max_error_ + 2);
-    printf("search bound [%u, %u)\n", begin, end);
+    printf("key: %lu search bound [%u, %u)\n", key, begin, end);
 
 
     const auto bound_size = end - begin;
-    const unsigned pos = lower_bound(key, rel.pk + begin, bound_size, [] (const rs_key_t& a, const rs_key_t& b) {
+    //printf("bound size: %d\n", bound_size);
+    const unsigned pos = begin + lower_bound(key, &rel.pk[begin], bound_size, [] (const rs_key_t& a, const rs_key_t& b) -> int {
+        //printf("a: %lu b: %lu\n", a, b);
         return a < b;
     });
-
-    printf("key: %lu pos: %u\n", pos);
+int index = blockIdx.x * blockDim.x + threadIdx.x;
+printf("i: %d rel.pk[i]: %lu\n", index, rel.pk[index]);
+    printf("key: %lu search bound [%u, %u) pos: %u expected: %d\n", key, begin, end, pos, index);
     return (pos < rel.count) ? reinterpret_cast<payload_t>(pos) : invalidTid;
 }
 
 __global__ void rs_bulk_lookup(ManagedRadixSpline* rs, unsigned n, rs_key_t* keys, Relation rel, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-    printf("index %d\n", index);
+//    printf("index %d\n", index);
     for (int i = index; i < n; i += stride) {
         tids[i] = rs_lookup(rs, keys[i], rel);
     }
@@ -279,6 +306,10 @@ int main(int argc, char** argv) {
     auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStopTs - startTs).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "GPU MOps: " << (numElements/1e6)/(kernelTime/1e3) << endl;
+
+    for (unsigned i = 0; i < numElements; ++i) {
+        printf("tid: %lu\n", reinterpret_cast<uint64_t>(tids[i]));
+    }
 
     return 0;
 }
