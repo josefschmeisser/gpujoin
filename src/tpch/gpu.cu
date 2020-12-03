@@ -27,16 +27,6 @@ struct group {
 
 constexpr auto group_size_with_padding = (sizeof(group) + 15) & ~(15);
 
-// CUDA kernel to add elements of two arrays
-__global__
-void add(int n, float *x, float *y)
-{
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < n; i += stride)
-        y[i] = x[i] + y[i];
-}
-
 // 32 bit Murmur3 hash
 __device__ uint32_t hash(uint32_t k)
 {
@@ -46,10 +36,6 @@ __device__ uint32_t hash(uint32_t k)
     k *= 0xc2b2ae35;
     k ^= k >> 16;
     return k;
-}
-
-__device__ void ht_insert(int32_t k)
-{
 }
 
 /*
@@ -118,9 +104,8 @@ __device__ void sortGroups(unsigned groupCount) {
         group* current = globalHT[k++];
         int j = i - 1;
 
-        /* Move elements of sorted[0..i-1], that are greater than key, to one position ahead of their current position */
-        while (j >= 0 && compare(current, sorted[j])) // sorted[j] > key)
-        {
+        // insertion sort
+        while (j >= 0 && compare(current, sorted[j])) {
             sorted[j + 1] = sorted[j];
             j = j - 1;
         }
@@ -268,34 +253,6 @@ __global__ void query_1_kernel(
         count = 0;
     }
 }
-
-__global__ void mallocTest()
-{
-    char* ptr = (char*)malloc(123);
-    printf("Thread %d got pointer: %p\n", threadIdx.x, ptr);
-    free(ptr);
-}
-
-/*
-struct lineitem_table_t {
-    std::vector<uint32_t> l_orderkey;
-    std::vector<uint32_t> l_partkey;
-    std::vector<uint32_t> l_suppkey;
-    std::vector<uint32_t> l_linenumber;
-    std::vector<int64_t> l_quantity;
-    std::vector<int64_t> l_extendedprice;
-    std::vector<int64_t> l_discount;
-    std::vector<int64_t> l_tax;
-    std::vector<char> l_returnflag;
-    std::vector<char> l_linestatus;
-    std::vector<uint32_t> l_shipdate;
-    std::vector<uint32_t> l_commitdate;
-    std::vector<uint32_t> l_receiptdate;
-    std::vector<std::array<char, 25>> l_shipinstruct;
-    std::vector<std::array<char, 10>> l_shipmode;
-    std::vector<std::string> l_comment;
-};
-*/
 
 void prepareManaged(lineitem_table_t& src, lineitem_table_device_t& dst) {
     const auto N = src.l_commitdate.size();
