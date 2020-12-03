@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <chrono>
 
+#include "zipf.hpp"
+
 using namespace std;
 
 static constexpr unsigned numElements = 1e8;
@@ -97,6 +99,11 @@ int main() {
     int numBlocks = 32*numSMs;*/
     printf("numblocks: %d\n", numBlocks);
 
+    // shuffle keys
+    auto rng = std::default_random_engine {};
+    std::shuffle(std::begin(keys), std::end(keys), rng);
+    // TODO zipfian lookup patterns
+
     btree::key_t* lookupKeys;
     cudaMalloc(&lookupKeys, numElements*sizeof(key_t));
     // TODO shuffle keys/Zipfian lookup patterns
@@ -104,7 +111,7 @@ int main() {
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
 
-    btree::prefetchTree(tree);
+//    btree::prefetchTree(tree);
 
     auto start = std::chrono::high_resolution_clock::now();
     gpu::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);

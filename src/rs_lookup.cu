@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -13,6 +14,7 @@
 
 #include "rs/multi_map.h"
 #include "btree.hpp"
+#include "zipf.hpp"
 
 using namespace std;
 
@@ -201,8 +203,12 @@ int main(int argc, char** argv) {
 
         printf("radix table size: %lu\n", rrs->radix_table_.size());
 
+        // shuffle keys
+        auto rng = std::default_random_engine {};
+        std::shuffle(std::begin(keys), std::end(keys), rng);
+        // TODO zipfian lookup patterns
+
         cudaMallocManaged(&lookupKeys, keys_size);
-        // TODO shuffle keys/Zipfian lookup patterns
         cudaMemcpy(lookupKeys, keys.data(), keys_size, cudaMemcpyHostToDevice);
         cudaMemAdvise(lookupKeys, keys_size, cudaMemAdviseSetReadMostly, device_id);
         cudaMemPrefetchAsync(lookupKeys, keys_size, device_id);
