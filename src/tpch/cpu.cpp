@@ -14,6 +14,12 @@ int main(int argc, char** argv) {
         },
         10, {{"approach", "cpu_only"}, {"threads", std::to_string(1)}});
 
+    e.timeAndProfile("tpch14", db.lineitem.l_linestatus.size(),
+        [&]() {
+            query_14(db);
+        },
+        10, {{"approach", "cpu_only"}, {"threads", std::to_string(1)}});
+
 //    query_1(db);
 //    query_14(db);
     return 0;

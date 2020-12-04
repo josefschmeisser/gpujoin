@@ -249,23 +249,44 @@ void query_1(Database& db) {
     //printf("tupleCount: %lu\n", tupleCount);
 }
 
-static inline uint64_t ilog2(uint64_t num) {
-    uint64_t lz = __builtin_clzl(num);
-    return lz^63;
+/*
+-- TPC-H Query 4
+
+select
+        o_orderpriority,
+        count(*) as order_count
+from
+        orders
+where
+        o_orderdate >= date '1993-07-01'
+        and o_orderdate < date '1993-10-01'
+        and exists (
+                select
+                        *
+                from
+                        lineitem
+                where
+                        l_orderkey = o_orderkey
+                        and l_commitdate < l_receiptdate
+        )
+group by
+        o_orderpriority
+order by
+        o_orderpriority
+*/
+void query_4(Database& db) {
 }
 
-static inline int64_t func(int64_t num, int64_t value) {
-    int64_t arg = (num + 1)*value;
-    return ilog2(arg);
-}
 
 /*
+-- TPC-H Query 14
+
 select
         100.00 * sum(case
                 when p_type like 'PROMO%'
-                        then l_extendedprice * func(l_discount, <value>)
+                        then l_extendedprice * (1 - l_discount)
                 else 0
-        end) / sum(l_extendedprice * func(l_discount, <value>)) as result
+        end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue
 from
         lineitem,
         part
@@ -273,6 +294,7 @@ where
         l_partkey = p_partkey
         and l_shipdate >= date '1995-09-01'
         and l_shipdate < date '1995-10-01'
+
 */
 void query_14(Database& db) {
     int64_t value = 2;
@@ -286,10 +308,8 @@ void query_14(Database& db) {
 
     // aggregation loop
     for (size_t i = 0; i < lineitem.l_partkey.size(); ++i) {
-        constexpr auto lower_shipdate =
-            to_julian_day(1, 9, 1995);  // 1995-09-01
-        constexpr auto upper_shipdate =
-            to_julian_day(1, 10, 1995);  // 1995-10-01
+        constexpr auto lower_shipdate = to_julian_day(1, 9, 1995); // 1995-09-01
+        constexpr auto upper_shipdate = to_julian_day(1, 10, 1995); // 1995-10-01
         if (lineitem.l_shipdate[i] < lower_shipdate ||
             lineitem.l_shipdate[i] >= upper_shipdate) {
             continue;
@@ -304,7 +324,7 @@ void query_14(Database& db) {
 
         auto extendedprice = lineitem.l_extendedprice[i];
         auto discount = lineitem.l_discount[i];
-        auto summand = extendedprice * func(discount, value);
+        auto summand = extendedprice * (100 - discount);
         sum2 += summand;
 
         auto& type = part.p_type[j];
@@ -313,6 +333,8 @@ void query_14(Database& db) {
         }
     }
 
+    sum1*=1'000;
+    sum2/=1'000;
     int64_t result = 100*sum1/sum2;
-    printf("%ld\n", result);
+    printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 }
