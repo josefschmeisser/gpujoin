@@ -22,7 +22,7 @@ struct lineitem_table_t {
     std::vector<uint32_t> l_receiptdate;
     std::vector<std::array<char, 25>> l_shipinstruct;
     std::vector<std::array<char, 10>> l_shipmode;
-    std::vector<std::string> l_comment;
+    std::vector<std::array<char, 44>> l_comment;
 };
 
 struct lineitem_table_device_t {
@@ -38,34 +38,48 @@ struct lineitem_table_device_t {
     char* l_linestatus;
     uint32_t* l_shipdate;
     uint32_t* l_commitdate;
-    uint32_t* l_receiptdate;/*
-    std::array<char, 25> l_shipinstruct;
-    std::array<char, 10> l_shipmode;
-    std::string l_comment;*/
+    uint32_t* l_receiptdate;
+    std::array<char, 25>* l_shipinstruct;
+    std::array<char, 10>* l_shipmode;
+    std::array<char, 44>* l_comment;
 };
+
+/*
+create table part
+  (
+     p_partkey     integer not null,
+     p_name        varchar(55) not null,
+     p_mfgr        char(25) not null,
+     p_brand       char(10) not null,
+     p_type        varchar(25) not null,
+     p_size        integer not null,
+     p_container   char(10) not null,
+     p_retailprice numeric(15, 2) not null,
+     p_comment     varchar(23) not null
+  );*/
 
 struct part_table_t {
     std::vector<uint32_t> p_partkey;
-    std::vector<std::string> p_name;
+    std::vector<std::array<char, 55>> p_name;
     std::vector<std::array<char, 25>> p_mfgr;
     std::vector<std::array<char, 10>> p_brand;
-    std::vector<std::string> p_type;
+    std::vector<std::array<char, 25>> p_type;
     std::vector<int32_t> p_size;
     std::vector<std::array<char, 10>> p_container;
     std::vector<int64_t> p_retailprice;
-    std::vector<std::string> p_comment;
+    std::vector<std::array<char, 23>> p_comment;
 };
 
 struct part_table_device_t {
     uint32_t* p_partkey;
-    std::string p_name;
-    std::array<char, 25> p_mfgr;
-    std::array<char, 10> p_brand;
-    std::string p_type;
+    std::array<char, 55>* p_name;
+    std::array<char, 25>* p_mfgr;
+    std::array<char, 10>* p_brand;
+    std::array<char, 25>* p_type;
     int32_t* p_size;
-    std::array<char, 10> p_container;
+    std::array<char, 10>* p_container;
     int64_t* p_retailprice;
-    std::string p_comment;
+    std::array<char, 23>* p_comment;
 };
 
 struct Database {

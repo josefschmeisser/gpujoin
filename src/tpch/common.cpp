@@ -65,6 +65,7 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
 
     std::array<char, 25> l_shipinstruct;
     std::array<char, 10> l_shipmode;
+    std::array<char, 44> l_comment;
     for (auto row : lineitem) {
         table.l_orderkey.push_back(static_cast<uint32_t>(std::stoul(row[0])));
         table.l_partkey.push_back(static_cast<uint32_t>(std::stoul(row[1])));
@@ -84,7 +85,8 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
         table.l_shipinstruct.push_back(l_shipinstruct);
         std::strncpy(l_shipmode.data(), row[14].c_str(), sizeof(l_shipmode));
         table.l_shipmode.push_back(l_shipmode);
-        table.l_comment.push_back(row[15]);
+        std::strncpy(l_comment.data(), row[15].c_str(), sizeof(l_comment));
+        table.l_comment.push_back(l_comment);
     }
 }
 
@@ -92,24 +94,30 @@ static void load_part_table(const std::string& file_name, part_table_t& table) {
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
 
+    std::array<char, 55> p_name;
     std::array<char, 25> p_mfgr;
     std::array<char, 10> p_brand;
+    std::array<char, 25> p_type;
     std::array<char, 10> p_container;
+    std::array<char, 23> p_comment;
 
     size_t tid = 0;
     for (auto row : lineitem) {
         table.p_partkey.push_back(static_cast<uint32_t>(std::stoul(row[0])));
-        table.p_name.push_back(row[1]);
+        std::strncpy(p_name.data(), row[1].c_str(), sizeof(p_name));
+        table.p_name.push_back(p_name);
         std::strncpy(p_mfgr.data(), row[2].c_str(), sizeof(p_mfgr));
         table.p_mfgr.push_back(p_mfgr);
         std::strncpy(p_brand.data(), row[3].c_str(), sizeof(p_brand));
         table.p_brand.push_back(p_brand);
-        table.p_type.push_back(row[4]);
+        std::strncpy(p_type.data(), row[4].c_str(), sizeof(p_type));
+        table.p_type.push_back(p_type);
         table.p_size.push_back(std::stoi(row[5]));
         std::strncpy(p_container.data(), row[6].c_str(), sizeof(p_container));
         table.p_container.push_back(p_container);
         table.p_retailprice.push_back(to_numeric(std::string_view(row[7]), 2));
-        table.p_comment.push_back(row[8]);
+        std::strncpy(p_comment.data(), row[8].c_str(), sizeof(p_comment));
+        table.p_comment.push_back(p_comment);
 
         // add index entry
         //part_partkey_index[table.p_partkey.back()] = tid++;

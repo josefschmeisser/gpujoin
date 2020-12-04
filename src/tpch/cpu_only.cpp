@@ -185,12 +185,16 @@ where
         and l_shipdate < date '1995-10-01'
 
 */
+#if 0
 void query_14_part_build(Database& db) {
     int64_t value = 2;
     int64_t sum1 = 0;
     int64_t sum2 = 0;
 
     constexpr std::string_view prefix = "PROMO";
+    constexpr auto lower_shipdate = to_julian_day(1, 9, 1995); // 1995-09-01
+    constexpr auto upper_shipdate = to_julian_day(1, 10, 1995); // 1995-10-01
+
     auto& part = db.part;
     auto& lineitem = db.lineitem;
 
@@ -201,8 +205,6 @@ void query_14_part_build(Database& db) {
 
     // aggregation loop
     for (size_t i = 0; i < lineitem.l_partkey.size(); ++i) {
-        constexpr auto lower_shipdate = to_julian_day(1, 9, 1995); // 1995-09-01
-        constexpr auto upper_shipdate = to_julian_day(1, 10, 1995); // 1995-10-01
         if (lineitem.l_shipdate[i] < lower_shipdate ||
             lineitem.l_shipdate[i] >= upper_shipdate) {
             continue;
@@ -231,6 +233,7 @@ void query_14_part_build(Database& db) {
     int64_t result = 100*sum1/sum2;
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 }
+#endif
 
 void query_14(Database& db) {
     int64_t value = 2;
@@ -238,13 +241,17 @@ void query_14(Database& db) {
     int64_t sum2 = 0;
 
     constexpr std::string_view prefix = "PROMO";
+    constexpr auto lower_shipdate = to_julian_day(1, 9, 1995); // 1995-09-01
+    constexpr auto upper_shipdate = to_julian_day(1, 10, 1995); // 1995-10-01
+/*
+    cout << "lower: " << lower_shipdate << endl;
+    cout << "upper: " << upper_shipdate << endl;
+*/
     auto& part = db.part;
     auto& lineitem = db.lineitem;
 
     std::unordered_multimap<uint32_t, size_t> ht(part.p_partkey.size());// lineitem.l_partkey.size());
     for (size_t i = 0; i < lineitem.l_partkey.size(); ++i) {
-        constexpr auto lower_shipdate = to_julian_day(1, 9, 1995); // 1995-09-01
-        constexpr auto upper_shipdate = to_julian_day(1, 10, 1995); // 1995-10-01
         if (lineitem.l_shipdate[i] < lower_shipdate ||
             lineitem.l_shipdate[i] >= upper_shipdate) {
             continue;
@@ -265,14 +272,14 @@ void query_14(Database& db) {
             sum2 += summand;
 
             auto& type = part.p_type[i];
-            if (type.compare(0, prefix.size(), prefix) == 0) {
+            if (std::strncmp(type.data(), prefix.data(), prefix.size()) == 0) {
                 sum1 += summand;
             }
         }
     }
 
-    sum1*=1'000;
-    sum2/=1'000;
+    sum1 *= 1'000;
+    sum2 /= 1'000;
     int64_t result = 100*sum1/sum2;
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 }
