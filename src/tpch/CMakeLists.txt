@@ -1,4 +1,4 @@
-set(SOURCE_FILES cpu.cpp common.cpp)
+set(SOURCE_FILES cpu.cpp common.cpp cpu_only.cpp)
 
 #include_directories(${CMAKE_SOURCE_DIR}/src)
 

@@ -56,7 +56,7 @@ struct part_table_t {
     std::vector<std::string> p_comment;
 };
 
-struct part_table_mgd_t {
+struct part_table_device_t {
     uint32_t* p_partkey;
     std::string p_name;
     std::array<char, 25> p_mfgr;
