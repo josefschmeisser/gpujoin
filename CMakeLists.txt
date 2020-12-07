@@ -33,5 +33,6 @@ target_link_libraries(
 )
 
 add_executable(rs_lookup src/rs_lookup.cu)
+add_dependencies(rs_lookup RadixSpline)
 
 add_subdirectory(src/tpch)
