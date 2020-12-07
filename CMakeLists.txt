@@ -1,19 +1,25 @@
 cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 
-project(SimpleConcurrentGPUHashTable LANGUAGES CXX CUDA)
+project(gpujoin LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
+
+set(ENABLE_PERFBENCHMARKING false)
 
 # put predefined cmake projects in their own solution folder
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 #string(APPEND CMAKE_CUDA_FLAGS " -gencode arch=compute_60,code=sm_60")
-set(CMAKE_CUDA_ARCHITECTURES 52 60 61 75 CACHE STRING "CUDA architectures")
+set(CMAKE_CUDA_ARCHITECTURES 60 61 70 CACHE STRING "CUDA architectures")
 
 # TODO cmake 3.17: use FindCUDAToolkit()
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
 
-include(lib/jevents.cmake)
+if(ENABLE_PERFBENCHMARKING)
+    include(lib/jevents.cmake)
+    add_compile_definitions(PERF_AVAILABLE=true)
+endif(ENABLE_PERFBENCHMARKING)
+
 include(lib/RadixSpline.cmake)
 
 include_directories(

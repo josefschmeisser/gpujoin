@@ -5,6 +5,9 @@ set(SOURCE_FILES cpu.cpp common.cpp cpu_only.cpp)
 add_executable(tpch ${SOURCE_FILES})
 target_include_directories(tpch PRIVATE $<BUILD_INTERFACE:${JEVENTS_INCLUDE_DIR}>)
 target_link_libraries(tpch ${JEVENTS_LIBRARY_PATH})
-add_dependencies(tpch jevents)
+
+if(ENABLE_PERFBENCHMARKING)
+    add_dependencies(tpch jevents)
+endif(ENABLE_PERFBENCHMARKING)
 
 add_executable(tpch_gpu gpu.cu common.cpp)
