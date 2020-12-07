@@ -36,6 +36,7 @@ target_include_directories(
 target_link_libraries(
     btree_lookup
     ${CUDART_LIBRARY}
+    numa
 )
 
 add_executable(rs_lookup src/rs_lookup.cu)

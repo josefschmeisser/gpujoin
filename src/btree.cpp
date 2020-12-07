@@ -9,14 +9,17 @@
 #include <bits/stdint-uintn.h>
 #include <cuda_runtime_api.h>
 
+#include <numa.h>
+
 using namespace std;
 
 namespace btree {
 
 Node* create_node(bool isLeaf) {
     Node* node;
-    void** dst = reinterpret_cast<void**>(&node);
-    cudaMallocManaged(dst, Node::pageSize);
+//    void** dst = reinterpret_cast<void**>(&node);
+//    cudaMallocManaged(dst, Node::pageSize);
+node = reinterpret_cast<Node*>(numa_alloc_onnode(Node::pageSize, 0));
     node->isLeaf = isLeaf;
     return node;
 }
@@ -78,7 +81,9 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
         auto k = keys[i];
         Node* value = (Node*)i;
         bool full = node->count >= Node::maxEntries;
+
         full = full || static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) > loadFactor;
+//	std::cout << "current load: " << static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) << std::endl;
         if (full) {
             leaves.push_back(node);
             node = create_node(true);
