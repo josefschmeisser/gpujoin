@@ -10,4 +10,4 @@ if(ENABLE_PERFBENCHMARKING)
     add_dependencies(tpch jevents)
 endif(ENABLE_PERFBENCHMARKING)
 
-add_executable(tpch_gpu gpu.cu common.cpp)
+add_executable(cuda_tpch_1 tpch_1.cu common.cpp)
