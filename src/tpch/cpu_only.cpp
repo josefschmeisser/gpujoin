@@ -185,9 +185,7 @@ where
         and l_shipdate < date '1995-10-01'
 
 */
-#if 0
 void query_14_part_build(Database& db) {
-    int64_t value = 2;
     int64_t sum1 = 0;
     int64_t sum2 = 0;
 
@@ -223,20 +221,18 @@ void query_14_part_build(Database& db) {
         sum2 += summand;
 
         auto& type = part.p_type[j];
-        if (type.compare(0, prefix.size(), prefix) == 0) {
+        if (std::strncmp(type.data(), prefix.data(), prefix.size()) == 0) {
             sum1 += summand;
         }
     }
 
-    sum1*=1'000;
-    sum2/=1'000;
+    sum1 *= 1'000;
+    sum2 /= 1'000;
     int64_t result = 100*sum1/sum2;
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 }
-#endif
 
-void query_14(Database& db) {
-    int64_t value = 2;
+void query_14_lineitem_build(Database& db) {
     int64_t sum1 = 0;
     int64_t sum2 = 0;
 

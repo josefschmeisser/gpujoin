@@ -91,7 +91,9 @@ void load_tables(Database& db, const std::string& path);
 
 void query_1(Database& db);
 
-void query_14(Database& db);
+void query_14_part_build(Database& db);
+
+void query_14_lineitem_build(Database& db);
 
 // source:
 // https://stason.org/TULARC/society/calendars/2-15-1-Is-there-a-formula-for-calculating-the-Julian-day-nu.html
