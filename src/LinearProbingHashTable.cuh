@@ -34,7 +34,7 @@ public:
             while (true) {
                 uint32_t prev = atomicCAS(&table[slot].key, emptyMarker, key);
                 if (prev == emptyMarker || prev == key) {
-                    table[slot]->value = value;
+                    table[slot].value = value;
                     return;
                 }
                 slot = (slot + 1) & (capacity - 1);
@@ -44,9 +44,9 @@ public:
         __device__ bool lookup(Key key, Value& value) {
             uint32_t slot = hash(key);
             while (true) {
-                Entry* entry = table[slot];
+                Entry* entry = &table[slot];
                 if (entry->key == key) {
-                    entry->value;
+                    value = entry->value;
                     return true;
                 } else if (entry->key == emptyMarker) {
                     return false;
@@ -56,17 +56,17 @@ public:
         }
     } deviceHandle;
 
-    static constexpr size_t calculateTableSize(size_t occupancyUpperBound) {
+    static constexpr uint32_t calculateTableSize(uint32_t occupancyUpperBound) {
         float sizeHint = static_cast<float>(occupancyUpperBound) / maxLoadFactor;
-        size_t n = static_cast<size_t>(std::ceil(std::log2(sizeHint))); // find n such that: 2^n >= sizeHint
-        size_t tableSize = 1ul << n;
+        uint32_t n = static_cast<uint32_t>(std::ceil(std::log2(sizeHint))); // find n such that: 2^n >= sizeHint
+        uint32_t tableSize = 1ul << n;
         return tableSize;
     }
 
-    LinearProbingHashTable(size_t occupancyUpperBound) 
+    LinearProbingHashTable(uint32_t occupancyUpperBound)
         : deviceHandle{nullptr, calculateTableSize(occupancyUpperBound)}
     {
-        auto ret = cudaMalloc(&deviceHandle.table, deviceHandle.capacity*sizeof(DeviceHandle::Entry));
+        auto ret = cudaMalloc(&deviceHandle.table, deviceHandle.capacity*sizeof(Entry));
         assert(ret == cudaSuccess);
     }
 

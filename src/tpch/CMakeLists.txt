@@ -11,3 +11,5 @@ if(ENABLE_PERFBENCHMARKING)
 endif(ENABLE_PERFBENCHMARKING)
 
 add_executable(cuda_tpch_1 tpch_1.cu common.cpp)
+
+add_executable(cuda_tpch_14 tpch_14.cu common.cpp)
