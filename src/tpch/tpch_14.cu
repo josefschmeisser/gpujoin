@@ -13,10 +13,6 @@
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
-
-__managed__ uint8_t buffer[1024*1024];
-__device__ unsigned int groupCount = 0;
-
 __managed__ int tupleCount;
 
 using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
@@ -65,6 +61,7 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
 
         size_t part_tid;
         bool match = ht.lookup(lineitem->l_partkey[i], part_tid);
+        // TODO refill
         if (match) {
             const auto extendedprice = lineitem->l_extendedprice[i];
             const auto discount = lineitem->l_discount[i];
@@ -72,7 +69,7 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
             sum2 += summand;
 
             const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
-            printf("type: %s\n", type);
+//            printf("type: %s\n", type);
             if (my_strcmp(type, prefix, 5) == 0) {
                 sum1 += summand;
             }
@@ -80,7 +77,7 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
     }
 
     const int64_t result = 100*(sum1*1'000)/(sum2/1'000);
-    atomicAdd((unsigned long long int*)&globalSum, (unsigned long long int)result);
+ //   atomicAdd((unsigned long long int*)&globalSum, (unsigned long long int)result);
     // TODO proper reduction
 }
 
@@ -134,6 +131,7 @@ int main(int argc, char** argv) {
 */
     LinearProbingHashTable<uint32_t, size_t> ht(part_size);
     build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
+    probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
     cudaDeviceSynchronize();
 
     auto kernelStop = std::chrono::high_resolution_clock::now();

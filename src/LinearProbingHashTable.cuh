@@ -68,6 +68,8 @@ public:
     {
         auto ret = cudaMalloc(&deviceHandle.table, deviceHandle.capacity*sizeof(Entry));
         assert(ret == cudaSuccess);
+        ret = cudaMemset(deviceHandle.table, 0xff, deviceHandle.capacity*sizeof(Entry));
+        assert(ret == cudaSuccess);
     }
 
     ~LinearProbingHashTable() {
