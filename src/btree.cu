@@ -1,5 +1,6 @@
 #include "btree.cuh"
 
+#include <cstddef>
 #include <cstdio>
 #include <vector>
 #include <iostream>
@@ -100,6 +101,8 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
     cout << "count per leaf node: " << n / leaves.size() << endl;
 
     Node* root = construct_inner_nodes(leaves, loadFactor);
+
+    cout << "tree size: " << tree_size_in_byte(root) / (1024*1024) << " MB" << endl;
     return root;
 }
 
@@ -145,6 +148,18 @@ bool lookup(Node* tree, key_t key, payload_t& result) {
     }
 
     return false;
+}
+
+size_t tree_size_in_byte(Node* tree) {
+    if (tree->isLeaf) { return Node::pageSize; }
+
+    size_t size = Node::pageSize;
+    for (unsigned i = 0; i <= tree->count; ++i) {
+        Node* child = reinterpret_cast<Node*>(tree->payloads[i]);
+        assert(child);
+        size += tree_size_in_byte(child);
+    }
+    return size;
 }
 
 #if 0

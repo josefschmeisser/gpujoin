@@ -32,7 +32,11 @@ bool lookup(Node* tree, key_t key, payload_t& result);
 
 void prefetchTree(Node* tree, int device = -1);
 
+size_t tree_size_in_byte(Node* tree);
+
 namespace cuda {
+
+__device__ payload_t btree_lookup(Node* tree, key_t key);
 
 __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids);
 
