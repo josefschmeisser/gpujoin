@@ -41,7 +41,17 @@ __device__ int my_strcmp(const char *str_a, const char *str_b, unsigned len){
     return match;
 }
 
-__managed__ int64_t globalSum = 0;
+__managed__ int64_t globalSum1 = 0;
+__managed__ int64_t globalSum2 = 0;
+
+#define FULL_MASK 0xffffffff
+
+// see: https://stackoverflow.com/a/44337310
+__forceinline__ __device__ unsigned lane_id() {
+    unsigned ret; 
+    asm volatile ("mov.u32 %0, %laneid;" : "=r"(ret));
+    return ret;
+}
 
 __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table_device_t* lineitem, device_ht_t ht) {
     const char* prefix = "PROMO";
@@ -76,9 +86,15 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
         }
     }
 
-    const int64_t result = 100*(sum1*1'000)/(sum2/1'000);
- //   atomicAdd((unsigned long long int*)&globalSum, (unsigned long long int)result);
-    // TODO proper reduction
+    // reduce both sums
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
+        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
+    }
+    if (lane_id() == 0) {
+        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
+        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -123,12 +139,6 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-/*
-    // char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate
-    query_1_kernel<<<numBlocks, blockSize>>>(N,
-        lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_shipdate);
-    cudaDeviceSynchronize();
-*/
     LinearProbingHashTable<uint32_t, size_t> ht(part_size);
     build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
     probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
@@ -141,7 +151,8 @@ int main(int argc, char** argv) {
 // TODO
 #endif
 
-// TODO output
+    int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
+    printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
     auto finish = std::chrono::high_resolution_clock::now();
     auto d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
