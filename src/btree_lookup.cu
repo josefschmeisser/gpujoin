@@ -49,7 +49,7 @@ int main() {
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
 
-//    btree::prefetchTree(tree);
+    btree::prefetchTree(tree, 0);
 
     auto start = std::chrono::high_resolution_clock::now();
     btree::cuda::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);

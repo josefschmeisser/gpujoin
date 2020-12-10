@@ -170,15 +170,19 @@ void prefetchTree(Node* tree, int device) {
 #endif
 
 void prefetchSubtree(Node* node, int device) {
-    cudaMemAdvise(node, Node::pageSize, cudaMemAdviseSetReadMostly, device);
+    bool isLeaf = node->isLeaf;
+
+    if (!isLeaf) {
+        for (unsigned i = 0; i <= node->count; ++i) {
+            Node* child = reinterpret_cast<Node*>(node->payloads[i]);
+            assert(child);
+            prefetchSubtree(child, device);
+        }
+    }
+
     cudaMemPrefetchAsync(node, btree::Node::pageSize, device);
 
-    if (node->isLeaf) return;
-    for (unsigned i = 0; i <= node->count; ++i) {
-        Node* child = reinterpret_cast<Node*>(node->payloads[i]);
-        assert(child);
-        prefetchSubtree(child, device);
-    }
+    if (isLeaf) return;
 };
 
 void prefetchTree(Node* tree, int device) {
@@ -186,6 +190,7 @@ void prefetchTree(Node* tree, int device) {
         cudaGetDevice(&device);
     }
     prefetchSubtree(tree, device);
+    cudaDeviceSynchronize();
 }
 
 namespace cuda {
