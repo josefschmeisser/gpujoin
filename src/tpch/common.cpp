@@ -10,8 +10,6 @@
 #include <cassert>
 #include <algorithm>
 
-#include <cuda_runtime_api.h>
-
 #include "common.hpp"
 #include "thirdparty/parser.hpp"
 
