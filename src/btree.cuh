@@ -7,7 +7,7 @@
 namespace btree {
 
 using key_t = uint32_t;
-using payload_t = void*;
+using payload_t = uintptr_t;
 
 static constexpr payload_t invalidTid = std::numeric_limits<btree::payload_t>::max();
 

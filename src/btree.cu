@@ -53,17 +53,17 @@ Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
         full = full || static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) > loadFactor;
         if (full) {
             //node->upperOrNext = curr;
-            node->payloads[node->count] = curr;
+            node->payloads[node->count] = reinterpret_cast<payload_t>(curr);
             currentLevel.push_back(node);
             node = create_node(false);
         } else {
-            bool appended = append_into(node, sep, curr);
+            bool appended = append_into(node, sep, reinterpret_cast<payload_t>(curr));
             (void)appended;
             assert(appended);
         }
     }
     //node->upperOrNext = lowerLevel[lowerLevel.size() - 1];
-    node->payloads[node->count] = lowerLevel[lowerLevel.size() - 1];
+    node->payloads[node->count] = reinterpret_cast<payload_t>(lowerLevel[lowerLevel.size() - 1]);
     currentLevel.push_back(node);
     cout << "count per inner node: " << lowerLevel.size() / currentLevel.size() << endl;
 
@@ -78,7 +78,7 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
     Node* node = create_node(true);
     for (uint64_t i = 0; i < n; i++) {
         auto k = keys[i];
-        Node* value = (Node*)i;
+        payload_t value = i;
         bool full = node->count >= Node::maxEntries;
 
         full = full || static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) > loadFactor;
@@ -232,10 +232,10 @@ __device__ payload_t btree_lookup(Node* tree, key_t key) {
     while (!node->isLeaf) {
         unsigned pos = naive_lower_bound(node, key);
         //printf("inner pos: %d\n", pos);
-        node = reinterpret_cast<Node*>(node->payloads[pos]);
+        node = reinterpret_cast<Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
             return invalidTid;
-        }
+        }*/
     }
 
     unsigned pos = naive_lower_bound(node, key);

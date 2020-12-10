@@ -156,7 +156,7 @@ __device__ payload_t rs_lookup(ManagedRadixSpline* rs, const rs_key_t key, const
     });
 //    int index = blockIdx.x * blockDim.x + threadIdx.x;
 //    printf("key: %lu search bound [%u, %u) pos: %u expected: %d\n", key, begin, end, pos, index);
-    return (pos < rel.count) ? reinterpret_cast<payload_t>(pos) : invalidTid;
+    return (pos < rel.count) ? static_cast<payload_t>(pos) : invalidTid;
 }
 
 __global__ void rs_bulk_lookup(ManagedRadixSpline* rs, unsigned n, const rs_key_t* keys, Relation rel, payload_t* tids) {

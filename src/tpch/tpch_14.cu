@@ -157,7 +157,8 @@ int main(int argc, char** argv) {
     part_table_device_t* part_device;
     cudaMallocManaged(&part_device, sizeof(part_table_device_t));
 
-#if USE_PINNED_MEM
+#define USE_PINNED_MEM
+#ifdef USE_PINNED_MEM
     copy_relation<vector_to_managed_array>(db.lineitem, *lineitem_device);
     copy_relation<vector_to_managed_array>(db.part, *part_device);
 #else
@@ -181,7 +182,7 @@ int main(int argc, char** argv) {
     int numBlocks = 32*numSMs;
     printf("numblocks: %d\n", numBlocks);
 
-#define HJ_QUERY
+//#define HJ_QUERY
 #ifdef HJ_QUERY
     auto start = std::chrono::high_resolution_clock::now();
     LinearProbingHashTable<uint32_t, size_t> ht(part_size);
