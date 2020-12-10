@@ -12,4 +12,6 @@ endif(ENABLE_PERFBENCHMARKING)
 
 add_executable(cuda_tpch_1 tpch_1.cu common.cpp)
 
-add_executable(cuda_tpch_14 tpch_14.cu common.cpp)
+#add_executable(cuda_tpch_14 ../btree.cu tpch_14.cu common.cpp)
+cuda_add_executable(cuda_tpch_14 ../btree.cu tpch_14.cu common.cpp)
+#target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-dc>)

@@ -1,6 +1,7 @@
 #include "common.hpp"
 
 #include <cstddef>
+#include <cstdio>
 #include <device_atomic_functions.h>
 #include <iostream>
 #include <limits>
@@ -10,6 +11,7 @@
 #include <chrono>
 
 #include "LinearProbingHashTable.cuh"
+#include "btree.cuh"
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
@@ -97,6 +99,50 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
     }
 }
 
+__global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned linteitem_size, part_table_device_t* part, btree::Node* tree) {
+    const char* prefix = "PROMO";
+    const uint32_t lower_shipdate = 2449962; // 1995-09-01
+    const uint32_t upper_shipdate = 2449992; // 1995-10-01
+
+    int64_t sum1 = 0;
+    int64_t sum2 = 0;
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < linteitem_size; i += stride) {
+        if (lineitem->l_shipdate[i] < lower_shipdate ||
+            lineitem->l_shipdate[i] >= upper_shipdate) {
+            continue;
+        }
+
+        auto payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
+        if (payload != btree::invalidTid) {
+            const size_t part_tid = reinterpret_cast<size_t>(payload);
+
+            const auto extendedprice = lineitem->l_extendedprice[i];
+            const auto discount = lineitem->l_discount[i];
+            const auto summand = extendedprice * (100 - discount);
+            sum2 += summand;
+
+            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
+//            printf("type: %s\n", type);
+            if (my_strcmp(type, prefix, 5) == 0) {
+                sum1 += summand;
+            }
+        }
+    }
+
+    // reduce both sums
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
+        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
+    }
+    if (lane_id() == 0) {
+        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
+        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
+    }
+}
+
 int main(int argc, char** argv) {
     using namespace std;
 
@@ -125,9 +171,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
-    // Set a heap size of 128 megabytes. Note that this must
-    // be done before any kernel is launched.
-    cudaThreadSetLimit(cudaLimitMallocHeapSize, 1024*1024*1024);
+    //cudaThreadSetLimit(cudaLimitMallocHeapSize, 1024*1024*1024);
 
     const int blockSize = 32;
     int numSMs;
@@ -137,12 +181,20 @@ int main(int argc, char** argv) {
     int numBlocks = 32*numSMs;
     printf("numblocks: %d\n", numBlocks);
 
+#define HJ_QUERY
+#ifdef HJ_QUERY
     auto start = std::chrono::high_resolution_clock::now();
-
     LinearProbingHashTable<uint32_t, size_t> ht(part_size);
     build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
     probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
     cudaDeviceSynchronize();
+#else
+    auto tree = btree::construct(db.part.p_partkey, 0.7);
+    btree::prefetchTree(tree, 0);
+    auto start = std::chrono::high_resolution_clock::now();
+    btree_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
+    cudaDeviceSynchronize();
+#endif
 
     auto kernelStop = std::chrono::high_resolution_clock::now();
     auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start).count()/1000.;
@@ -151,6 +203,8 @@ int main(int argc, char** argv) {
 // TODO
 #endif
 
+printf("sum1: %lu\n", globalSum1);
+printf("sum2: %lu\n", globalSum2);
     int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 

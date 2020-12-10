@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(ENABLE_PERFBENCHMARKING false)
 
+set(CUDA_SEPARABLE_COMPILATION ON)
+find_package(CUDA)
+
 # put predefined cmake projects in their own solution folder
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
