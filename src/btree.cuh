@@ -1,13 +1,15 @@
 #pragma once
 
-#include <bits/stdint-uintn.h>
 #include <cstdint>
 #include <vector>
+#include <limits>
 
 namespace btree {
 
 using key_t = uint32_t;
 using payload_t = void*;
+
+static constexpr payload_t invalidTid = std::numeric_limits<btree::payload_t>::max();
 
 struct NodeBase {
     bool isLeaf;
@@ -30,4 +32,10 @@ bool lookup(Node* tree, key_t key, payload_t& result);
 
 void prefetchTree(Node* tree, int device = -1);
 
-};
+namespace cuda {
+
+__global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids);
+
+} // namespace cuda
+
+} // namespace btree

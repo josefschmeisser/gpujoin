@@ -13,7 +13,7 @@
 #include <stdexcept>
 
 #include "rs/multi_map.h"
-#include "btree.hpp"
+#include "btree.cuh"
 #include "zipf.hpp"
 
 using namespace std;

@@ -27,7 +27,7 @@ include_directories(
     ${RADIXSPLINE_INCLUDE_DIR}
 )
 
-add_executable(btree_lookup src/btree.cpp src/btree_lookup.cu)
+add_executable(btree_lookup src/btree.cu src/btree_lookup.cu)
 target_include_directories(
     btree_lookup
     PRIVATE
