@@ -25,14 +25,15 @@ include(lib/RadixSpline.cmake)
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
     ${RADIXSPLINE_INCLUDE_DIR}
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
 )
 
 add_executable(btree_lookup src/btree.cu src/btree_lookup.cu)
-target_include_directories(
-    btree_lookup
-    PRIVATE
-    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
-)
+#target_include_directories(
+#    btree_lookup
+#    PRIVATE
+#    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+#)
 target_link_libraries(
     btree_lookup
     ${CUDART_LIBRARY}
