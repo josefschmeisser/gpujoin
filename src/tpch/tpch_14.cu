@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <device_atomic_functions.h>
+#include <driver_types.h>
 #include <iostream>
 #include <limits>
 #include <math.h>
@@ -182,7 +183,7 @@ __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < lineitem_size + 31; i += stride) {
-        printf("i: %d\n", i);
+//        printf("i: %d\n", i);
 
         btree::payload_t payload = btree::invalidTid;
         if (i < lineitem_size &&
@@ -190,34 +191,25 @@ __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned 
             lineitem->l_shipdate[i] < upper_shipdate) {
             payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
         }
-        //printf("lookup %lu\n", payload);
-        /*
-        if (payload != btree::invalidTid) {
-            unsigned base = atomicAggInc(output_index);
-            __syncwarp();
 
-//            unsigned lane = lane_id();
-            // _device__ ​ unsigned int __funnelshift_l ( unsigned int  lo, unsigned int  hi, unsigned int  shift ) 
-            unsigned mask = __funnelshift_l(0xffffffff, 0, lane_id());
-
-        }*/
-
-        int match = payload != btree::invalidTid && i % 3 == 0;
+        int match = payload != btree::invalidTid;// && i % 3 == 0;
         unsigned my_lane = lane_id();
         unsigned mask = __ballot_sync(FULL_MASK, match);
         unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
-        printf("right %u\n", right);
+//        printf("right %u\n", right);
         unsigned offset = __popc(mask & right);
         
-        printf("lane: %u offset: %u\n", my_lane, offset);
+//        printf("lane: %u offset: %u\n", my_lane, offset);
+int leader = __ffs(mask) - 1;
 
         unsigned base = 0;
-        if (my_lane == 0) {
-            base = atomicInc(&output_index, __popc(mask));
+        if (my_lane == leader) {
+            printf("lane count: %u\n", __popc(mask));
+            base = atomicAdd(&output_index, __popc(mask));
         }
 
         //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
-        base = __shfl_sync(FULL_MASK, base, 0);
+        base = __shfl_sync(FULL_MASK, base, leader);
 
         if (match) {
             printf("lane %u store to: %u\n", my_lane, base + offset);
@@ -319,8 +311,14 @@ cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
 //btree_lookup_kernel<<<1, 32>>>(lineitem_device, 128, tree, join_entries);
 btree_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
 
+
     cudaDeviceSynchronize();
-return;
+decltype(output_index) matches;
+cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
+assert(error == cudaSuccess);
+printf("join matches: %u\n", matches);
+
+return 0;
 #endif
 
     auto kernelStop = std::chrono::high_resolution_clock::now();
