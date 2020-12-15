@@ -99,7 +99,7 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
     }
 }
 
-__global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned linteitem_size, part_table_device_t* part, btree::Node* tree) {
+__global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned lineitem_size, part_table_device_t* part, btree::Node* tree) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -109,7 +109,7 @@ __global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned linteit
 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < linteitem_size; i += stride) {
+    for (int i = index; i < lineitem_size; i += stride) {
         if (lineitem->l_shipdate[i] < lower_shipdate ||
             lineitem->l_shipdate[i] >= upper_shipdate) {
             continue;
@@ -142,6 +142,120 @@ __global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned linteit
         atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
 }
+
+
+struct JoinEntry {
+    unsigned lineitem_tid;
+    unsigned part_tid;
+};
+__device__ unsigned output_index = 0;
+
+/*
+// source: https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
+// increment the value at ptr by 1 and return the old value
+__device__ int atomicAggInc(int *ptr) {
+    int mask = __match_any_sync(__activemask(), (unsigned long long)ptr);
+    int leader = __ffs(mask) - 1;    // select a leader
+    int res;
+    if(lane_id() == leader)                  // leader does the update
+        res = atomicAdd(ptr, __popc(mask));
+    res = __shfl_sync(mask, res, leader);    // get leader’s old value
+    return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
+}*/
+
+/*
+inline __device__ unsigned __funnelshift_l(unsigned low32, unsigned high32, unsigned shiftWidth) {
+  unsigned result;
+  asm("shf.l.wrap.b32 %0, %1, %2, %3;"
+      : "=r"(result)
+      : "r"(low32), "r"(high32), "r"(shiftWidth));
+  return result;
+}*/
+
+__global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned lineitem_size, btree::Node* tree, JoinEntry* join_entries) {
+//    const char* prefix = "PROMO";
+    const uint32_t lower_shipdate = 2449962; // 1995-09-01
+    const uint32_t upper_shipdate = 2449992; // 1995-10-01
+
+//    unsigned matches = 0;
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < lineitem_size; i += stride) { // FIXME
+    printf("i: %d\n", i);
+    /*
+        if (lineitem->l_shipdate[i] < lower_shipdate ||
+            lineitem->l_shipdate[i] >= upper_shipdate) {
+            continue;
+        }*/
+
+        auto payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
+        printf("lookup %lu\n", payload);
+        /*
+        if (payload != btree::invalidTid) {
+            unsigned base = atomicAggInc(output_index);
+            __syncwarp();
+
+//            unsigned lane = lane_id();
+            // _device__ ​ unsigned int __funnelshift_l ( unsigned int  lo, unsigned int  hi, unsigned int  shift ) 
+            unsigned mask = __funnelshift_l(0xffffffff, 0, lane_id());
+
+        }*/
+
+        int match = payload != btree::invalidTid;
+        unsigned my_lane = lane_id();
+        unsigned mask = __ballot_sync(FULL_MASK, match);
+        unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
+        printf("right %lu\n", right);
+        unsigned offset = __popc(mask & right);
+        
+        printf("lane: %u offset: %u\n", my_lane, offset);
+
+        unsigned base = 0;
+        if (my_lane == 0) {
+            base = atomicInc(&output_index, __popc(mask));
+        }
+
+        //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
+        base = __shfl_sync(FULL_MASK, base, 0);
+
+        join_entries[base + offset].lineitem_tid = i;
+    }
+}
+
+#if 0
+__global__ void join_kernel(lineitem_table_device_t* lineitem, unsigned linteitem_size, part_table_device_t* part, btree::Node* tree) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < linteitem_size; i += stride) {
+        if (payload != btree::invalidTid) {
+            const size_t part_tid = reinterpret_cast<size_t>(payload);
+
+            const auto extendedprice = lineitem->l_extendedprice[i];
+            const auto discount = lineitem->l_discount[i];
+            const auto summand = extendedprice * (100 - discount);
+            sum2 += summand;
+
+            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
+//            printf("type: %s\n", type);
+            if (my_strcmp(type, prefix, 5) == 0) {
+                sum1 += summand;
+            }
+        }
+    }
+
+    // reduce both sums
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
+        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
+    }
+    if (lane_id() == 0) {
+        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
+        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
+    }
+}
+#endif
+
 
 int main(int argc, char** argv) {
     using namespace std;
@@ -193,8 +307,16 @@ int main(int argc, char** argv) {
     auto tree = btree::construct(db.part.p_partkey, 0.7);
     btree::prefetchTree(tree, 0);
     auto start = std::chrono::high_resolution_clock::now();
-    btree_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
+//    btree_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
+
+
+//__global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned linteitem_size, btree::Node* tree, JoinEntry* join_entries)
+JoinEntry* join_entries;
+cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
+btree_lookup_kernel<<<1, 32>>>(lineitem_device, 128, tree, join_entries);
+
     cudaDeviceSynchronize();
+return;
 #endif
 
     auto kernelStop = std::chrono::high_resolution_clock::now();
