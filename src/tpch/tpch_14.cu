@@ -181,16 +181,16 @@ __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned 
 
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size; i += stride) { // FIXME
-    printf("i: %d\n", i);
-    /*
-        if (lineitem->l_shipdate[i] < lower_shipdate ||
-            lineitem->l_shipdate[i] >= upper_shipdate) {
-            continue;
-        }*/
+    for (int i = index; i < lineitem_size + 31; i += stride) {
+        printf("i: %d\n", i);
 
-        auto payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
-        printf("lookup %lu\n", payload);
+        btree::payload_t payload = btree::invalidTid;
+        if (i < lineitem_size &&
+            lineitem->l_shipdate[i] >= lower_shipdate &&
+            lineitem->l_shipdate[i] < upper_shipdate) {
+            payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
+        }
+        //printf("lookup %lu\n", payload);
         /*
         if (payload != btree::invalidTid) {
             unsigned base = atomicAggInc(output_index);
@@ -202,11 +202,11 @@ __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned 
 
         }*/
 
-        int match = payload != btree::invalidTid;
+        int match = payload != btree::invalidTid && i % 3 == 0;
         unsigned my_lane = lane_id();
         unsigned mask = __ballot_sync(FULL_MASK, match);
         unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
-        printf("right %lu\n", right);
+        printf("right %u\n", right);
         unsigned offset = __popc(mask & right);
         
         printf("lane: %u offset: %u\n", my_lane, offset);
@@ -219,7 +219,10 @@ __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned 
         //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
         base = __shfl_sync(FULL_MASK, base, 0);
 
-        join_entries[base + offset].lineitem_tid = i;
+        if (match) {
+            printf("lane %u store to: %u\n", my_lane, base + offset);
+            join_entries[base + offset].lineitem_tid = i;
+        }
     }
 }
 
@@ -313,7 +316,8 @@ int main(int argc, char** argv) {
 //__global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned linteitem_size, btree::Node* tree, JoinEntry* join_entries)
 JoinEntry* join_entries;
 cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
-btree_lookup_kernel<<<1, 32>>>(lineitem_device, 128, tree, join_entries);
+//btree_lookup_kernel<<<1, 32>>>(lineitem_device, 128, tree, join_entries);
+btree_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
 
     cudaDeviceSynchronize();
 return;
