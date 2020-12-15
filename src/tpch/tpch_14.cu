@@ -64,8 +64,8 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
     int64_t sum1 = 0;
     int64_t sum2 = 0;
 
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {
         if (lineitem->l_shipdate[i] < lower_shipdate ||
             lineitem->l_shipdate[i] >= upper_shipdate) {
@@ -108,8 +108,8 @@ __global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned lineite
     int64_t sum1 = 0;
     int64_t sum2 = 0;
 
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
     for (int i = index; i < lineitem_size; i += stride) {
         if (lineitem->l_shipdate[i] < lower_shipdate ||
             lineitem->l_shipdate[i] >= upper_shipdate) {
@@ -134,6 +134,7 @@ __global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned lineite
     }
 
     // reduce both sums
+    #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
         sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
         sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
@@ -164,27 +165,13 @@ __device__ int atomicAggInc(int *ptr) {
     return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
 }*/
 
-/*
-inline __device__ unsigned __funnelshift_l(unsigned low32, unsigned high32, unsigned shiftWidth) {
-  unsigned result;
-  asm("shf.l.wrap.b32 %0, %1, %2, %3;"
-      : "=r"(result)
-      : "r"(low32), "r"(high32), "r"(shiftWidth));
-  return result;
-}*/
-
 __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned lineitem_size, btree::Node* tree, JoinEntry* join_entries) {
-//    const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
-//    unsigned matches = 0;
-
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
     for (int i = index; i < lineitem_size + 31; i += stride) {
-//        printf("i: %d\n", i);
-
         btree::payload_t payload = btree::invalidTid;
         if (i < lineitem_size &&
             lineitem->l_shipdate[i] >= lower_shipdate &&
@@ -192,54 +179,52 @@ __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned 
             payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
         }
 
-        int match = payload != btree::invalidTid;// && i % 3 == 0;
-        unsigned my_lane = lane_id();
+        int match = payload != btree::invalidTid;
         unsigned mask = __ballot_sync(FULL_MASK, match);
+        unsigned my_lane = lane_id();
         unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
 //        printf("right %u\n", right);
         unsigned offset = __popc(mask & right);
-        
-//        printf("lane: %u offset: %u\n", my_lane, offset);
-int leader = __ffs(mask) - 1;
 
         unsigned base = 0;
+        int leader = __ffs(mask) - 1;
         if (my_lane == leader) {
-            printf("lane count: %u\n", __popc(mask));
             base = atomicAdd(&output_index, __popc(mask));
         }
-
-        //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
         base = __shfl_sync(FULL_MASK, base, leader);
 
         if (match) {
-            printf("lane %u store to: %u\n", my_lane, base + offset);
+//            printf("lane %u store to: %u\n", my_lane, base + offset);
             join_entries[base + offset].lineitem_tid = i;
         }
     }
 }
 
-#if 0
-__global__ void join_kernel(lineitem_table_device_t* lineitem, unsigned linteitem_size, part_table_device_t* part, btree::Node* tree) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < linteitem_size; i += stride) {
-        if (payload != btree::invalidTid) {
-            const size_t part_tid = reinterpret_cast<size_t>(payload);
+__global__ void join_kernel(lineitem_table_device_t* lineitem, part_table_device_t* part, JoinEntry* join_entries, size_t n) {
+    int64_t sum1 = 0;
+    int64_t sum2 = 0;
+    const char* prefix = "PROMO";
 
-            const auto extendedprice = lineitem->l_extendedprice[i];
-            const auto discount = lineitem->l_discount[i];
-            const auto summand = extendedprice * (100 - discount);
-            sum2 += summand;
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n; i += stride) {
+        const auto lineitem_tid = join_entries[i].lineitem_tid;
+        const auto part_tid = join_entries[i].part_tid;
 
-            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
-//            printf("type: %s\n", type);
-            if (my_strcmp(type, prefix, 5) == 0) {
-                sum1 += summand;
-            }
+        const auto extendedprice = lineitem->l_extendedprice[lineitem_tid];
+        const auto discount = lineitem->l_discount[lineitem_tid];
+        const auto summand = extendedprice * (100 - discount);
+        sum2 += summand;
+
+        const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
+//        printf("type: %s\n", type);
+        if (my_strcmp(type, prefix, 5) == 0) {
+            sum1 += summand;
         }
     }
 
     // reduce both sums
+    #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
         sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
         sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
@@ -249,7 +234,6 @@ __global__ void join_kernel(lineitem_table_device_t* lineitem, unsigned linteite
         atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
 }
-#endif
 
 
 int main(int argc, char** argv) {
@@ -301,24 +285,24 @@ int main(int argc, char** argv) {
 #else
     auto tree = btree::construct(db.part.p_partkey, 0.7);
     btree::prefetchTree(tree, 0);
+
     auto start = std::chrono::high_resolution_clock::now();
-//    btree_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
-
-
-//__global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned linteitem_size, btree::Node* tree, JoinEntry* join_entries)
-JoinEntry* join_entries;
-cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
-//btree_lookup_kernel<<<1, 32>>>(lineitem_device, 128, tree, join_entries);
-btree_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
-
-
+    btree_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
     cudaDeviceSynchronize();
-decltype(output_index) matches;
-cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
-assert(error == cudaSuccess);
-printf("join matches: %u\n", matches);
 
-return 0;
+/*
+    JoinEntry* join_entries;
+    cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
+    auto start = std::chrono::high_resolution_clock::now();
+    btree_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
+    cudaDeviceSynchronize();
+    decltype(output_index) matches;
+    cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
+    assert(error == cudaSuccess);
+    printf("join matches: %u\n", matches);
+
+    join_kernel<<<numBlocks, blockSize>>>(lineitem_device, part_device, join_entries, matches);
+    cudaDeviceSynchronize();*/
 #endif
 
     auto kernelStop = std::chrono::high_resolution_clock::now();
@@ -328,11 +312,12 @@ return 0;
 // TODO
 #endif
 
+/*
 printf("sum1: %lu\n", globalSum1);
 printf("sum2: %lu\n", globalSum2);
     int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
-
+*/
     auto finish = std::chrono::high_resolution_clock::now();
     auto d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
