@@ -90,6 +90,7 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
     }
 
     // reduce both sums
+    #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
         sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
         sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
