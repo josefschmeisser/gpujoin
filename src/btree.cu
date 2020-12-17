@@ -7,6 +7,7 @@
 #include <tuple>
 #include <cassert>
 #include <numeric>
+#include <limits>
 
 #include <numa.h>
 
@@ -20,6 +21,13 @@ Node* create_node(bool isLeaf) {
     cudaMallocManaged(dst, Node::pageSize);
     //node = reinterpret_cast<Node*>(numa_alloc_onnode(Node::pageSize, 0));
     node->isLeaf = isLeaf;
+
+    // initialize key vector with the largest key value possible
+    static constexpr auto maxKey = std::numeric_limits<key_t>::max();
+    for (unsigned i = 0; i < Node::maxEntries; ++i) {
+        node->keys[i] = maxKey;
+    }
+
     return node;
 }
 
