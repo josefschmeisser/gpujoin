@@ -44,6 +44,8 @@ target_link_libraries(
     numa
 )
 
+add_executable(btree_monolithic src/btree_monolithic.cu)
+
 add_executable(rs_lookup src/rs_lookup.cu)
 add_dependencies(rs_lookup RadixSpline)
 
