@@ -12,9 +12,10 @@ endif(ENABLE_PERFBENCHMARKING)
 
 add_executable(cuda_tpch_1 tpch_1.cu common.cpp)
 
-list(APPEND CUDA_NVCC_FLAGS -gencode arch=compute_61,code=sm_61)
+list(APPEND CUDA_NVCC_FLAGS -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70)
+#string(APPEND CMAKE_CUDA_FLAGS " -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70")
 
 #add_executable(cuda_tpch_14 ../btree.cu tpch_14.cu common.cpp)
 cuda_add_executable(cuda_tpch_14 ../btree.cu tpch_14.cu common.cpp)
 #target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-dc>)
-target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70>)
+#target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70>)
