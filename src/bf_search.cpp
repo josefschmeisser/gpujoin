@@ -178,8 +178,8 @@ printf("pre_lower: %lu pre_upper: %lu\n", pre_lower, pre_upper);
         printf("+++ open bounds +++\n");
     }
 
-    lower = (cont && less) ? pre_lower : lower;
-    upper = (cont && !less) ? pre_upper : upper;
+    lower = (!cont || less) ? pre_lower : lower;
+    upper = (!cont || !less) ? pre_upper : upper;
 
 printf("lower: %lu upper: %lu\n", lower, upper);
 
