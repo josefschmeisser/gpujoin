@@ -14,6 +14,8 @@
 #include "LinearProbingHashTable.cuh"
 #include "btree.cuh"
 
+using vector_copy_policy = vector_to_managed_array;
+
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
 __managed__ int tupleCount;
@@ -246,50 +248,16 @@ int main(int argc, char** argv) {
     const auto lineitem_size = db.lineitem.l_orderkey.size();
     const auto part_size = db.part.p_partkey.size();
 
-/*
     lineitem_table_device_t* lineitem_device;
-    cudaMallocManaged(&lineitem_device, sizeof(lineitem_table_device_t));
     part_table_device_t* part_device;
-    cudaMallocManaged(&part_device, sizeof(part_table_device_t));
-
-#define USE_PINNED_MEM
-#ifdef USE_PINNED_MEM
-    copy_relation<vector_to_managed_array>(db.lineitem, *lineitem_device);
-    copy_relation<vector_to_managed_array>(db.part, *part_device);
-#else
     {
         auto start = std::chrono::high_resolution_clock::now();
-        copy_relation<vector_to_device_array>(db.lineitem, *lineitem_device);
-        copy_relation<vector_to_device_array>(db.part, *part_device);
+        lineitem_device = copy_relation<vector_copy_policy>(db.lineitem);
+        part_device = copy_relation<vector_copy_policy>(db.part);
         auto finish = std::chrono::high_resolution_clock::now();
         auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
         std::cout << "Transfer time: " << d << " ms\n";
     }
-#endif
-*/
-
-
-    lineitem_table_device_t* lineitem_device;
-    part_table_device_t* part_device;
-
-#define USE_PINNED_MEM
-#ifdef USE_PINNED_MEM
-    lineitem_device = copy_relation<vector_to_managed_array>(db.lineitem);
-    part_device = copy_relation<vector_to_managed_array>(db.part);
-#else
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-        lineitem_device = copy_relation<vector_to_device_array>(db.lineitem);
-        part_device = copy_relation<vector_to_device_array>(db.part);
-        auto finish = std::chrono::high_resolution_clock::now();
-        auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
-        std::cout << "Transfer time: " << d << " ms\n";
-    }
-#endif
-
-
-
-    //cudaThreadSetLimit(cudaLimitMallocHeapSize, 1024*1024*1024);
 
     const int blockSize = 32;
     int numSMs;
@@ -332,13 +300,9 @@ int main(int argc, char** argv) {
     auto kernelStop = std::chrono::high_resolution_clock::now();
     auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start).count()/1000.;
 
-#ifndef NDEBUG
-// TODO
-#endif
-
-/*
-printf("sum1: %lu\n", globalSum1);
-printf("sum2: %lu\n", globalSum2);*/
+    /*
+    printf("sum1: %lu\n", globalSum1);
+    printf("sum2: %lu\n", globalSum2);*/
     int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 

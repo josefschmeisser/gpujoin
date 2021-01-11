@@ -9,6 +9,8 @@
 
 #include "common.hpp"
 
+using vector_copy_policy = vector_to_device_array;
+
 struct group {
     uint64_t sum_qty;
     uint64_t sum_base_price;
@@ -252,18 +254,13 @@ int main(int argc, char** argv) {
     const auto N = db.lineitem.l_commitdate.size();
 
     lineitem_table_device_t* lineitem;
-#if USE_PINNED_MEM
-    //prepareManaged(db.lineitem, lineitem);
-    lineitem = copy_relation<vector_to_managed_array>(db.lineitem);
-#else
     {
         auto start = std::chrono::high_resolution_clock::now();
-        lineitem = copy_relation<vector_to_device_array>(db.lineitem);
+        lineitem = copy_relation<vector_copy_policy>(db.lineitem);
         auto finish = std::chrono::high_resolution_clock::now();
         auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
         std::cout << "Transfer time: " << d << " ms\n";
     }
-#endif
 
     // Set a heap size of 128 megabytes. Note that this must
     // be done before any kernel is launched.
