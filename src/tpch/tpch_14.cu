@@ -56,7 +56,7 @@ __forceinline__ __device__ unsigned lane_id() {
     return ret;
 }
 
-__global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table_device_t* lineitem, device_ht_t ht) {
+__global__ void probe_kernel(size_t n, const part_table_device_t* part, const lineitem_table_device_t* lineitem, device_ht_t ht) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -101,7 +101,7 @@ __global__ void probe_kernel(size_t n, part_table_device_t* part, lineitem_table
     }
 }
 
-__global__ void btree_kernel(lineitem_table_device_t* lineitem, unsigned lineitem_size, part_table_device_t* part, btree::Node* tree) {
+__global__ void btree_kernel(const lineitem_table_device_t* lineitem, unsigned lineitem_size, const part_table_device_t* part, btree::Node* tree) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -166,7 +166,7 @@ __device__ int atomicAggInc(int *ptr) {
     return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
 }*/
 
-__global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned lineitem_size, btree::Node* tree, JoinEntry* join_entries) {
+__global__ void btree_lookup_kernel(const lineitem_table_device_t* lineitem, unsigned lineitem_size, btree::Node* tree, JoinEntry* join_entries) {
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
@@ -201,7 +201,7 @@ __global__ void btree_lookup_kernel(lineitem_table_device_t* lineitem, unsigned 
     }
 }
 
-__global__ void join_kernel(lineitem_table_device_t* lineitem, part_table_device_t* part, JoinEntry* join_entries, size_t n) {
+__global__ void join_kernel(const lineitem_table_device_t* lineitem, const part_table_device_t* part, JoinEntry* join_entries, size_t n) {
     int64_t sum1 = 0;
     int64_t sum2 = 0;
     const char* prefix = "PROMO";
@@ -246,6 +246,7 @@ int main(int argc, char** argv) {
     const auto lineitem_size = db.lineitem.l_orderkey.size();
     const auto part_size = db.part.p_partkey.size();
 
+/*
     lineitem_table_device_t* lineitem_device;
     cudaMallocManaged(&lineitem_device, sizeof(lineitem_table_device_t));
     part_table_device_t* part_device;
@@ -265,6 +266,28 @@ int main(int argc, char** argv) {
         std::cout << "Transfer time: " << d << " ms\n";
     }
 #endif
+*/
+
+
+    lineitem_table_device_t* lineitem_device;
+    part_table_device_t* part_device;
+
+#define USE_PINNED_MEM
+#ifdef USE_PINNED_MEM
+    lineitem_device = copy_relation<vector_to_managed_array>(db.lineitem);
+    part_device = copy_relation<vector_to_managed_array>(db.part);
+#else
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        lineitem_device = copy_relation<vector_to_device_array>(db.lineitem);
+        part_device = copy_relation<vector_to_device_array>(db.part);
+        auto finish = std::chrono::high_resolution_clock::now();
+        auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+        std::cout << "Transfer time: " << d << " ms\n";
+    }
+#endif
+
+
 
     //cudaThreadSetLimit(cudaLimitMallocHeapSize, 1024*1024*1024);
 
@@ -315,10 +338,10 @@ int main(int argc, char** argv) {
 
 /*
 printf("sum1: %lu\n", globalSum1);
-printf("sum2: %lu\n", globalSum2);
+printf("sum2: %lu\n", globalSum2);*/
     int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
-*/
+
     auto finish = std::chrono::high_resolution_clock::now();
     auto d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";

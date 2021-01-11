@@ -111,7 +111,7 @@ __device__ void sortGroups(unsigned groupCount) {
     }
 }
 
-__global__ void query_1_kernel(int n, lineitem_table_device_t lineitem) {
+__global__ void query_1_kernel(int n, const lineitem_table_device_t* lineitem) {
     //constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
     const uint32_t threshold_date = 2451059;
 
@@ -124,10 +124,10 @@ __global__ void query_1_kernel(int n, lineitem_table_device_t lineitem) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {
-        if (lineitem.l_shipdate[i] > threshold_date) continue;
+        if (lineitem->l_shipdate[i] > threshold_date) continue;
 
-        uint32_t h = static_cast<uint32_t>(lineitem.l_returnflag[i]) << 8;
-        h |= lineitem.l_linestatus[i];
+        uint32_t h = static_cast<uint32_t>(lineitem->l_returnflag[i]) << 8;
+        h |= lineitem->l_linestatus[i];
         h = hash(h);
         h &= 0b0111;
         group* groupPtr = &localGroups[h];
@@ -136,15 +136,15 @@ __global__ void query_1_kernel(int n, lineitem_table_device_t lineitem) {
             //int atomicCAS(int* address, int compare, int val);
             int stored = atomicCAS(&groupPtr->in_use, 0, 1);
             if (stored == 0) {
-                groupPtr->l_returnflag = lineitem.l_returnflag[i];
-                groupPtr->l_linestatus = lineitem.l_linestatus[i];
+                groupPtr->l_returnflag = lineitem->l_returnflag[i];
+                groupPtr->l_linestatus = lineitem->l_linestatus[i];
                 __threadfence();
             }
         }
 
 /* TODO: collision handling
         __syncthreads();
-        if (groupPtr->l_returnflag != lineitem.l_returnflag[i] || groupPtr->l_linestatus != lineitem.l_linestatus[i]) {
+        if (groupPtr->l_returnflag != lineitem->l_returnflag[i] || groupPtr->l_linestatus != lineitem->l_linestatus[i]) {
             // TODO handle collisions; spill to global hashtable
             __threadfence();
             printf("first trap\n");
@@ -152,13 +152,13 @@ __global__ void query_1_kernel(int n, lineitem_table_device_t lineitem) {
         }
 */
 
-        const auto current_l_extendedprice = lineitem.l_extendedprice[i];
-        const auto current_l_discount = lineitem.l_discount[i];
-        const auto current_l_quantity = lineitem.l_quantity[i];
+        const auto current_l_extendedprice = lineitem->l_extendedprice[i];
+        const auto current_l_discount = lineitem->l_discount[i];
+        const auto current_l_quantity = lineitem->l_quantity[i];
         atomicAdd((unsigned long long int*)&groupPtr->sum_qty, (unsigned long long int)current_l_quantity);
         atomicAdd((unsigned long long int*)&groupPtr->sum_base_price, (unsigned long long int)current_l_extendedprice);
         atomicAdd((unsigned long long int*)&groupPtr->sum_disc_price, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount)));
-        atomicAdd((unsigned long long int*)&groupPtr->sum_charge, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount) * (100 + lineitem.l_tax[i])));
+        atomicAdd((unsigned long long int*)&groupPtr->sum_charge, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount) * (100 + lineitem->l_tax[i])));
         atomicAdd((unsigned long long int*)&groupPtr->avg_qty, (unsigned long long int)current_l_quantity);
         atomicAdd((unsigned long long int*)&groupPtr->avg_price, (unsigned long long int)current_l_extendedprice);
         atomicAdd((unsigned long long int*)&groupPtr->avg_disc, (unsigned long long int)current_l_discount);
@@ -251,15 +251,14 @@ int main(int argc, char** argv) {
     load_tables(db, argv[1]);
     const auto N = db.lineitem.l_commitdate.size();
 
-    lineitem_table_device_t lineitem;
+    lineitem_table_device_t* lineitem;
 #if USE_PINNED_MEM
     //prepareManaged(db.lineitem, lineitem);
-    copy_relation<vector_to_managed_array>(db.lineitem, lineitem);
+    lineitem = copy_relation<vector_to_managed_array>(db.lineitem);
 #else
     {
         auto start = std::chrono::high_resolution_clock::now();
-        //prepareDeviceResident(db.lineitem, lineitem);
-        copy_relation<vector_to_device_array>(db.lineitem, lineitem);
+        lineitem = copy_relation<vector_to_device_array>(db.lineitem);
         auto finish = std::chrono::high_resolution_clock::now();
         auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
         std::cout << "Transfer time: " << d << " ms\n";

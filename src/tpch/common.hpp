@@ -10,6 +10,8 @@
 
 #include <cuda_runtime_api.h>
 
+#include <numa.h>
+
 struct lineitem_table_t {
     std::vector<uint32_t> l_orderkey;
     std::vector<uint32_t> l_partkey;
@@ -151,6 +153,17 @@ struct vector_to_managed_array {
     }
 };
 
+template<unsigned node = 0>
+struct vector_to_numa_node_array {
+    template<class T>
+    T* operator() (const std::vector<T>& vec) {
+        size_t columnSize = vec.size() * sizeof(typename std::remove_reference<decltype(vec)>::type::value_type);
+        T* dst = reinterpret_cast<T*>(numa_alloc_onnode(columnSize, node));
+        std::memcpy(dst, vec.data(), columnSize);
+        return dst;
+    }
+};
+
 template<class F>
 void copy_relation(const lineitem_table_t& src, lineitem_table_device_t& dst) {
     const auto N = src.l_orderkey.size();
@@ -186,4 +199,61 @@ void copy_relation(const part_table_t& src, part_table_device_t& dst) {
     dst.p_container = f(src.p_container);
     dst.p_retailprice = f(src.p_retailprice);
     dst.p_comment = f(src.p_comment);
+}
+
+template<class F>
+lineitem_table_device_t* copy_relation(const lineitem_table_t& src) {
+    const auto N = src.l_orderkey.size();
+    static F f;
+    lineitem_table_device_t tmp;
+    tmp.l_orderkey = f(src.l_orderkey);
+    tmp.l_partkey = f(src.l_partkey);
+    tmp.l_suppkey = f(src.l_suppkey);
+    tmp.l_linenumber = f(src.l_linenumber);
+    tmp.l_quantity = f(src.l_quantity);
+    tmp.l_extendedprice = f(src.l_extendedprice);
+    tmp.l_discount = f(src.l_discount);
+    tmp.l_tax = f(src.l_tax);
+    tmp.l_returnflag = f(src.l_returnflag);
+    tmp.l_linestatus = f(src.l_linestatus);
+    tmp.l_shipdate = f(src.l_shipdate);
+    tmp.l_commitdate = f(src.l_commitdate);
+    tmp.l_receiptdate = f(src.l_receiptdate);
+    tmp.l_shipinstruct = f(src.l_shipinstruct);
+    tmp.l_shipmode = f(src.l_shipmode);
+    tmp.l_comment = f(src.l_comment);
+
+    lineitem_table_device_t* dst;
+
+    cudaMalloc(&dst, sizeof(lineitem_table_device_t));
+    cudaMemcpy(dst, &tmp, sizeof(lineitem_table_device_t), cudaMemcpyHostToDevice);
+/*
+    cudaMallocManaged(&dst, sizeof(lineitem_table_device_t));
+    std::memcpy(dst, &tmp, sizeof(lineitem_table_device_t));*/
+    return dst;
+}
+
+template<class F>
+part_table_device_t* copy_relation(const part_table_t& src) {
+    const auto N = src.p_partkey.size();
+    static F f;
+    part_table_device_t tmp;
+    tmp.p_partkey = f(src.p_partkey);
+    tmp.p_name = f(src.p_name);
+    tmp.p_mfgr = f(src.p_mfgr);
+    tmp.p_brand = f(src.p_brand);
+    tmp.p_type = f(src.p_type);
+    tmp.p_size = f(src.p_size);
+    tmp.p_container = f(src.p_container);
+    tmp.p_retailprice = f(src.p_retailprice);
+    tmp.p_comment = f(src.p_comment);
+
+    part_table_device_t* dst;
+
+    cudaMalloc(&dst, sizeof(part_table_device_t));
+    cudaMemcpy(dst, &tmp, sizeof(part_table_device_t), cudaMemcpyHostToDevice);
+/*
+    cudaMallocManaged(&dst, sizeof(part_table_device_t));
+    std::memcpy(dst, &tmp, sizeof(part_table_device_t));*/
+    return dst;
 }
