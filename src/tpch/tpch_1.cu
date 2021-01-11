@@ -111,18 +111,9 @@ __device__ void sortGroups(unsigned groupCount) {
     }
 }
 
-__global__ void query_1_kernel(
-    int n,
-    char* __restrict__ l_returnflag,
-    char* __restrict__ l_linestatus,
-    int64_t* __restrict__ l_quantity,
-    int64_t* __restrict__ l_extendedprice,
-    int64_t* __restrict__ l_discount,
-    int64_t* __restrict__ l_tax,
-    uint32_t* __restrict__ l_shipdate)
-{
+__global__ void query_1_kernel(int n, lineitem_table_device_t lineitem) {
     //constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
-    uint32_t threshold_date = 2451059;
+    const uint32_t threshold_date = 2451059;
 
     __shared__ group localGroups[16];
     for (int i = threadIdx.x; i < 16; i += blockDim.x) {
@@ -133,10 +124,10 @@ __global__ void query_1_kernel(
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {
-        if (l_shipdate[i] > threshold_date) continue;
+        if (lineitem.l_shipdate[i] > threshold_date) continue;
 
-        uint32_t h = static_cast<uint32_t>(l_returnflag[i]) << 8;
-        h |= l_linestatus[i];
+        uint32_t h = static_cast<uint32_t>(lineitem.l_returnflag[i]) << 8;
+        h |= lineitem.l_linestatus[i];
         h = hash(h);
         h &= 0b0111;
         group* groupPtr = &localGroups[h];
@@ -145,15 +136,15 @@ __global__ void query_1_kernel(
             //int atomicCAS(int* address, int compare, int val);
             int stored = atomicCAS(&groupPtr->in_use, 0, 1);
             if (stored == 0) {
-                groupPtr->l_returnflag = l_returnflag[i];
-                groupPtr->l_linestatus = l_linestatus[i];
+                groupPtr->l_returnflag = lineitem.l_returnflag[i];
+                groupPtr->l_linestatus = lineitem.l_linestatus[i];
                 __threadfence();
             }
         }
 
 /* TODO: collision handling
         __syncthreads();
-        if (groupPtr->l_returnflag != l_returnflag[i] || groupPtr->l_linestatus != l_linestatus[i]) {
+        if (groupPtr->l_returnflag != lineitem.l_returnflag[i] || groupPtr->l_linestatus != lineitem.l_linestatus[i]) {
             // TODO handle collisions; spill to global hashtable
             __threadfence();
             printf("first trap\n");
@@ -161,13 +152,13 @@ __global__ void query_1_kernel(
         }
 */
 
-        auto current_l_extendedprice = l_extendedprice[i];
-        auto current_l_discount = l_discount[i];
-        auto current_l_quantity = l_quantity[i];
+        const auto current_l_extendedprice = lineitem.l_extendedprice[i];
+        const auto current_l_discount = lineitem.l_discount[i];
+        const auto current_l_quantity = lineitem.l_quantity[i];
         atomicAdd((unsigned long long int*)&groupPtr->sum_qty, (unsigned long long int)current_l_quantity);
         atomicAdd((unsigned long long int*)&groupPtr->sum_base_price, (unsigned long long int)current_l_extendedprice);
         atomicAdd((unsigned long long int*)&groupPtr->sum_disc_price, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount)));
-        atomicAdd((unsigned long long int*)&groupPtr->sum_charge, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount) * (100 + l_tax[i])));
+        atomicAdd((unsigned long long int*)&groupPtr->sum_charge, (unsigned long long int)(current_l_extendedprice * (100 - current_l_discount) * (100 + lineitem.l_tax[i])));
         atomicAdd((unsigned long long int*)&groupPtr->avg_qty, (unsigned long long int)current_l_quantity);
         atomicAdd((unsigned long long int*)&groupPtr->avg_price, (unsigned long long int)current_l_extendedprice);
         atomicAdd((unsigned long long int*)&groupPtr->avg_disc, (unsigned long long int)current_l_discount);
@@ -292,9 +283,7 @@ int main(int argc, char** argv) {
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    // char* l_returnflag, char* l_linestatus, int64_t* l_quantity, int64_t* l_extendedprice, int64_t* l_discount, int64_t* l_tax, uint32_t* l_shipdate
-    query_1_kernel<<<numBlocks, blockSize>>>(N,
-        lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_shipdate);
+    query_1_kernel<<<numBlocks, blockSize>>>(N, lineitem);
     cudaDeviceSynchronize();
 
     auto kernelStop = std::chrono::high_resolution_clock::now();
