@@ -260,7 +260,7 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n
 
     const int last = n - 1;
     const int start = static_cast<int>(last*hint);
-assert(start <= last);
+    assert(start <= last);
 
     bool cont = true;
     bool less = arr[start] < x;
@@ -272,19 +272,12 @@ assert(start <= last);
         current = max(0, min(last , start + offset));
     }
 
-    const auto pre_lower = max(0, min(n, start + (offset>>less)));
-    const auto pre_upper = 1 + max(0, min(n, start + (offset>>(1 - less))));
+    const auto pre_lower = max(0, min(static_cast<int>(n), start + (offset>>less)));
+    const auto pre_upper = 1 + max(0, min(static_cast<int>(n), start + (offset>>(1 - less))));
     const unsigned lower = (!cont || less) ? pre_lower : 0;
     const unsigned upper = (!cont || !less) ? pre_upper : n;
 
-//    return lower + branchy_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
-    unsigned pos1 = lower + branchy_binary_search(x, arr + lower, upper - lower);
-    unsigned pos2 = branchy_binary_search(x, arr, n);
-    //printf("pos1: %u pos2: %u\n", pos1, pos2);
-    if (pos1 != pos2) {
-        printf("mismatch pos1: %u pos2: %u\n", pos1, pos2);
-    }
-    return pos1;
+    return lower + branchy_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
 }
 
 __device__ payload_t btree_lookup(Node* tree, key_t key) {
@@ -319,6 +312,7 @@ __device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
         if (pos > 0) {
             const auto prev = static_cast<float>(node->keys[pos - 1]);
             const auto current = static_cast<float>(node->keys[pos]);
+            printf("pref: %f current: %f\n", prev, current);
             hint = (static_cast<float>(key) - prev)/(current - prev);
         } else {
             hint = 0.5f;
@@ -344,22 +338,21 @@ __device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
 __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-
-    printf("index: %d stride: %d\n", index, stride);
-#if 0
     for (int i = index; i < n; i += stride) {
         //tids[i] = btree_lookup(tree, keys[i]);
-        auto tid1 = btree_lookup(tree, keys[i]);
-        //tids[i] = btree_lookup_with_hints(tree, keys[i]);
+        //auto tid1 = btree_lookup(tree, keys[i]);
+        tids[i] = btree_lookup_with_hints(tree, keys[i]);
+        /*
         
         auto tid2 = btree_lookup_with_hints(tree, keys[i]);
         
         if (tid1 != tid2) {
             printf("mismatch\n");
         }
+
+        tids[i] = tid1;*/
    //     printf("tids[%d] = %lu\n", tids[i]);
     }
-#endif
 }
 
 } // namespace cuda
