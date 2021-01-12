@@ -218,14 +218,15 @@ void prefetchTree(Node* tree, int device) {
 
 namespace cuda {
 
-__device__ unsigned naive_lower_bound(Node* node, key_t key) {
+template<class T>
+__device__ unsigned branchy_binary_search(T x, const T* arr, unsigned size) {
     unsigned lower = 0;
-    unsigned upper = node->count;
+    unsigned upper = size;
     do {
         unsigned mid = ((upper - lower) / 2) + lower;
-        if (key < node->keys[mid]) {
+        if (x < arr[mid]) {
             upper = mid;
-        } else if (key > node->keys[mid]) {
+        } else if (x > arr[mid]) {
             lower = mid + 1;
         } else {
             return mid;
@@ -234,11 +235,64 @@ __device__ unsigned naive_lower_bound(Node* node, key_t key) {
     return lower;
 }
 
+template<class T>
+__device__ unsigned branch_free_binary_search(T x, const T* arr, unsigned size) {
+//    if (size < 1) { return 0; }
+
+    const unsigned steps = 31 - __clz(size - 1);
+    //printf("steps: %d\n", steps);
+    unsigned mid = 1 << steps;
+
+    unsigned ret = (arr[mid] < x) * (size - mid);
+    //while (mid > 0) {
+    for (unsigned step = 1; step <= steps; ++step) {
+        mid >>= 1;
+        ret += (arr[ret + mid] < x) ? mid : 0;
+    }
+    ret += (arr[ret] < x) ? 1 : 0;
+
+    return ret;
+}
+
+template<class T, unsigned max_step = 8> // TODO find optimal limit
+__device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n, float hint) {
+//    if (size < 1) { return 0; }
+
+    const int last = n - 1;
+    const int start = static_cast<int>(last*hint);
+assert(start <= last);
+
+    bool cont = true;
+    bool less = arr[start] < x;
+    int offset = -1 + 2*less;
+    unsigned current = max(0, min(last , start + offset));
+    for (unsigned i = 0; i < max_step; ++i) {
+        cont = ((arr[current] < x) == less);
+        offset = cont ? offset<<1 : offset;
+        current = max(0, min(last , start + offset));
+    }
+
+    const auto pre_lower = max(0, min(n, start + (offset>>less)));
+    const auto pre_upper = 1 + max(0, min(n, start + (offset>>(1 - less))));
+    const unsigned lower = (!cont || less) ? pre_lower : 0;
+    const unsigned upper = (!cont || !less) ? pre_upper : n;
+
+//    return lower + branchy_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
+    unsigned pos1 = lower + branchy_binary_search(x, arr + lower, upper - lower);
+    unsigned pos2 = branchy_binary_search(x, arr, n);
+    //printf("pos1: %u pos2: %u\n", pos1, pos2);
+    if (pos1 != pos2) {
+        printf("mismatch pos1: %u pos2: %u\n", pos1, pos2);
+    }
+    return pos1;
+}
+
 __device__ payload_t btree_lookup(Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     Node* node = tree;
     while (!node->isLeaf) {
-        unsigned pos = naive_lower_bound(node, key);
+        //unsigned pos = naive_lower_bound(node, key);
+        unsigned pos = branch_free_binary_search(key, node->keys, node->count);
         //printf("inner pos: %d\n", pos);
         node = reinterpret_cast<Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
@@ -246,7 +300,8 @@ __device__ payload_t btree_lookup(Node* tree, key_t key) {
         }*/
     }
 
-    unsigned pos = naive_lower_bound(node, key);
+    //unsigned pos = naive_lower_bound(node, key);
+    unsigned pos = branch_free_binary_search(key, node->keys, node->count);
     //printf("leaf pos: %d\n", pos);
     if ((pos < node->count) && (node->keys[pos] == key)) {
         return node->payloads[pos];
@@ -255,19 +310,56 @@ __device__ payload_t btree_lookup(Node* tree, key_t key) {
     return invalidTid;
 }
 
-__device__ unsigned lower_bound_with_hint(Node* node, key_t key, float hint) {
-    return 0;
+__device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
+    //printf("btree_lookup key: %lu\n", key);
+    float hint = 0.5f;
+    Node* node = tree;
+    while (!node->isLeaf) {
+        unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+        if (pos > 0) {
+            const auto prev = static_cast<float>(node->keys[pos - 1]);
+            const auto current = static_cast<float>(node->keys[pos]);
+            hint = (static_cast<float>(key) - prev)/(current - prev);
+        } else {
+            hint = 0.5f;
+        }
+
+        node = reinterpret_cast<Node*>(node->payloads[pos]);
+        /*
+        if (node == nullptr) {
+            return invalidTid;
+        }*/
+    }
+
+    //unsigned pos = naive_lower_bound(node, key);
+    unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+    //printf("leaf pos: %d\n", pos);
+    if ((pos < node->count) && (node->keys[pos] == key)) {
+        return node->payloads[pos];
+    }
+
+    return invalidTid;
 }
 
 __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
-    //printf("index: %d stride: %d\n", index, stride);
+    printf("index: %d stride: %d\n", index, stride);
+#if 0
     for (int i = index; i < n; i += stride) {
-        tids[i] = btree_lookup(tree, keys[i]);
-        //printf("tids[%d] = %lu\n", tids[i]);
+        //tids[i] = btree_lookup(tree, keys[i]);
+        auto tid1 = btree_lookup(tree, keys[i]);
+        //tids[i] = btree_lookup_with_hints(tree, keys[i]);
+        
+        auto tid2 = btree_lookup_with_hints(tree, keys[i]);
+        
+        if (tid1 != tid2) {
+            printf("mismatch\n");
+        }
+   //     printf("tids[%d] = %lu\n", tids[i]);
     }
+#endif
 }
 
 } // namespace cuda

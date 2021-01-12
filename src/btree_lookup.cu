@@ -13,7 +13,8 @@
 
 using namespace std;
 
-static constexpr unsigned numElements = 1e8;
+static constexpr unsigned maxRepetitions = 10;
+static constexpr unsigned numElements = 1e6;//8;
 
 int main() {
 
@@ -49,21 +50,28 @@ int main() {
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
 
-    //btree::prefetchTree(tree, 0);
+    btree::prefetchTree(tree, 0);
 
     const auto kernelStart = std::chrono::high_resolution_clock::now();
-    btree::cuda::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
-    cudaDeviceSynchronize();
+    for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
+        btree::cuda::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
+        cudaDeviceSynchronize();
+    }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
     const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
-    std::cout << "GPU MOps: " << (numElements/1e6)/(kernelTime/1e3) << endl;
+    std::cout << "GPU MOps: " << (maxRepetitions*numElements/1e6)/(kernelTime/1e3) << endl;
 
-/*
+
     for (unsigned i = 0; i < numElements; ++i) {
-        printf("tid: %lu\n", reinterpret_cast<uint64_t>(tids[i]));
+        //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(tids[i]), keys[i]);
+        if (reinterpret_cast<uint64_t>(tids[i]) != keys[i]) {
+            printf("i: %u tid: %lu key[i]: %lu\n", i, reinterpret_cast<uint64_t>(tids[i]), keys[i]);
+            throw;
+        }
     }
-*/
+
+    return 0;
 
     const auto cpuStart = std::chrono::high_resolution_clock::now();
     for (unsigned i = 0; i < numElements; ++i) {
