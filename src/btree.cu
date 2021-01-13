@@ -237,7 +237,7 @@ __device__ unsigned branchy_binary_search(T x, const T* arr, unsigned size) {
 
 template<class T>
 __device__ unsigned branch_free_binary_search(T x, const T* arr, unsigned size) {
-//    if (size < 1) { return 0; }
+    if (size < 1) { return 0; }
 
     const unsigned steps = 31 - __clz(size - 1);
     //printf("steps: %d\n", steps);
@@ -254,7 +254,7 @@ __device__ unsigned branch_free_binary_search(T x, const T* arr, unsigned size) 
     return ret;
 }
 
-template<class T, unsigned max_step = 8> // TODO find optimal limit
+template<class T, unsigned max_step = 4> // TODO find optimal limit
 __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n, float hint) {
 //    if (size < 1) { return 0; }
 
@@ -269,7 +269,7 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n
     for (unsigned i = 0; i < max_step; ++i) {
         cont = ((arr[current] < x) == less);
         offset = cont ? offset<<1 : offset;
-        current = max(0, min(last , start + offset));
+        current = max(0, min(last, start + offset));
     }
 
     const auto pre_lower = max(0, min(static_cast<int>(n), start + (offset>>less)));
@@ -278,6 +278,7 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n
     const unsigned upper = (!cont || !less) ? pre_upper : n;
 
     return lower + branchy_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
+//    return lower + branch_free_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
 }
 
 __device__ payload_t btree_lookup(Node* tree, key_t key) {
@@ -309,11 +310,11 @@ __device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
     Node* node = tree;
     while (!node->isLeaf) {
         unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
-        if (pos > 0) {
+        if (pos > 0 && pos < node->count) {
             const auto prev = static_cast<float>(node->keys[pos - 1]);
             const auto current = static_cast<float>(node->keys[pos]);
-            printf("pref: %f current: %f\n", prev, current);
             hint = (static_cast<float>(key) - prev)/(current - prev);
+//            printf("prev: %f current: %f hint: %f\n", prev, current, hint);
         } else {
             hint = 0.5f;
         }
@@ -340,18 +341,7 @@ __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payloa
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {
         //tids[i] = btree_lookup(tree, keys[i]);
-        //auto tid1 = btree_lookup(tree, keys[i]);
         tids[i] = btree_lookup_with_hints(tree, keys[i]);
-        /*
-        
-        auto tid2 = btree_lookup_with_hints(tree, keys[i]);
-        
-        if (tid1 != tid2) {
-            printf("mismatch\n");
-        }
-
-        tids[i] = tid1;*/
-   //     printf("tids[%d] = %lu\n", tids[i]);
     }
 }
 

@@ -14,7 +14,7 @@
 using namespace std;
 
 static constexpr unsigned maxRepetitions = 10;
-static constexpr unsigned numElements = 1e6;//8;
+static constexpr unsigned numElements = 1e8;
 
 int main() {
 
@@ -62,11 +62,11 @@ int main() {
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "GPU MOps: " << (maxRepetitions*numElements/1e6)/(kernelTime/1e3) << endl;
 
-
+    // validate results
     for (unsigned i = 0; i < numElements; ++i) {
         //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(tids[i]), keys[i]);
         if (reinterpret_cast<uint64_t>(tids[i]) != keys[i]) {
-            printf("i: %u tid: %lu key[i]: %lu\n", i, reinterpret_cast<uint64_t>(tids[i]), keys[i]);
+            printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(tids[i]), keys[i]);
             throw;
         }
     }
