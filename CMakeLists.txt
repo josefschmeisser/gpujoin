@@ -12,7 +12,7 @@ find_package(CUDA)
 # put predefined cmake projects in their own solution folder
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-string(APPEND CMAKE_CUDA_FLAGS " -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70")
+string(APPEND CMAKE_CUDA_FLAGS " -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70")
 #set(CMAKE_CUDA_ARCHITECTURES 60 61 70 CACHE STRING "CUDA architectures")
 #set(CMAKE_CUDA_ARCHITECTURES 60 61 70)
 
@@ -44,13 +44,11 @@ target_link_libraries(
     numa
 )
 
-add_executable(btree_monolithic src/btree_monolithic.cu)
+#add_executable(btree_monolithic src/btree_monolithic.cu)
 
 add_executable(rs_lookup src/rs_lookup.cu)
 add_dependencies(rs_lookup RadixSpline)
 
 add_subdirectory(src/tpch)
-
-
 
 add_executable(bf_search src/bf_search.cpp)

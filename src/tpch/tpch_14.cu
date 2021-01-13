@@ -302,7 +302,8 @@ int main(int argc, char** argv) {
 
     /*
     printf("sum1: %lu\n", globalSum1);
-    printf("sum2: %lu\n", globalSum2);*/
+    printf("sum2: %lu\n", globalSum2);
+    */
     int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
