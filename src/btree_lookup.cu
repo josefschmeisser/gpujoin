@@ -16,6 +16,18 @@ using namespace std;
 static constexpr unsigned maxRepetitions = 10;
 static constexpr unsigned numElements = 1e8;
 
+using namespace btree;
+using namespace btree::cuda;
+
+__global__ void btree_bulk_lookup(Node* tree, unsigned n, btree::key_t* keys, payload_t* tids) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n; i += stride) {
+        //tids[i] = btree_lookup(tree, keys[i]);
+        tids[i] = btree::cuda::btree_lookup_with_hints(tree, keys[i]);
+    }
+}
+
 int main() {
 
     std::vector<btree::key_t> keys(numElements);
@@ -44,9 +56,9 @@ int main() {
     // TODO zipfian lookup patterns
 
     btree::key_t* lookupKeys;
-    cudaMalloc(&lookupKeys, numElements*sizeof(key_t));
+    cudaMalloc(&lookupKeys, numElements*sizeof(btree::key_t));
     // TODO shuffle keys/Zipfian lookup patterns
-    cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(key_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(btree::key_t), cudaMemcpyHostToDevice);
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
 
@@ -54,7 +66,7 @@ int main() {
 
     const auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-        btree::cuda::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
+        btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();

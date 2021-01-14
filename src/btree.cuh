@@ -38,7 +38,9 @@ namespace cuda {
 
 __device__ payload_t btree_lookup(Node* tree, key_t key);
 
-__global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids);
+__device__ payload_t btree_lookup_with_hints(Node* tree, key_t key);
+
+//__global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids);
 
 } // namespace cuda
 

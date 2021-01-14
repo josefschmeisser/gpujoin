@@ -1,21 +1,32 @@
-#include "btree.cuh"
-
 #include <cstdint>
 #include <cstdio>
 #include <cuda_runtime.h>
 #include <functional>
 #include <iostream>
 #include <numeric>
-#include <sys/types.h>
 #include <chrono>
 
 #include "zipf.hpp"
 
+#include "btree.cuh"
 #include "btree.cu"
 
 using namespace std;
 
+static constexpr unsigned maxRepetitions = 10;
 static constexpr unsigned numElements = 1e8;
+
+using namespace btree;
+using namespace btree::cuda;
+
+__global__ void btree_bulk_lookup(Node* tree, unsigned n, btree::key_t* keys, payload_t* tids) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n; i += stride) {
+        //tids[i] = btree_lookup(tree, keys[i]);
+        tids[i] = btree::cuda::btree_lookup_with_hints(tree, keys[i]);
+    }
+}
 
 int main() {
 
@@ -45,27 +56,34 @@ int main() {
     // TODO zipfian lookup patterns
 
     btree::key_t* lookupKeys;
-    cudaMalloc(&lookupKeys, numElements*sizeof(key_t));
+    cudaMalloc(&lookupKeys, numElements*sizeof(btree::key_t));
     // TODO shuffle keys/Zipfian lookup patterns
-    cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(key_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(btree::key_t), cudaMemcpyHostToDevice);
     btree::payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
 
-    //btree::prefetchTree(tree, 0);
+    btree::prefetchTree(tree, 0);
 
     const auto kernelStart = std::chrono::high_resolution_clock::now();
-    btree::cuda::btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
-    cudaDeviceSynchronize();
+    for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
+        btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
+        cudaDeviceSynchronize();
+    }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
     const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
-    std::cout << "GPU MOps: " << (numElements/1e6)/(kernelTime/1e3) << endl;
+    std::cout << "GPU MOps: " << (maxRepetitions*numElements/1e6)/(kernelTime/1e3) << endl;
 
-/*
+    // validate results
     for (unsigned i = 0; i < numElements; ++i) {
-        printf("tid: %lu\n", reinterpret_cast<uint64_t>(tids[i]));
+        //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(tids[i]), keys[i]);
+        if (reinterpret_cast<uint64_t>(tids[i]) != keys[i]) {
+            printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(tids[i]), keys[i]);
+            throw;
+        }
     }
-*/
+
+    return 0;
 
     const auto cpuStart = std::chrono::high_resolution_clock::now();
     for (unsigned i = 0; i < numElements; ++i) {

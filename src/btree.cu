@@ -336,6 +336,7 @@ __device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
     return invalidTid;
 }
 
+/*
 __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
@@ -344,6 +345,7 @@ __global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payloa
         tids[i] = btree_lookup_with_hints(tree, keys[i]);
     }
 }
+*/
 
 } // namespace cuda
 

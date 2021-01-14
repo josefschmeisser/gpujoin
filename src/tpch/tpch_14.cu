@@ -13,8 +13,9 @@
 
 #include "LinearProbingHashTable.cuh"
 #include "btree.cuh"
+#include "btree.cu"
 
-using vector_copy_policy = vector_to_managed_array;
+using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
@@ -119,7 +120,7 @@ __global__ void btree_kernel(const lineitem_table_device_t* lineitem, unsigned l
             continue;
         }
 
-        auto payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
+        auto payload = btree::cuda::btree_lookup_with_hints(tree, lineitem->l_partkey[i]);
         if (payload != btree::invalidTid) {
             const size_t part_tid = reinterpret_cast<size_t>(payload);
 
