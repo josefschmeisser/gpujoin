@@ -14,12 +14,12 @@
 using namespace std;
 
 static constexpr unsigned maxRepetitions = 10;
-static constexpr unsigned numElements = 1e8;
+static unsigned numElements = 1e8;
 
 using namespace btree;
 using namespace btree::cuda;
 
-__global__ void btree_bulk_lookup(const Node* tree, unsigned n, btree::key_t* keys, payload_t* tids) {
+__global__ void btree_bulk_lookup(const Node* tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {
@@ -28,7 +28,11 @@ __global__ void btree_bulk_lookup(const Node* tree, unsigned n, btree::key_t* ke
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1) {
+        std::string::size_type sz;
+        numElements = std::stod(argv[1],& sz);
+    }
 
     std::vector<btree::key_t> keys(numElements);
     std::iota(keys.begin(), keys.end(), 0);
@@ -43,11 +47,11 @@ int main() {
     }
 
     int blockSize = 32;
-    int numBlocks = (numElements + blockSize - 1) / blockSize;
-/*
+   // int numBlocks = (numElements + blockSize - 1) / blockSize;
+
     int numSMs;
     cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
-    int numBlocks = 32*numSMs;*/
+    int numBlocks = 32*numSMs;
     printf("numblocks: %d\n", numBlocks);
 
     // shuffle keys
