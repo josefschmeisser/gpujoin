@@ -19,7 +19,7 @@ static constexpr unsigned numElements = 1e8;
 using namespace btree;
 using namespace btree::cuda;
 
-__global__ void btree_bulk_lookup(Node* tree, unsigned n, btree::key_t* keys, payload_t* tids) {
+__global__ void btree_bulk_lookup(const Node* tree, unsigned n, btree::key_t* keys, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {

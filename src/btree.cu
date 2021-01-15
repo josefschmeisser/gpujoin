@@ -282,14 +282,14 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n
 //    return lower + branch_free_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
 }
 
-__device__ payload_t btree_lookup(Node* tree, key_t key) {
+__device__ payload_t btree_lookup(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
-    Node* node = tree;
+    const Node* node = tree;
     while (!node->isLeaf) {
         //unsigned pos = naive_lower_bound(node, key);
         unsigned pos = branch_free_binary_search(key, node->keys, node->count);
         //printf("inner pos: %d\n", pos);
-        node = reinterpret_cast<Node*>(node->payloads[pos]);/*
+        node = reinterpret_cast<const Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
             return invalidTid;
         }*/
@@ -305,10 +305,10 @@ __device__ payload_t btree_lookup(Node* tree, key_t key) {
     return invalidTid;
 }
 
-__device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
+__device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     float hint = 0.5f;
-    Node* node = tree;
+    const Node* node = tree;
     while (!node->isLeaf) {
         unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
         if (pos > 0 && pos < node->count) {
@@ -320,7 +320,7 @@ __device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
             hint = 0.5f;
         }
 
-        node = reinterpret_cast<Node*>(node->payloads[pos]);
+        node = reinterpret_cast<const Node*>(node->payloads[pos]);
         /*
         if (node == nullptr) {
             return invalidTid;
@@ -338,7 +338,7 @@ __device__ payload_t btree_lookup_with_hints(Node* tree, key_t key) {
 }
 
 /*
-__global__ void btree_bulk_lookup(Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
+__global__ void btree_bulk_lookup(const Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {

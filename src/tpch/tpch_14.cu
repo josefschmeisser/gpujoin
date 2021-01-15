@@ -23,7 +23,7 @@ __managed__ int tupleCount;
 
 using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
 
-__global__ void build_kernel(size_t n, part_table_device_t* part, device_ht_t ht) {
+__global__ void build_kernel(size_t n, const part_table_device_t* part, device_ht_t ht) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (size_t i = index; i < n; i += stride) {
@@ -104,7 +104,7 @@ __global__ void probe_kernel(size_t n, const part_table_device_t* part, const li
     }
 }
 
-__global__ void btree_kernel(const lineitem_table_device_t* lineitem, unsigned lineitem_size, const part_table_device_t* part, btree::Node* tree) {
+__global__ void btree_kernel(const lineitem_table_device_t* lineitem, unsigned lineitem_size, const part_table_device_t* part, const btree::Node* tree) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -169,7 +169,7 @@ __device__ int atomicAggInc(int *ptr) {
     return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
 }*/
 
-__global__ void btree_lookup_kernel(const lineitem_table_device_t* lineitem, unsigned lineitem_size, btree::Node* tree, JoinEntry* join_entries) {
+__global__ void btree_lookup_kernel(const lineitem_table_device_t* lineitem, unsigned lineitem_size, const btree::Node* tree, JoinEntry* join_entries) {
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
