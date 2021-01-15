@@ -5,6 +5,7 @@
 #include <iostream>
 #include <numeric>
 #include <chrono>
+#include <memory>
 
 #include "zipf.hpp"
 
@@ -59,14 +60,15 @@ int main() {
     cudaMalloc(&lookupKeys, numElements*sizeof(btree::key_t));
     // TODO shuffle keys/Zipfian lookup patterns
     cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(btree::key_t), cudaMemcpyHostToDevice);
-    btree::payload_t* tids;
-    cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
+    btree::payload_t* d_tids;
+    cudaMalloc(&d_tids, numElements*sizeof(decltype(d_tids)));
 
     btree::prefetchTree(tree, 0);
 
+    printf("executing kernel...\n");
     const auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-        btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
+        btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, d_tids);
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
@@ -75,10 +77,14 @@ int main() {
     std::cout << "GPU MOps: " << (maxRepetitions*numElements/1e6)/(kernelTime/1e3) << endl;
 
     // validate results
+    printf("validating results...\n");
+    std::unique_ptr<btree::payload_t[]> h_tids(new btree::payload_t[numElements]);
+    //btree::payload_t* h_tids =
+    cudaMemcpy(h_tids.get(), d_tids, numElements*sizeof(decltype(d_tids)), cudaMemcpyDeviceToHost);
     for (unsigned i = 0; i < numElements; ++i) {
-        //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(tids[i]), keys[i]);
-        if (reinterpret_cast<uint64_t>(tids[i]) != keys[i]) {
-            printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(tids[i]), keys[i]);
+        //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(h_tids[i]), keys[i]);
+        if (reinterpret_cast<uint64_t>(h_tids[i]) != keys[i]) {
+            printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(h_tids[i]), keys[i]);
             throw;
         }
     }

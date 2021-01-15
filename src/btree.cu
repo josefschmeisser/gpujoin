@@ -209,6 +209,7 @@ void prefetchSubtree(Node* node, int device) {
 };
 
 void prefetchTree(Node* tree, int device) {
+    printf("prefetching btree nodes...\n");
     if (device < 0) {
         cudaGetDevice(&device);
     }
