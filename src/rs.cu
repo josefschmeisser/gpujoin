@@ -116,7 +116,7 @@ __global__ void do_lower_bound(const int* arr, const unsigned size) {
     });
 }
 
-__device__ unsigned get_spline_segment(DeviceRadixSpline* rs, const rs_key_t key) {
+__device__ unsigned get_spline_segment(const DeviceRadixSpline* rs, const rs_key_t key) {
     const rs_key_t prefix = (key - rs->min_key_) >> rs->num_shift_bits_;
 
     const uint32_t begin = rs->radix_table_[prefix];
@@ -132,7 +132,7 @@ __device__ unsigned get_spline_segment(DeviceRadixSpline* rs, const rs_key_t key
     return lb;
 }
 
-__device__ double get_estimate(DeviceRadixSpline* rs, const rs_key_t key) {
+__device__ double get_estimate(const DeviceRadixSpline* rs, const rs_key_t key) {
     if (key <= rs->min_key_) return 0;
     if (key >= rs->max_key_) return rs->num_keys_ - 1;
 
