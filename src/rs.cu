@@ -44,13 +44,33 @@ struct DeviceRadixSpline {
     rs_spline_point_t* spline_points_;
 };
 
-auto builRadixSpline(const std::vector<rs_key_t>& keys) {
+auto build_radix_spline(const std::vector<rs_key_t>& keys) {
     auto min = keys.front();
     auto max = keys.back();
     rs::Builder<rs_key_t> rsb(min, max);
     for (const auto& key : keys) rsb.AddKey(key);
     rs::RadixSpline<rs_key_t> rs = rsb.Finalize();
     return rs;
+}
+
+template<class F, class T>
+DeviceRadixSpline* copy_radix_spline(const T& radixSpline) {
+    static F f;
+
+    static DeviceRadixSpline tmp;
+    const RawRadixSpline* rrs = reinterpret_cast<const RawRadixSpline*>(&radixSpline);
+    std::memcpy(&tmp, &radixSpline, sizeof(DeviceRadixSpline));
+
+    // copy radix table
+    tmp.radix_table_ = f(rrs->radix_table_);
+
+    // copy spline points
+    tmp.spline_points_ = f(rrs->spline_points_);
+
+    DeviceRadixSpline* d_rs;
+    cudaMalloc(&d_rs, sizeof(DeviceRadixSpline));
+    cudaMemcpy(d_rs, &tmp, sizeof(DeviceRadixSpline), cudaMemcpyHostToDevice);
+    return d_rs;
 }
 
 namespace cuda {

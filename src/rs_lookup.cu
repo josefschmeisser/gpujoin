@@ -13,6 +13,7 @@
 #include "rs/multi_map.h"
 #include "btree.cuh"
 #include "zipf.hpp"
+#include "utils.hpp"
 
 #include "rs.cu"
 
@@ -67,8 +68,8 @@ int main(int argc, char** argv) {
         keys.push_back(8128);
         sort(keys.begin(), keys.end());
 
-        auto rs = builRadixSpline(keys);
-
+        auto rs = build_radix_spline(keys);
+/*
         RawRadixSpline* rrs = reinterpret_cast<RawRadixSpline*>(&rs);
         cudaMallocManaged(&d_rs, sizeof(DeviceRadixSpline));
         std::memcpy(d_rs, &rs, sizeof(DeviceRadixSpline));
@@ -80,13 +81,15 @@ int main(int argc, char** argv) {
         const auto rs_spline_points_size = sizeof(rs_spline_point_t)*rrs->spline_points_.size();
         cudaMallocManaged(&d_rs->spline_points_, rs_spline_points_size);
         std::memcpy(d_rs->spline_points_, rrs->spline_points_.data(), rs_spline_points_size);
+*/
+        d_rs = rs::copy_radix_spline<vector_to_managed_array>(rs);
 
         const auto keys_size = sizeof(rs_key_t)*keys.size();
         cudaMallocManaged(&rel.pk, keys_size);
         std::memcpy(rel.pk, keys.data(), keys_size);
         rel.count = keys.size();
 
-        printf("radix table size: %lu\n", rrs->radix_table_.size());
+//        printf("radix table size: %lu\n", rrs->radix_table_.size());
 
         // shuffle keys
         auto rng = std::default_random_engine {};
