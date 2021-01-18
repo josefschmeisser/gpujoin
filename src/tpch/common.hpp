@@ -8,9 +8,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <cuda_runtime_api.h>
-
-#include <numa.h>
+#include "utils.hpp"
 
 struct lineitem_table_t {
     std::vector<uint32_t> l_orderkey;
@@ -110,39 +108,6 @@ constexpr uint32_t to_julian_day(uint32_t day, uint32_t month, uint32_t year) {
     return day + (153 * m + 2) / 5 + y * 365 + y / 4 - y / 100 + y / 400 -
            32045;
 }
-
-struct vector_to_device_array {
-    template<class T>
-    T* operator() (const std::vector<T>& vec) {
-        T* dst;
-        size_t columnSize = vec.size() * sizeof(typename std::remove_reference<decltype(vec)>::type::value_type);
-        cudaMalloc((void**)&dst, columnSize);
-        cudaMemcpy(dst, vec.data(), columnSize, cudaMemcpyHostToDevice);
-        return dst;
-    }
-};
-
-struct vector_to_managed_array {
-    template<class T>
-    T* operator() (const std::vector<T>& vec) {
-        T* dst;
-        size_t columnSize = vec.size() * sizeof(typename std::remove_reference<decltype(vec)>::type::value_type);
-        cudaMallocManaged((void**)&dst, columnSize);
-        std::memcpy(dst, vec.data(), columnSize);
-        return dst;
-    }
-};
-
-template<unsigned node = 0>
-struct vector_to_numa_node_array {
-    template<class T>
-    T* operator() (const std::vector<T>& vec) {
-        size_t columnSize = vec.size() * sizeof(typename std::remove_reference<decltype(vec)>::type::value_type);
-        T* dst = reinterpret_cast<T*>(numa_alloc_onnode(columnSize, node));
-        std::memcpy(dst, vec.data(), columnSize);
-        return dst;
-    }
-};
 
 template<class F>
 lineitem_table_device_t* copy_relation(const lineitem_table_t& src) {
