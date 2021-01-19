@@ -17,6 +17,8 @@
 
 using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
 
+static constexpr bool prefetch_index = true;
+
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
 __managed__ int tupleCount;
@@ -116,53 +118,6 @@ struct IndexLookup<btree::Node> {
         return btree::cuda::btree_lookup_with_hints(tree, key);
     }
 };
-
-#if 0
-__global__ void btree_full_kernel(const lineitem_table_device_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_device_t* __restrict__ part, const btree::Node* tree) {
-    const char* prefix = "PROMO";
-    const uint32_t lower_shipdate = 2449962; // 1995-09-01
-    const uint32_t upper_shipdate = 2449992; // 1995-10-01
-
-    int64_t sum1 = 0;
-    int64_t sum2 = 0;
-
-    const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size; i += stride) {
-        if (lineitem->l_shipdate[i] < lower_shipdate ||
-            lineitem->l_shipdate[i] >= upper_shipdate) {
-            continue;
-        }
-
-        auto payload = btree::cuda::btree_lookup_with_hints(tree, lineitem->l_partkey[i]);
-        if (payload != btree::invalidTid) {
-            const size_t part_tid = reinterpret_cast<size_t>(payload);
-
-            const auto extendedprice = lineitem->l_extendedprice[i];
-            const auto discount = lineitem->l_discount[i];
-            const auto summand = extendedprice * (100 - discount);
-            sum2 += summand;
-
-            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
-//            printf("type: %s\n", type);
-            if (my_strcmp(type, prefix, 5) == 0) {
-                sum1 += summand;
-            }
-        }
-    }
-
-    // reduce both sums
-    #pragma unroll
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
-        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
-    }
-    if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
-        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
-    }
-}
-#endif
 
 template<class IndexLookupType>
 __global__ void ij_full_kernel(const lineitem_table_device_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_device_t* __restrict__ part, IndexLookupType index_lookup) {
@@ -306,7 +261,12 @@ __global__ void ij_join_kernel(const lineitem_table_device_t* __restrict__ linei
 int main(int argc, char** argv) {
     using namespace std;
 
-    assert(argc > 1);
+    if (argc != 3) {
+        printf("%s <tpch dataset path> <join method [0-2]>\n", argv[0]);
+        return 0;
+    }
+    enum JoinType : unsigned { HJ, IJ, TWO_PHASE_IJ } join_type { static_cast<unsigned>(std::stoi(argv[2])) };
+
     Database db;
     load_tables(db, argv[1]);
     const unsigned lineitem_size = db.lineitem.l_orderkey.size();
@@ -331,52 +291,64 @@ int main(int argc, char** argv) {
     int numBlocks = 32*numSMs;
     printf("numblocks: %d\n", numBlocks);
 
-//#define HJ_QUERY
-#ifdef HJ_QUERY
-    auto start = std::chrono::high_resolution_clock::now();
-    LinearProbingHashTable<uint32_t, size_t> ht(part_size);
-    hj_build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
-    hj_probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
-    cudaDeviceSynchronize();
-#else
-    auto tree = btree::construct(db.part.p_partkey, 0.7);
-    btree::prefetchTree(tree, 0);
-    IndexLookup<btree::Node> index_lookup {tree};
+    decltype(std::chrono::high_resolution_clock::now()) kernelStart, kernelStop;
+    switch (join_type) {
+        case JoinType::HJ: {
+            kernelStart = std::chrono::high_resolution_clock::now();
+            LinearProbingHashTable<uint32_t, size_t> ht(part_size);
+            hj_build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
+            hj_probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
+            cudaDeviceSynchronize();
+            kernelStop = std::chrono::high_resolution_clock::now();
+            break;
+        }
+        case JoinType::IJ: {
+            auto tree = btree::construct(db.part.p_partkey, 0.7);
+            btree::prefetchTree(tree, 0);
+            IndexLookup<btree::Node> index_lookup {tree};
 
-//#define TWO_PHASE_IJ
-#ifndef TWO_PHASE_IJ
-    auto start = std::chrono::high_resolution_clock::now();
-    ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_lookup);
-//    btree_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
-    cudaDeviceSynchronize();
-#else
-    JoinEntry* join_entries;
-    cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
-    auto start = std::chrono::high_resolution_clock::now();
-    ij_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
-    cudaDeviceSynchronize();
-    decltype(output_index) matches;
-    cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
-    assert(error == cudaSuccess);
-    printf("join matches: %u\n", matches);
+            kernelStart = std::chrono::high_resolution_clock::now();
+            ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_lookup);
+            //btree_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
+            cudaDeviceSynchronize();
+            kernelStop = std::chrono::high_resolution_clock::now();
+            break;
+        }
+        case JoinType::TWO_PHASE_IJ: {
+            auto tree = btree::construct(db.part.p_partkey, 0.7);
+            btree::prefetchTree(tree, 0);
 
-    ij_join_kernel<<<numBlocks, blockSize>>>(lineitem_device, part_device, join_entries, matches);
-    cudaDeviceSynchronize();
-#endif // TWO_PHASE_IJ
-#endif // HJ_QUERY
+            JoinEntry* join_entries;
+            cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
 
-    auto kernelStop = std::chrono::high_resolution_clock::now();
-    auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start).count()/1000.;
+            kernelStart = std::chrono::high_resolution_clock::now();
+            ij_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
+            cudaDeviceSynchronize();
 
-    /*
+            decltype(output_index) matches;
+            cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
+            assert(error == cudaSuccess);
+            //printf("join matches: %u\n", matches);
+
+            ij_join_kernel<<<numBlocks, blockSize>>>(lineitem_device, part_device, join_entries, matches);
+            cudaDeviceSynchronize();
+            kernelStop = std::chrono::high_resolution_clock::now();
+            break;
+        }
+        default:
+            std::cerr << "unknown join method: " << join_type << std::endl;
+    }
+    const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+
+/*
     printf("sum1: %lu\n", globalSum1);
     printf("sum2: %lu\n", globalSum2);
-    */
-    int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
+*/
+    const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
-    auto finish = std::chrono::high_resolution_clock::now();
-    auto d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
+    const auto finish = std::chrono::high_resolution_clock::now();
+    const auto d = chrono::duration_cast<chrono::microseconds>(finish - kernelStart).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "Elapsed time with printf: " << d << " ms\n";
 
