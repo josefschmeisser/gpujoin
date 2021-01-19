@@ -34,7 +34,7 @@ struct Relation {
     uint64_t* payload;
 };
 
-__device__ payload_t rs_lookup(const DeviceRadixSpline* rs, const rs_key_t key, const Relation& rel) {
+__device__ payload_t rs_lookup(const DeviceRadixSpline* __restrict__ rs, const rs_key_t key, const Relation& rel) {
     const unsigned estimate = rs::cuda::get_estimate(rs, key);
 //    printf("key: %lu estimate: %u\n", key, estimate);
     const unsigned begin = (estimate < rs->max_error_) ? 0 : (estimate - rs->max_error_);
@@ -49,7 +49,7 @@ __device__ payload_t rs_lookup(const DeviceRadixSpline* rs, const rs_key_t key, 
     return (pos < rel.count) ? static_cast<payload_t>(pos) : invalidTid;
 }
 
-__global__ void rs_bulk_lookup(const DeviceRadixSpline* rs, unsigned n, const rs_key_t* __restrict__ keys, Relation rel, payload_t* __restrict__ tids) {
+__global__ void rs_bulk_lookup(const DeviceRadixSpline* __restrict__ rs, unsigned n, const rs_key_t* __restrict__ keys, Relation rel, payload_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {

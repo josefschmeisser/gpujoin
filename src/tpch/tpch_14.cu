@@ -59,7 +59,7 @@ __forceinline__ __device__ unsigned lane_id() {
     return ret;
 }
 
-__global__ void hj_probe_kernel(size_t n, const part_table_device_t* part, const lineitem_table_device_t* lineitem, device_ht_t ht) {
+__global__ void hj_probe_kernel(size_t n, const part_table_device_t* __restrict__ part, const lineitem_table_device_t* __restrict__ lineitem, device_ht_t ht) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -117,8 +117,8 @@ struct IndexLookup<btree::Node> {
     }
 };
 
-
-__global__ void btree_full_kernel(const lineitem_table_device_t* lineitem, const unsigned lineitem_size, const part_table_device_t* part, const btree::Node* tree) {
+#if 0
+__global__ void btree_full_kernel(const lineitem_table_device_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_device_t* __restrict__ part, const btree::Node* tree) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -162,9 +162,10 @@ __global__ void btree_full_kernel(const lineitem_table_device_t* lineitem, const
         atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
 }
+#endif
 
 template<class IndexLookupType>
-__global__ void ij_full_kernel(const lineitem_table_device_t* lineitem, const unsigned lineitem_size, const part_table_device_t* part, IndexLookupType index_lookup) {
+__global__ void ij_full_kernel(const lineitem_table_device_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_device_t* __restrict__ part, IndexLookupType index_lookup) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -229,7 +230,7 @@ __device__ int atomicAggInc(int *ptr) {
     return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
 }*/
 
-__global__ void ij_lookup_kernel(const lineitem_table_device_t* lineitem, unsigned lineitem_size, const btree::Node* tree, JoinEntry* join_entries) {
+__global__ void ij_lookup_kernel(const lineitem_table_device_t* __restrict__ lineitem, unsigned lineitem_size, const btree::Node* __restrict__ tree, JoinEntry* __restrict__ join_entries) {
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
@@ -264,7 +265,7 @@ __global__ void ij_lookup_kernel(const lineitem_table_device_t* lineitem, unsign
     }
 }
 
-__global__ void ij_join_kernel(const lineitem_table_device_t* lineitem, const part_table_device_t* part, JoinEntry* join_entries, size_t n) {
+__global__ void ij_join_kernel(const lineitem_table_device_t* __restrict__ lineitem, const part_table_device_t* __restrict__ part, const JoinEntry* __restrict__ join_entries, size_t n) {
     int64_t sum1 = 0;
     int64_t sum2 = 0;
     const char* prefix = "PROMO";
@@ -332,33 +333,35 @@ int main(int argc, char** argv) {
 #ifdef HJ_QUERY
     auto start = std::chrono::high_resolution_clock::now();
     LinearProbingHashTable<uint32_t, size_t> ht(part_size);
-    build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
-    probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
+    hj_build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
+    hj_probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
     cudaDeviceSynchronize();
 #else
     auto tree = btree::construct(db.part.p_partkey, 0.7);
     btree::prefetchTree(tree, 0);
     IndexLookup<btree::Node> index_lookup {tree};
 
+//#define TWO_PHASE_IJ
+#ifndef TWO_PHASE_IJ
     auto start = std::chrono::high_resolution_clock::now();
-  //  ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_lookup);
-    btree_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
+    ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_lookup);
+//    btree_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
     cudaDeviceSynchronize();
-
-/*
+#else
     JoinEntry* join_entries;
     cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
     auto start = std::chrono::high_resolution_clock::now();
-    btree_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
+    ij_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
     cudaDeviceSynchronize();
     decltype(output_index) matches;
     cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
     assert(error == cudaSuccess);
     printf("join matches: %u\n", matches);
 
-    join_kernel<<<numBlocks, blockSize>>>(lineitem_device, part_device, join_entries, matches);
-    cudaDeviceSynchronize();*/
-#endif
+    ij_join_kernel<<<numBlocks, blockSize>>>(lineitem_device, part_device, join_entries, matches);
+    cudaDeviceSynchronize();
+#endif // TWO_PHASE_IJ
+#endif // HJ_QUERY
 
     auto kernelStop = std::chrono::high_resolution_clock::now();
     auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start).count()/1000.;
