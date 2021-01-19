@@ -260,7 +260,9 @@ __global__ void ij_lookup_kernel(const lineitem_table_device_t* __restrict__ lin
 
         if (match) {
 //            printf("lane %u store to: %u\n", my_lane, base + offset);
-            join_entries[base + offset].lineitem_tid = i;
+            auto& join_entry = join_entries[base + offset];
+            join_entry.lineitem_tid = i;
+            join_entry.part_tid = payload;
         }
     }
 }
