@@ -128,7 +128,7 @@ void load_tables(Database& db, const std::string& path) {
 }
 
 #if false
-void prepareManaged(lineitem_table_t& src, lineitem_table_device_t& dst) {
+void prepareManaged(lineitem_table_t& src, lineitem_table_plain_t& dst) {
     const auto N = src.l_commitdate.size();
 
     size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);
@@ -197,7 +197,7 @@ void prepareManaged(lineitem_table_t& src, lineitem_table_device_t& dst) {
 */
 }
 
-void prepareDeviceResident(lineitem_table_t& src, lineitem_table_device_t& dst) {
+void prepareDeviceResident(lineitem_table_t& src, lineitem_table_plain_t& dst) {
     const auto N = src.l_commitdate.size();
 
     size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);

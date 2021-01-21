@@ -1,5 +1,6 @@
 #include "common.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <device_atomic_functions.h>
@@ -14,10 +15,13 @@
 #include "LinearProbingHashTable.cuh"
 #include "btree.cuh"
 #include "btree.cu"
+#include "rs.cu"
 
 using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
+using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
 
 static constexpr bool prefetch_index = true;
+static constexpr bool sort_indexed_relation = true;
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
@@ -25,7 +29,7 @@ __managed__ int tupleCount;
 
 using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
 
-__global__ void hj_build_kernel(size_t n, const part_table_device_t* part, device_ht_t ht) {
+__global__ void hj_build_kernel(size_t n, const part_table_plain_t* part, device_ht_t ht) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (size_t i = index; i < n; i += stride) {
@@ -61,7 +65,7 @@ __forceinline__ __device__ unsigned lane_id() {
     return ret;
 }
 
-__global__ void hj_probe_kernel(size_t n, const part_table_device_t* __restrict__ part, const lineitem_table_device_t* __restrict__ lineitem, device_ht_t ht) {
+__global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__ part, const lineitem_table_plain_t* __restrict__ lineitem, device_ht_t ht) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -107,20 +111,69 @@ __global__ void hj_probe_kernel(size_t n, const part_table_device_t* __restrict_
 }
 
 template<class Index>
-struct IndexLookup {
+struct IndexStructure {
+    __host__ void construct();
+
     __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const;
 };
 
 template<>
-struct IndexLookup<btree::Node> {
-    const btree::Node* tree;
+struct IndexStructure<btree::Node> {
+    btree::Node* tree;
+
+    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
+        tree = btree::construct(h_column, 0.7);
+        if (prefetch_index) {
+            btree::prefetchTree(tree, 0);
+        }
+    }
+
     __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
         return btree::cuda::btree_lookup_with_hints(tree, key);
     }
 };
 
-template<class IndexLookupType>
-__global__ void ij_full_kernel(const lineitem_table_device_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_device_t* __restrict__ part, IndexLookupType index_lookup) {
+template<>
+struct IndexStructure<rs::DeviceRadixSpline> {
+    rs::DeviceRadixSpline* d_rs_;
+    const btree::key_t* d_column_;
+
+    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
+        d_column_ = d_column;
+        auto h_rs = rs::build_radix_spline(h_column);
+        d_rs_ = rs::copy_radix_spline<rs_placement_policy>(h_rs);
+        auto rrs = reinterpret_cast<const rs::RawRadixSpline*>(&h_rs);
+        assert(h_column.size() == rrs->num_keys_);
+    }
+
+    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
+        const unsigned estimate = rs::cuda::get_estimate(d_rs_, key);
+        const unsigned begin = (estimate < d_rs_->max_error_) ? 0 : (estimate - d_rs_->max_error_);
+        const unsigned end = (estimate + d_rs_->max_error_ + 2 > d_rs_->num_keys_) ? d_rs_->num_keys_ : (estimate + d_rs_->max_error_ + 2);
+
+        const auto bound_size = end - begin;
+        const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const rs::rs_key_t& a, const rs::rs_key_t& b) -> int {
+            return a < b;
+        });
+        return (pos < d_rs_->num_keys_) ? static_cast<btree::payload_t>(pos) : btree::invalidTid;
+    }
+};
+
+/*
+template<>
+struct IndexStructure<std::lower_bound> {
+    __host__ void construct();
+
+    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
+        return 0;
+    }
+};*/
+
+using ChosenIndexStructure = IndexStructure<btree::Node>;
+
+
+template<class IndexStructureType>
+__global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
     const char* prefix = "PROMO";
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
@@ -136,7 +189,7 @@ __global__ void ij_full_kernel(const lineitem_table_device_t* __restrict__ linei
             continue;
         }
 
-        auto payload = index_lookup(lineitem->l_partkey[i]);
+        auto payload = index_structure(lineitem->l_partkey[i]);
         if (payload != btree::invalidTid) {
             const size_t part_tid = reinterpret_cast<size_t>(payload);
 
@@ -185,7 +238,7 @@ __device__ int atomicAggInc(int *ptr) {
     return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
 }*/
 
-__global__ void ij_lookup_kernel(const lineitem_table_device_t* __restrict__ lineitem, unsigned lineitem_size, const btree::Node* __restrict__ tree, JoinEntry* __restrict__ join_entries) {
+__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const btree::Node* __restrict__ tree, JoinEntry* __restrict__ join_entries) {
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
@@ -222,7 +275,7 @@ __global__ void ij_lookup_kernel(const lineitem_table_device_t* __restrict__ lin
     }
 }
 
-__global__ void ij_join_kernel(const lineitem_table_device_t* __restrict__ lineitem, const part_table_device_t* __restrict__ part, const JoinEntry* __restrict__ join_entries, size_t n) {
+__global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const part_table_plain_t* __restrict__ part, const JoinEntry* __restrict__ join_entries, size_t n) {
     int64_t sum1 = 0;
     int64_t sum2 = 0;
     const char* prefix = "PROMO";
@@ -260,7 +313,11 @@ __global__ void ij_join_kernel(const lineitem_table_device_t* __restrict__ linei
 
 int main(int argc, char** argv) {
     using namespace std;
-
+/*
+part_table_t t;
+sort_relation(t);
+return 0;
+*/
     if (argc != 3) {
         printf("%s <tpch dataset path> <join method [0-2]>\n", argv[0]);
         return 0;
@@ -269,19 +326,19 @@ int main(int argc, char** argv) {
 
     Database db;
     load_tables(db, argv[1]);
+    if (sort_indexed_relation) {
+        printf("sorting part relation...\n");
+        sort_relation(db.part);
+    }
     const unsigned lineitem_size = db.lineitem.l_orderkey.size();
     const unsigned part_size = db.part.p_partkey.size();
 
-    lineitem_table_device_t* lineitem_device;
-    part_table_device_t* part_device;
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-        lineitem_device = copy_relation<vector_copy_policy>(db.lineitem);
-        part_device = copy_relation<vector_copy_policy>(db.part);
-        auto finish = std::chrono::high_resolution_clock::now();
-        auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
-        std::cout << "Transfer time: " << d << " ms\n";
-    }
+    auto start = std::chrono::high_resolution_clock::now();
+    auto [lineitem_device, lineitem_device_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
+    auto [part_device, part_device_ptrs] = copy_relation<vector_copy_policy>(db.part);
+    auto finish = std::chrono::high_resolution_clock::now();
+    auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+    std::cout << "Transfer time: " << d << " ms\n";
 
     const int blockSize = 32;
     int numSMs;
@@ -302,13 +359,15 @@ int main(int argc, char** argv) {
             kernelStop = std::chrono::high_resolution_clock::now();
             break;
         }
-        case JoinType::IJ: {
+        case JoinType::IJ: {/*
             auto tree = btree::construct(db.part.p_partkey, 0.7);
             btree::prefetchTree(tree, 0);
-            IndexLookup<btree::Node> index_lookup {tree};
+            IndexLookup<btree::Node> index_lookup {tree};*/
+            ChosenIndexStructure index_structure;
+            index_structure.construct(db.part.p_partkey, part_device->p_partkey);
 
             kernelStart = std::chrono::high_resolution_clock::now();
-            ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_lookup);
+            ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_structure);
             //btree_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
             cudaDeviceSynchronize();
             kernelStop = std::chrono::high_resolution_clock::now();
@@ -347,8 +406,8 @@ int main(int argc, char** argv) {
     const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
-    const auto finish = std::chrono::high_resolution_clock::now();
-    const auto d = chrono::duration_cast<chrono::microseconds>(finish - kernelStart).count()/1000.;
+    finish = std::chrono::high_resolution_clock::now();
+    d = chrono::duration_cast<chrono::microseconds>(finish - kernelStart).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "Elapsed time with printf: " << d << " ms\n";
 

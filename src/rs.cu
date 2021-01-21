@@ -16,7 +16,7 @@
 
 namespace rs {
 
-using rs_key_t = uint64_t;
+using rs_key_t = uint32_t;// uint64_t;
 using rs_rt_entry_t = uint32_t;
 using rs_spline_point_t = rs::Coord<rs_key_t>;
 

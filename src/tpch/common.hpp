@@ -33,7 +33,7 @@ struct lineitem_table_t {
     std::vector<std::array<char, 44>> l_comment;
 };
 
-struct lineitem_table_device_t {
+struct lineitem_table_plain_t {
     uint32_t* l_orderkey;
     uint32_t* l_partkey;
     uint32_t* l_suppkey;
@@ -78,7 +78,7 @@ struct part_table_t {
     std::vector<std::array<char, 23>> p_comment;
 };
 
-struct part_table_device_t {
+struct part_table_plain_t {
     uint32_t* p_partkey;
     std::array<char, 55>* p_name;
     std::array<char, 25>* p_mfgr;
@@ -114,60 +114,60 @@ constexpr uint32_t to_julian_day(uint32_t day, uint32_t month, uint32_t year) {
 }
 
 template<class F>
-lineitem_table_device_t* copy_relation(const lineitem_table_t& src) {
+auto copy_relation(const lineitem_table_t& src) {
     const auto N = src.l_orderkey.size();
     static F f;
-    lineitem_table_device_t tmp;
-    tmp.l_orderkey = f(src.l_orderkey);
-    tmp.l_partkey = f(src.l_partkey);
-    tmp.l_suppkey = f(src.l_suppkey);
-    tmp.l_linenumber = f(src.l_linenumber);
-    tmp.l_quantity = f(src.l_quantity);
-    tmp.l_extendedprice = f(src.l_extendedprice);
-    tmp.l_discount = f(src.l_discount);
-    tmp.l_tax = f(src.l_tax);
-    tmp.l_returnflag = f(src.l_returnflag);
-    tmp.l_linestatus = f(src.l_linestatus);
-    tmp.l_shipdate = f(src.l_shipdate);
-    tmp.l_commitdate = f(src.l_commitdate);
-    tmp.l_receiptdate = f(src.l_receiptdate);
-    tmp.l_shipinstruct = f(src.l_shipinstruct);
-    tmp.l_shipmode = f(src.l_shipmode);
-    tmp.l_comment = f(src.l_comment);
+    auto plain = std::make_unique<lineitem_table_plain_t>();
+    plain->l_orderkey = f(src.l_orderkey);
+    plain->l_partkey = f(src.l_partkey);
+    plain->l_suppkey = f(src.l_suppkey);
+    plain->l_linenumber = f(src.l_linenumber);
+    plain->l_quantity = f(src.l_quantity);
+    plain->l_extendedprice = f(src.l_extendedprice);
+    plain->l_discount = f(src.l_discount);
+    plain->l_tax = f(src.l_tax);
+    plain->l_returnflag = f(src.l_returnflag);
+    plain->l_linestatus = f(src.l_linestatus);
+    plain->l_shipdate = f(src.l_shipdate);
+    plain->l_commitdate = f(src.l_commitdate);
+    plain->l_receiptdate = f(src.l_receiptdate);
+    plain->l_shipinstruct = f(src.l_shipinstruct);
+    plain->l_shipmode = f(src.l_shipmode);
+    plain->l_comment = f(src.l_comment);
 
-    lineitem_table_device_t* dst;
+    lineitem_table_plain_t* dst;
 
-    cudaMalloc(&dst, sizeof(lineitem_table_device_t));
-    cudaMemcpy(dst, &tmp, sizeof(lineitem_table_device_t), cudaMemcpyHostToDevice);
+    cudaMalloc(&dst, sizeof(lineitem_table_plain_t));
+    cudaMemcpy(dst, plain.get(), sizeof(lineitem_table_plain_t), cudaMemcpyHostToDevice);
 /*
-    cudaMallocManaged(&dst, sizeof(lineitem_table_device_t));
-    std::memcpy(dst, &tmp, sizeof(lineitem_table_device_t));*/
-    return dst;
+    cudaMallocManaged(&dst, sizeof(lineitem_table_plain_t));
+    std::memcpy(dst, &tmp, sizeof(lineitem_table_plain_t));*/
+    return std::make_pair(dst, std::move(plain));
 }
 
 template<class F>
-part_table_device_t* copy_relation(const part_table_t& src) {
+auto copy_relation(const part_table_t& src) {
     const auto N = src.p_partkey.size();
     static F f;
-    part_table_device_t tmp;
-    tmp.p_partkey = f(src.p_partkey);
-    tmp.p_name = f(src.p_name);
-    tmp.p_mfgr = f(src.p_mfgr);
-    tmp.p_brand = f(src.p_brand);
-    tmp.p_type = f(src.p_type);
-    tmp.p_size = f(src.p_size);
-    tmp.p_container = f(src.p_container);
-    tmp.p_retailprice = f(src.p_retailprice);
-    tmp.p_comment = f(src.p_comment);
+    auto plain = std::make_unique<part_table_plain_t>();
+    plain->p_partkey = f(src.p_partkey);
+    plain->p_name = f(src.p_name);
+    plain->p_mfgr = f(src.p_mfgr);
+    plain->p_brand = f(src.p_brand);
+    plain->p_type = f(src.p_type);
+    plain->p_size = f(src.p_size);
+    plain->p_container = f(src.p_container);
+    plain->p_retailprice = f(src.p_retailprice);
+    plain->p_comment = f(src.p_comment);
 
-    part_table_device_t* dst;
+    part_table_plain_t* dst;
 
-    cudaMalloc(&dst, sizeof(part_table_device_t));
-    cudaMemcpy(dst, &tmp, sizeof(part_table_device_t), cudaMemcpyHostToDevice);
+    cudaMalloc(&dst, sizeof(part_table_plain_t));
+    cudaMemcpy(dst, plain.get(), sizeof(part_table_plain_t), cudaMemcpyHostToDevice);
 /*
-    cudaMallocManaged(&dst, sizeof(part_table_device_t));
-    std::memcpy(dst, &tmp, sizeof(part_table_device_t));*/
-    return dst;
+    cudaMallocManaged(&dst, sizeof(part_table_plain_t));
+    std::memcpy(dst, &tmp, sizeof(part_table_plain_t));*/
+    return std::make_pair(dst, std::move(plain));
 }
 
 void sort_relation(part_table_t& part);

@@ -20,3 +20,4 @@ target_link_libraries(cuda_tpch_1 numa)
 
 add_executable(cuda_tpch_14 tpch_14.cu common.cpp)
 target_link_libraries(cuda_tpch_14 numa)
+target_include_directories(cuda_tpch_14 PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)

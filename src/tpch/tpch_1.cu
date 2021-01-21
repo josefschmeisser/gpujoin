@@ -113,7 +113,7 @@ __device__ void sortGroups(unsigned groupCount) {
     }
 }
 
-__global__ void query_1_kernel(int n, const lineitem_table_device_t* lineitem) {
+__global__ void query_1_kernel(int n, const lineitem_table_plain_t* lineitem) {
     //constexpr auto threshold_date = to_julian_day(2, 9, 1998); // 1998-09-02
     const uint32_t threshold_date = 2451059;
 
@@ -253,14 +253,11 @@ int main(int argc, char** argv) {
     load_tables(db, argv[1]);
     const auto N = db.lineitem.l_commitdate.size();
 
-    lineitem_table_device_t* lineitem;
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-        lineitem = copy_relation<vector_copy_policy>(db.lineitem);
-        auto finish = std::chrono::high_resolution_clock::now();
-        auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
-        std::cout << "Transfer time: " << d << " ms\n";
-    }
+    auto start = std::chrono::high_resolution_clock::now();
+    auto [d_lineitem, lineitem_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
+    auto finish = std::chrono::high_resolution_clock::now();
+    auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+    std::cout << "Transfer time: " << d << " ms\n";
 
     // Set a heap size of 128 megabytes. Note that this must
     // be done before any kernel is launched.
@@ -277,9 +274,9 @@ int main(int argc, char** argv) {
     int numBlocks = 32*numSMs;
     printf("numblocks: %d\n", numBlocks);
 
-    auto start = std::chrono::high_resolution_clock::now();
+    start = std::chrono::high_resolution_clock::now();
 
-    query_1_kernel<<<numBlocks, blockSize>>>(N, lineitem);
+    query_1_kernel<<<numBlocks, blockSize>>>(N, d_lineitem);
     cudaDeviceSynchronize();
 
     auto kernelStop = std::chrono::high_resolution_clock::now();
@@ -312,8 +309,8 @@ int main(int argc, char** argv) {
         cout << t.l_returnflag << "\t" << t.l_linestatus << "\t" << t.count_order << endl;
     }
 
-    auto finish = std::chrono::high_resolution_clock::now();
-    auto d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
+    finish = std::chrono::high_resolution_clock::now();
+    d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "Elapsed time with printf: " << d << " ms\n";
 

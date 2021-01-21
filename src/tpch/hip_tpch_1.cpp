@@ -306,7 +306,7 @@ struct lineitem_table_t {
 };
 */
 
-void prepareManaged(lineitem_table_t& src, lineitem_table_device_t& dst) {
+void prepareManaged(lineitem_table_t& src, lineitem_table_plain_t& dst) {
     const auto N = src.l_commitdate.size();
 
     size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);
@@ -375,7 +375,7 @@ void prepareManaged(lineitem_table_t& src, lineitem_table_device_t& dst) {
 */
 }
 
-void prepareDeviceResident(lineitem_table_t& src, lineitem_table_device_t& dst) {
+void prepareDeviceResident(lineitem_table_t& src, lineitem_table_plain_t& dst) {
     const auto N = src.l_commitdate.size();
 
     size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);
@@ -447,7 +447,7 @@ int main(int argc, char** argv) {
     load_tables(db, argv[1]);
     const auto N = db.lineitem.l_commitdate.size();
 
-    lineitem_table_device_t lineitem;
+    lineitem_table_plain_t lineitem;
 
 #if USE_PINNED_MEM
     prepareManaged(db.lineitem, lineitem);
