@@ -1,12 +1,16 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <cstring>
 #include <type_traits>
 #include <vector>
+#include <numeric>
 
 #include "utils.hpp"
 
@@ -165,3 +169,5 @@ part_table_device_t* copy_relation(const part_table_t& src) {
     std::memcpy(dst, &tmp, sizeof(part_table_device_t));*/
     return dst;
 }
+
+void sort_relation(part_table_t& part);

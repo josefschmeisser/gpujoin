@@ -37,3 +37,28 @@ struct vector_to_numa_node_array {
         return dst;
     }
 };
+
+template<class T, class P>
+std::vector<size_t> compute_permutation(const std::vector<T>& input, P p) {
+    std::vector<size_t> permutation(input.size());
+    std::iota(permutation.begin(), permutation.end(), 0);
+    std::sort(permutation.begin(), permutation.end(), [&](const auto a, const auto b) {
+        return p(input[a], input[b]);
+    });
+    return permutation;
+}
+
+// applies a given permuation by swapping all elements along each permuation cycle
+template<typename... Ts>
+void apply_permutation(std::vector<size_t>& permutation, std::vector<Ts>&... vectors) {
+    for (size_t i = 0; i < permutation.size(); ++i) {
+        auto current = i;
+        while (i != permutation[current]) {
+            auto next = permutation[current];
+            (std::swap(vectors[current], vectors[next]), ...);
+            permutation[current] = current;
+            current = next;
+        }
+        permutation[current] = current;
+    }
+}
