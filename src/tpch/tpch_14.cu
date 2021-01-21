@@ -20,7 +20,7 @@
 using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
 using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
 
-static constexpr bool prefetch_index = true;
+static constexpr bool prefetch_index = false;
 static constexpr bool sort_indexed_relation = true;
 
 __device__ unsigned int count = 0;
@@ -110,31 +110,25 @@ __global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__
     }
 }
 
-template<class Index>
-struct IndexStructure {
-    __host__ void construct();
 
-    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const;
-};
-
-template<>
-struct IndexStructure<btree::Node> {
-    btree::Node* tree;
+struct btree_index {
+    const btree::Node* tree_;
 
     __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
-        tree = btree::construct(h_column, 0.7);
+        auto tree = btree::construct(h_column, 0.7);
         if (prefetch_index) {
             btree::prefetchTree(tree, 0);
         }
+        tree_ = tree;
     }
 
     __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-        return btree::cuda::btree_lookup_with_hints(tree, key);
+//        return btree::cuda::btree_lookup(tree, key);
+        return btree::cuda::btree_lookup_with_hints(tree_, key);
     }
 };
 
-template<>
-struct IndexStructure<rs::DeviceRadixSpline> {
+struct radix_spline_index {
     rs::DeviceRadixSpline* d_rs_;
     const btree::key_t* d_column_;
 
@@ -142,7 +136,7 @@ struct IndexStructure<rs::DeviceRadixSpline> {
         d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
         d_rs_ = rs::copy_radix_spline<rs_placement_policy>(h_rs);
-        auto rrs = reinterpret_cast<const rs::RawRadixSpline*>(&h_rs);
+        auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
     }
 
@@ -159,17 +153,25 @@ struct IndexStructure<rs::DeviceRadixSpline> {
     }
 };
 
-/*
-template<>
-struct IndexStructure<std::lower_bound> {
-    __host__ void construct();
+struct lower_bound_index {
+    struct device_data_t {
+        const btree::key_t* d_column;
+        const unsigned d_size;
+    }* device_data;
+
+    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
+        device_data_t tmp { d_column, static_cast<unsigned>(h_column.size()) };
+        cudaMalloc(&device_data, sizeof(device_data_t));
+        cudaMemcpy(device_data, &tmp, sizeof(device_data_t), cudaMemcpyHostToDevice);
+    }
 
     __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-        return 0;
+//        return btree::cuda::branchy_binary_search(key, device_data->d_column, device_data->d_size);
+        return btree::cuda::branch_free_binary_search(key, device_data->d_column, device_data->d_size);
     }
-};*/
+};
 
-using ChosenIndexStructure = IndexStructure<btree::Node>;
+using chosen_index_structure = radix_spline_index;// btree_index;// radix_spline_index;
 
 
 template<class IndexStructureType>
@@ -238,7 +240,8 @@ __device__ int atomicAggInc(int *ptr) {
     return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
 }*/
 
-__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const btree::Node* __restrict__ tree, JoinEntry* __restrict__ join_entries) {
+#if 0
+__global__ void btree_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const btree::Node* __restrict__ tree, JoinEntry* __restrict__ join_entries) {
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
     const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
@@ -250,6 +253,45 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
             lineitem->l_shipdate[i] >= lower_shipdate &&
             lineitem->l_shipdate[i] < upper_shipdate) {
             payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
+        }
+
+        int match = payload != btree::invalidTid;
+        unsigned mask = __ballot_sync(FULL_MASK, match);
+        unsigned my_lane = lane_id();
+        unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
+//        printf("right %u\n", right);
+        unsigned offset = __popc(mask & right);
+
+        unsigned base = 0;
+        int leader = __ffs(mask) - 1;
+        if (my_lane == leader) {
+            base = atomicAdd(&output_index, __popc(mask));
+        }
+        base = __shfl_sync(FULL_MASK, base, leader);
+
+        if (match) {
+//            printf("lane %u store to: %u\n", my_lane, base + offset);
+            auto& join_entry = join_entries[base + offset];
+            join_entry.lineitem_tid = i;
+            join_entry.part_tid = payload;
+        }
+    }
+}
+#endif
+
+template<class IndexStructureType>
+__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
+    const uint32_t lower_shipdate = 2449962; // 1995-09-01
+    const uint32_t upper_shipdate = 2449992; // 1995-10-01
+
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < lineitem_size + 31; i += stride) {
+        btree::payload_t payload = btree::invalidTid;
+        if (i < lineitem_size &&
+            lineitem->l_shipdate[i] >= lower_shipdate &&
+            lineitem->l_shipdate[i] < upper_shipdate) {
+            payload = index_structure(lineitem->l_partkey[i]);
         }
 
         int match = payload != btree::invalidTid;
@@ -359,12 +401,9 @@ return 0;
             kernelStop = std::chrono::high_resolution_clock::now();
             break;
         }
-        case JoinType::IJ: {/*
-            auto tree = btree::construct(db.part.p_partkey, 0.7);
-            btree::prefetchTree(tree, 0);
-            IndexLookup<btree::Node> index_lookup {tree};*/
-            ChosenIndexStructure index_structure;
-            index_structure.construct(db.part.p_partkey, part_device->p_partkey);
+        case JoinType::IJ: {
+            chosen_index_structure index_structure;
+            index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
 
             kernelStart = std::chrono::high_resolution_clock::now();
             ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_structure);
@@ -374,14 +413,14 @@ return 0;
             break;
         }
         case JoinType::TWO_PHASE_IJ: {
-            auto tree = btree::construct(db.part.p_partkey, 0.7);
-            btree::prefetchTree(tree, 0);
+            chosen_index_structure index_structure;
+            index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
 
             JoinEntry* join_entries;
             cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
 
             kernelStart = std::chrono::high_resolution_clock::now();
-            ij_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, tree, join_entries);
+            ij_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, index_structure, join_entries);
             cudaDeviceSynchronize();
 
             decltype(output_index) matches;
