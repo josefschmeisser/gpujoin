@@ -240,45 +240,6 @@ __device__ int atomicAggInc(int *ptr) {
     return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
 }*/
 
-#if 0
-__global__ void btree_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const btree::Node* __restrict__ tree, JoinEntry* __restrict__ join_entries) {
-    const uint32_t lower_shipdate = 2449962; // 1995-09-01
-    const uint32_t upper_shipdate = 2449992; // 1995-10-01
-
-    const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size + 31; i += stride) {
-        btree::payload_t payload = btree::invalidTid;
-        if (i < lineitem_size &&
-            lineitem->l_shipdate[i] >= lower_shipdate &&
-            lineitem->l_shipdate[i] < upper_shipdate) {
-            payload = btree::cuda::btree_lookup(tree, lineitem->l_partkey[i]);
-        }
-
-        int match = payload != btree::invalidTid;
-        unsigned mask = __ballot_sync(FULL_MASK, match);
-        unsigned my_lane = lane_id();
-        unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
-//        printf("right %u\n", right);
-        unsigned offset = __popc(mask & right);
-
-        unsigned base = 0;
-        int leader = __ffs(mask) - 1;
-        if (my_lane == leader) {
-            base = atomicAdd(&output_index, __popc(mask));
-        }
-        base = __shfl_sync(FULL_MASK, base, leader);
-
-        if (match) {
-//            printf("lane %u store to: %u\n", my_lane, base + offset);
-            auto& join_entry = join_entries[base + offset];
-            join_entry.lineitem_tid = i;
-            join_entry.part_tid = payload;
-        }
-    }
-}
-#endif
-
 template<class IndexStructureType>
 __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
     const uint32_t lower_shipdate = 2449962; // 1995-09-01
@@ -355,11 +316,7 @@ __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineit
 
 int main(int argc, char** argv) {
     using namespace std;
-/*
-part_table_t t;
-sort_relation(t);
-return 0;
-*/
+
     if (argc != 3) {
         printf("%s <tpch dataset path> <join method [0-2]>\n", argv[0]);
         return 0;
