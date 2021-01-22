@@ -321,7 +321,7 @@ int main(int argc, char** argv) {
         printf("%s <tpch dataset path> <join method [0-2]>\n", argv[0]);
         return 0;
     }
-    enum JoinType : unsigned { HJ, IJ, TWO_PHASE_IJ } join_type { static_cast<unsigned>(std::stoi(argv[2])) };
+    enum JoinType : unsigned { HJ, IJ, TWO_PHASE_IJ } join_type { static_cast<JoinType>(std::stoi(argv[2])) };
 
     Database db;
     load_tables(db, argv[1]);
@@ -332,12 +332,20 @@ int main(int argc, char** argv) {
     const unsigned lineitem_size = db.lineitem.l_orderkey.size();
     const unsigned part_size = db.part.p_partkey.size();
 
-    auto start = std::chrono::high_resolution_clock::now();
-    auto [lineitem_device, lineitem_device_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
-    auto [part_device, part_device_ptrs] = copy_relation<vector_copy_policy>(db.part);
-    auto finish = std::chrono::high_resolution_clock::now();
-    auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
-    std::cout << "Transfer time: " << d << " ms\n";
+    lineitem_table_plain_t* lineitem_device;
+    std::unique_ptr<lineitem_table_plain_t> lineitem_device_ptrs;
+    part_table_plain_t* part_device;
+    std::unique_ptr<part_table_plain_t> part_device_ptrs;
+    {
+        const auto start = std::chrono::high_resolution_clock::now();
+        //auto [lineitem_device, lineitem_device_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
+        std::tie(lineitem_device, lineitem_device_ptrs) = copy_relation<vector_copy_policy>(db.lineitem);
+        //auto [part_device, part_device_ptrs] = copy_relation<vector_copy_policy>(db.part);
+        std::tie(part_device, part_device_ptrs) = copy_relation<vector_copy_policy>(db.part);
+        const auto finish = std::chrono::high_resolution_clock::now();
+        const auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+        std::cout << "Transfer time: " << d << " ms\n";
+    }
 
     const int blockSize = 32;
     int numSMs;
@@ -402,8 +410,8 @@ int main(int argc, char** argv) {
     const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
-    finish = std::chrono::high_resolution_clock::now();
-    d = chrono::duration_cast<chrono::microseconds>(finish - kernelStart).count()/1000.;
+    const auto finish = std::chrono::high_resolution_clock::now();
+    const auto d = chrono::duration_cast<chrono::microseconds>(finish - kernelStart).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "Elapsed time with printf: " << d << " ms\n";
 

@@ -55,7 +55,9 @@ void apply_permutation(std::vector<size_t>& permutation, std::vector<Ts>&... vec
         auto current = i;
         while (i != permutation[current]) {
             auto next = permutation[current];
-            (std::swap(vectors[current], vectors[next]), ...);
+            //fold expression are a c++17 feature
+            //(std::swap(vectors[current], vectors[next]), ...);
+            (void) (int[]) {(std::swap(vectors[current], vectors[next]), 0)...};
             permutation[current] = current;
             current = next;
         }

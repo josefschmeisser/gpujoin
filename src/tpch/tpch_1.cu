@@ -253,11 +253,16 @@ int main(int argc, char** argv) {
     load_tables(db, argv[1]);
     const auto N = db.lineitem.l_commitdate.size();
 
-    auto start = std::chrono::high_resolution_clock::now();
-    auto [d_lineitem, lineitem_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
-    auto finish = std::chrono::high_resolution_clock::now();
-    auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
-    std::cout << "Transfer time: " << d << " ms\n";
+    lineitem_table_plain_t* d_lineitem;
+    std::unique_ptr<lineitem_table_plain_t> lineitem_ptrs;
+    {
+        const auto start = std::chrono::high_resolution_clock::now();
+        //auto [d_lineitem, lineitem_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
+        std::tie(d_lineitem, lineitem_ptrs) = copy_relation<vector_copy_policy>(db.lineitem);
+        const auto finish = std::chrono::high_resolution_clock::now();
+        const auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+        std::cout << "Transfer time: " << d << " ms\n";
+    }
 
     // Set a heap size of 128 megabytes. Note that this must
     // be done before any kernel is launched.
@@ -274,7 +279,7 @@ int main(int argc, char** argv) {
     int numBlocks = 32*numSMs;
     printf("numblocks: %d\n", numBlocks);
 
-    start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::high_resolution_clock::now();
 
     query_1_kernel<<<numBlocks, blockSize>>>(N, d_lineitem);
     cudaDeviceSynchronize();
@@ -309,8 +314,8 @@ int main(int argc, char** argv) {
         cout << t.l_returnflag << "\t" << t.l_linestatus << "\t" << t.count_order << endl;
     }
 
-    finish = std::chrono::high_resolution_clock::now();
-    d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
+    const auto finish = std::chrono::high_resolution_clock::now();
+    const auto d = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "Elapsed time with printf: " << d << " ms\n";
 
