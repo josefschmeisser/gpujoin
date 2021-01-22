@@ -22,7 +22,7 @@ using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
 
 static constexpr bool prefetch_index = true;
 static constexpr bool sort_indexed_relation = true;
-static constexpr int block_size = 32;
+static constexpr int block_size = 128;
 static int num_sms;
 
 __device__ unsigned int count = 0;
@@ -358,29 +358,30 @@ struct helper {
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 
         LinearProbingHashTable<uint32_t, size_t> ht(part_size);
-        hj_build_kernel<<<numBlocks, block_size>>>(part_size, part_device, ht.deviceHandle);
-        hj_probe_kernel<<<numBlocks, block_size>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
+        int num_blocks = (part_size + block_size - 1) / block_size;
+        hj_build_kernel<<<num_blocks, block_size>>>(part_size, part_device, ht.deviceHandle);
+
+        //num_blocks = 32*num_sms;
+        num_blocks = (lineitem_size + block_size - 1) / block_size;
+        hj_probe_kernel<<<num_blocks, block_size>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "Kernel time: " << kernelTime << " ms\n";
+        std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 #endif
 
     void run_ij() {
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 
-//    int numBlocks = (lineitem_size + block_size - 1) / block_size;
-    int numBlocks = 32*num_sms;
-    printf("numblocks: %d\n", numBlocks);
-
-        ij_full_kernel<<<numBlocks, block_size>>>(lineitem_device, lineitem_size, part_device, index_structure);
+        int num_blocks = (lineitem_size + block_size - 1) / block_size;
+        ij_full_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, part_device, index_structure);
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "Kernel time: " << kernelTime << " ms\n";
+        std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 
 /*
@@ -403,7 +404,7 @@ struct helper {
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "Kernel time: " << kernelTime << " ms\n";
+        std::cout << "kernel time: " << kernelTime << " ms\n";
     }*/
 };
 
@@ -417,29 +418,37 @@ void load_and_run_ij(const std::string& path) {
 int main(int argc, char** argv) {
     using namespace std;
 
+    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);// devId);
+
+#ifdef USE_HJ
+    if (argc != 2) {
+        printf("%s <tpch dataset path>\n", argv[0]);
+        return 0;
+    }
+
+    helper<lower_bound_index> h;
+    h.load_database(argv[1]);
+    h.run_hj();
+#else
     if (argc != 3) {
         printf("%s <tpch dataset path> <index type: {0: btree, 1: radixspline, 2: lowerbound>\n", argv[0]);
         return 0;
     }
     enum IndexType : unsigned { btree, radixspline, lowerbound } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
 
-    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);// devId);
-
-#ifdef USE_HJ
-    helper<lower_bound_index> h;
-    h.load_database(argv[1]);
-    h.run_hj();
-#else
     switch (index_type) {
         case IndexType::btree: {
+            printf("using btree\n");
             load_and_run_ij<btree_index>(argv[1]);
             break;
         }
         case IndexType::radixspline: {
+            printf("using radixspline\n");
             load_and_run_ij<radix_spline_index>(argv[1]);
             break;
         }
         case IndexType::lowerbound: {
+            printf("using lower bound search\n");
             load_and_run_ij<lower_bound_index>(argv[1]);
             break;
         }

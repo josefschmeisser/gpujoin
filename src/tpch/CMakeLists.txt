@@ -18,6 +18,13 @@ target_link_libraries(cuda_tpch_1 numa)
 #target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-dc>)
 #target_link_libraries(cuda_tpch_14 numa)
 
+# index join executable
 add_executable(cuda_tpch_14 tpch_14.cu common.cpp)
 target_link_libraries(cuda_tpch_14 numa)
 target_include_directories(cuda_tpch_14 PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
+
+# hash join executable
+add_executable(cuda_hj_tpch_14 tpch_14.cu common.cpp)
+target_compile_definitions(cuda_hj_tpch_14 PUBLIC USE_HJ)
+target_link_libraries(cuda_hj_tpch_14 numa)
+target_include_directories(cuda_hj_tpch_14 PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
