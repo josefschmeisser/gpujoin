@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
     btree::payload_t* d_tids;
     cudaMalloc(&d_tids, numElements*sizeof(decltype(d_tids)));
 
-    btree::prefetchTree(tree, 0);
+    //btree::prefetchTree(tree, 0);
 
     printf("executing kernel...\n");
     const auto kernelStart = std::chrono::high_resolution_clock::now();

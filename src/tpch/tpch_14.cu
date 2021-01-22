@@ -20,8 +20,10 @@
 using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
 using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
 
-static constexpr bool prefetch_index = false;
+static constexpr bool prefetch_index = true;
 static constexpr bool sort_indexed_relation = true;
+static constexpr int block_size = 32;
+static int num_sms;
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
@@ -123,8 +125,8 @@ struct btree_index {
     }
 
     __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-//        return btree::cuda::btree_lookup(tree, key);
-        return btree::cuda::btree_lookup_with_hints(tree_, key);
+        return btree::cuda::btree_lookup(tree_, key);
+   //     return btree::cuda::btree_lookup_with_hints(tree_, key);
     }
 };
 
@@ -313,95 +315,138 @@ __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineit
     }
 }
 
+template<class IndexType>
+struct helper {
+    IndexType index_structure;
+
+    unsigned lineitem_size;
+    lineitem_table_plain_t* lineitem_device;
+    std::unique_ptr<lineitem_table_plain_t> lineitem_device_ptrs;
+
+    unsigned part_size;
+    part_table_plain_t* part_device;
+    std::unique_ptr<part_table_plain_t> part_device_ptrs;
+
+    void load_database(const std::string& path) {
+        Database db;
+        load_tables(db, path);
+        if (sort_indexed_relation) {
+            printf("sorting part relation...\n");
+            sort_relation(db.part);
+        }
+        lineitem_size = db.lineitem.l_orderkey.size();
+        part_size = db.part.p_partkey.size();
+
+        {
+            const auto start = std::chrono::high_resolution_clock::now();
+            //auto [lineitem_device, lineitem_device_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
+            std::tie(lineitem_device, lineitem_device_ptrs) = copy_relation<vector_copy_policy>(db.lineitem);
+            //auto [part_device, part_device_ptrs] = copy_relation<vector_copy_policy>(db.part);
+            std::tie(part_device, part_device_ptrs) = copy_relation<vector_copy_policy>(db.part);
+            const auto finish = std::chrono::high_resolution_clock::now();
+            const auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
+            std::cout << "transfer time: " << d << " ms\n";
+        }
+
+#ifndef USE_HJ
+        index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
+#endif
+    }
+
+#ifdef USE_HJ
+    void run_hj() {
+        const auto kernelStart = std::chrono::high_resolution_clock::now();
+
+        LinearProbingHashTable<uint32_t, size_t> ht(part_size);
+        hj_build_kernel<<<numBlocks, block_size>>>(part_size, part_device, ht.deviceHandle);
+        hj_probe_kernel<<<numBlocks, block_size>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
+        cudaDeviceSynchronize();
+
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
+        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        std::cout << "Kernel time: " << kernelTime << " ms\n";
+    }
+#endif
+
+    void run_ij() {
+        const auto kernelStart = std::chrono::high_resolution_clock::now();
+
+//    int numBlocks = (lineitem_size + block_size - 1) / block_size;
+    int numBlocks = 32*num_sms;
+    printf("numblocks: %d\n", numBlocks);
+
+        ij_full_kernel<<<numBlocks, block_size>>>(lineitem_device, lineitem_size, part_device, index_structure);
+        cudaDeviceSynchronize();
+
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
+        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        std::cout << "Kernel time: " << kernelTime << " ms\n";
+    }
+
+/*
+    void run_two_phase_ij() {
+        JoinEntry* join_entries;
+        cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
+
+        const auto kernelStart = std::chrono::high_resolution_clock::now();
+
+        ij_lookup_kernel<<<numBlocks, block_size>>>(lineitem_device, lineitem_size, index_structure, join_entries);
+        cudaDeviceSynchronize();
+
+        decltype(output_index) matches;
+        cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
+        assert(error == cudaSuccess);
+        //printf("join matches: %u\n", matches);
+
+        ij_join_kernel<<<numBlocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
+        cudaDeviceSynchronize();
+
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
+        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        std::cout << "Kernel time: " << kernelTime << " ms\n";
+    }*/
+};
+
+template<class IndexType>
+void load_and_run_ij(const std::string& path) {
+    helper<IndexType> h;
+    h.load_database(path);
+    h.run_ij();
+}
 
 int main(int argc, char** argv) {
     using namespace std;
 
     if (argc != 3) {
-        printf("%s <tpch dataset path> <join method [0-2]>\n", argv[0]);
+        printf("%s <tpch dataset path> <index type: {0: btree, 1: radixspline, 2: lowerbound>\n", argv[0]);
         return 0;
     }
-    enum JoinType : unsigned { HJ, IJ, TWO_PHASE_IJ } join_type { static_cast<JoinType>(std::stoi(argv[2])) };
+    enum IndexType : unsigned { btree, radixspline, lowerbound } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
 
-    Database db;
-    load_tables(db, argv[1]);
-    if (sort_indexed_relation) {
-        printf("sorting part relation...\n");
-        sort_relation(db.part);
-    }
-    const unsigned lineitem_size = db.lineitem.l_orderkey.size();
-    const unsigned part_size = db.part.p_partkey.size();
+    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);// devId);
 
-    lineitem_table_plain_t* lineitem_device;
-    std::unique_ptr<lineitem_table_plain_t> lineitem_device_ptrs;
-    part_table_plain_t* part_device;
-    std::unique_ptr<part_table_plain_t> part_device_ptrs;
-    {
-        const auto start = std::chrono::high_resolution_clock::now();
-        //auto [lineitem_device, lineitem_device_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
-        std::tie(lineitem_device, lineitem_device_ptrs) = copy_relation<vector_copy_policy>(db.lineitem);
-        //auto [part_device, part_device_ptrs] = copy_relation<vector_copy_policy>(db.part);
-        std::tie(part_device, part_device_ptrs) = copy_relation<vector_copy_policy>(db.part);
-        const auto finish = std::chrono::high_resolution_clock::now();
-        const auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
-        std::cout << "Transfer time: " << d << " ms\n";
-    }
-
-    const int blockSize = 32;
-    int numSMs;
-    cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);// devId);
-
-//    int numBlocks = (lineitem_size + blockSize - 1) / blockSize;
-    int numBlocks = 32*numSMs;
-    printf("numblocks: %d\n", numBlocks);
-
-    decltype(std::chrono::high_resolution_clock::now()) kernelStart, kernelStop;
-    switch (join_type) {
-        case JoinType::HJ: {
-            kernelStart = std::chrono::high_resolution_clock::now();
-            LinearProbingHashTable<uint32_t, size_t> ht(part_size);
-            hj_build_kernel<<<numBlocks, blockSize>>>(part_size, part_device, ht.deviceHandle);
-            hj_probe_kernel<<<numBlocks, blockSize>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
-            cudaDeviceSynchronize();
-            kernelStop = std::chrono::high_resolution_clock::now();
+#ifdef USE_HJ
+    helper<lower_bound_index> h;
+    h.load_database(argv[1]);
+    h.run_hj();
+#else
+    switch (index_type) {
+        case IndexType::btree: {
+            load_and_run_ij<btree_index>(argv[1]);
             break;
         }
-        case JoinType::IJ: {
-            chosen_index_structure index_structure;
-            index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
-
-            kernelStart = std::chrono::high_resolution_clock::now();
-            ij_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, index_structure);
-            //btree_full_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, part_device, tree);
-            cudaDeviceSynchronize();
-            kernelStop = std::chrono::high_resolution_clock::now();
+        case IndexType::radixspline: {
+            load_and_run_ij<radix_spline_index>(argv[1]);
             break;
         }
-        case JoinType::TWO_PHASE_IJ: {
-            chosen_index_structure index_structure;
-            index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
-
-            JoinEntry* join_entries;
-            cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
-
-            kernelStart = std::chrono::high_resolution_clock::now();
-            ij_lookup_kernel<<<numBlocks, blockSize>>>(lineitem_device, lineitem_size, index_structure, join_entries);
-            cudaDeviceSynchronize();
-
-            decltype(output_index) matches;
-            cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
-            assert(error == cudaSuccess);
-            //printf("join matches: %u\n", matches);
-
-            ij_join_kernel<<<numBlocks, blockSize>>>(lineitem_device, part_device, join_entries, matches);
-            cudaDeviceSynchronize();
-            kernelStop = std::chrono::high_resolution_clock::now();
+        case IndexType::lowerbound: {
+            load_and_run_ij<lower_bound_index>(argv[1]);
             break;
         }
         default:
-            std::cerr << "unknown join method: " << join_type << std::endl;
+            std::cerr << "unknown index type: " << index_type << std::endl;
     }
-    const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+#endif
 
 /*
     printf("sum1: %lu\n", globalSum1);
@@ -409,11 +454,6 @@ int main(int argc, char** argv) {
 */
     const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
-
-    const auto finish = std::chrono::high_resolution_clock::now();
-    const auto d = chrono::duration_cast<chrono::microseconds>(finish - kernelStart).count()/1000.;
-    std::cout << "Kernel time: " << kernelTime << " ms\n";
-    std::cout << "Elapsed time with printf: " << d << " ms\n";
 
     return 0;
 }
