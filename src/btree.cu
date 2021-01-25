@@ -305,6 +305,7 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     return invalidTid;
 }
 
+#if 1
 __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     float hint = 0.5f;
@@ -330,12 +331,67 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     //unsigned pos = naive_lower_bound(node, key);
     unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
     //printf("leaf pos: %d\n", pos);
+/*
     if ((pos < node->count) && (node->keys[pos] == key)) {
         return node->payloads[pos];
+    }
+    return invalidTid;
+*/
+    return (pos < node->count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
+}
+#endif
+
+#if 0
+__device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
+    //printf("btree_lookup key: %lu\n", key);
+    float hint = 0.5f;
+    const Node* node = tree;
+    while (!node->isLeaf) {
+        unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+
+        const auto prev = (pos > 0) ? node->keys[pos - 1] : key>>1;
+        const auto current = (pos < node->count) ? node->keys[pos] : key + 1;
+        hint = (static_cast<float>(key) - prev)/(current - prev);
+
+        node = reinterpret_cast<const Node*>(node->payloads[pos]);
+    }
+
+    //unsigned pos = naive_lower_bound(node, key);
+    unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+
+    return (pos < node->count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
+}
+#endif
+
+#if 0
+__device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
+    //printf("btree_lookup key: %lu\n", key);
+    float hint = 0.5;
+    const Node* node;
+    unsigned pos;
+    payload_t payload = reinterpret_cast<payload_t>(tree);
+    do {
+        node = reinterpret_cast<const Node*>(payload);
+
+        pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+        if (pos > 0 && pos < node->count) {
+            const auto prev = static_cast<float>(node->keys[pos - 1]);
+            const auto current = static_cast<float>(node->keys[pos]);
+            hint = (static_cast<float>(key) - prev)/(current - prev);
+        } else {
+            hint = 0.5f;
+        }
+
+        payload = node->payloads[pos];
+    } while (!node->isLeaf);
+
+    if ((pos < node->count) && (node->keys[pos] == key)) {
+        return payload;
     }
 
     return invalidTid;
 }
+#endif
 
 /*
 __global__ void btree_bulk_lookup(const Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
