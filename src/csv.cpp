@@ -4,12 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <chrono>
+#include <tuple>
 #include <vector>
 #include <thread>
 #include <string>
 #include <string_view>
 #include <iostream>
 
+#include <bits/c++config.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -89,11 +91,12 @@ int64_t read_numeric(const char* begin, size_t len) {
 
 static std::vector<int64_t> results;
 
-
+/*
 struct worker_state {
 };
+*/
 
-template <bool first_partition = false>
+template<bool first_partition = false>
 void sum_extendedprice(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num, std::vector<uint64_t>& dst) {
     int64_t sum = 0;
 
@@ -164,7 +167,6 @@ const auto dest_limit = dst.size();
         bar_pos = find_first(bar_pattern, partition_start + i, partition_size_hint - i);
         bar_cnt += (bar_pos >= 0);
         bar_pos = std::max(bar_pos, 0l);
-    //    auto col1_begin = i + bar_pos + 1;
         auto col1 = read_int(partition_start + i, bar_pos);
 
 
@@ -199,6 +201,157 @@ cout << "col0: " << col0 << " col1: " << col1 << std::endl;
 }
 
 
+template<typename T>
+struct parser {
+    static T parse(const char* begin, size_t len);
+};
+
+template<typename... Ts>
+struct columns {
+    static constexpr std::size_t n = sizeof...(Ts);
+};
+
+
+
+template<template<typename T> class Mapper, typename... Ts>
+struct map_tuple;
+
+template<template<typename T> class Mapper, typename... Ts>
+struct map_tuple<Mapper, std::tuple<Ts...>> {
+    using mapped_type = std::tuple<typename Mapper<Ts>::type...>;
+};
+
+template<class T>
+struct to_unique_ptr_to_vector {
+    using type = std::unique_ptr<std::vector<T>>;// std::vector<T>*;
+};
+
+
+//template<typename ColumnTypes, bool first_partition = false>
+template<typename TupleType>
+struct worker {
+    using dest_tuple_type = typename map_tuple<to_unique_ptr_to_vector, TupleType>::mapped_type;
+
+    const char* data_start_;
+    const char* partition_start_hint_;
+    const size_t partition_size_hint_;
+    const unsigned thread_num_;
+
+    const char* partition_start_;
+    size_t partition_size_;
+
+    worker(const char* data_start, const char* partition_start_hint, size_t partition_size_hint, unsigned thread_num)
+        : data_start_(data_start)
+        , partition_start_hint_(partition_start_hint)
+        , partition_size_hint_(partition_size_hint)
+        , thread_num_(thread_num)
+    {}
+
+    void initial_run(dest_tuple_type& dest, size_t dest_begin);
+
+    void run(dest_tuple_type& dest, size_t dest_begin);
+
+};
+
+template<typename TupleType>
+void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
+    printf("in worker\n");
+
+    // correct partition size
+    if (thread_num_ > 0) {
+        size_t offset = 0;
+        const size_t max_offset = partition_start_hint_ - data_start_;
+        while (offset < partition_size_hint_) {
+            if (offset > max_offset) {
+                return;
+            } else if (*(partition_start_hint_ - offset) == '\n') {
+                break;
+            } else {
+                offset++;
+            }
+        }
+        partition_start_ = partition_start_hint_ - offset;
+        partition_size_ = partition_size_hint_ + offset;
+    }
+
+    run(dest, dest_begin);
+}
+
+template<typename TupleType>
+void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t dest_begin) {
+
+    int64_t sum = 0;
+
+    size_t dest_index = dest_begin + thread_num_;
+
+
+    constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
+    constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
+
+    size_t i = 0;
+
+//const unsigned column_count = 16;
+const auto dest_limit = std::get<0>(dest)->size();
+    while (i < partition_size_hint_ &&  dest_index < dest_limit) {
+    
+        ssize_t bar_pos;
+        unsigned bar_cnt = 0;
+
+/*
+        for (unsigned column = 0; column < ColumnType::n; ++column) {
+            // parse column 0
+            auto bar_pos = find_first(bar_pattern, partition_start + i, partition_size_ - i);
+            unsigned bar_cnt = (bar_pos >= 0);
+            bar_pos = std::max(bar_pos, 0l);
+//            auto col0 = read_int(partition_start + i, bar_pos);
+
+            using column_type = typename std::tuple_element<N, std::tuple<Args...>>::type;;
+            auto col0 = parser<column_type>::parse(partition_start + i, bar_pos);
+            dst[dest_index] = col0;
+            i += bar_pos + 1;
+            // parse column 1
+            bar_pos = find_first(bar_pattern, partition_start + i, partition_size_ - i);
+            bar_cnt += (bar_pos >= 0);
+            bar_pos = std::max(bar_pos, 0l);
+            auto col1 = read_int(partition_start + i, bar_pos);
+        }
+*/
+
+        // TODO
+
+        auto newline_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
+        i += newline_pos + 1;
+
+//cout << "col0: " << col0 << " col1: " << col1 << std::endl;
+
+/*
+        int column0;
+        int column1;
+
+        ssize_t bar_pos;
+        for (unsigned column = 0; column < column_count; ++column) {
+            auto bar_pos = find_first(bar_pattern, partition_start + i, partition_size_ - i);
+            bar_cnt += (bar_pos >= 0);
+
+        }
+*/
+        if (bar_cnt != 2) {// column_count - 1) {
+            std::cerr << "invalid line at char ..." << std::endl;
+            return;
+        }
+
+    //    break;
+    if (i > 300) break;
+    }
+
+   // *result = sum;
+}
+
+
+
+
+
+
 
 int32_t parse_int(const char* begin);
 
@@ -230,6 +383,25 @@ unsigned sample_line_width(const char* data_start, size_t data_size) {
 void rebalance() {
 }
 
+
+
+template<typename... Ts>
+void allocate_vectors(std::tuple<Ts...>& input_tuple, size_t n) {
+    std::apply([&n](Ts&... Args) {
+        ((Args.reset(new typename Ts::element_type()), Args->reserve(n)), ...);
+    }, input_tuple);
+}
+
+template<typename TupleType>
+auto create_vectors(size_t n) {
+    using mapped_type = typename map_tuple<to_unique_ptr_to_vector, TupleType>::mapped_type;
+    mapped_type new_tuple;
+    allocate_vectors(new_tuple, 10); // TODO
+    return new_tuple;
+}
+
+
+template<typename TupleType>
 void parse(const std::string& file) {
 
     int handle = open(file.c_str(), O_RDONLY);
@@ -258,9 +430,16 @@ cout << "estimated line count: " << est_record_count << std::endl;
     const auto num_threads = 1;// TODO std::thread::hardware_concurrency();
 
 
-std::vector<uint64_t> dest1;
+std::vector<int32_t> dest1;
 dest1.resize(est_record_count);
 
+
+///auto dest_tuple = std::make_tuple(&dest1);
+
+
+auto dest_tuple = create_vectors<TupleType>(est_record_count);
+
+std::vector<worker<TupleType>> workers;
 
   //  const auto partition_size = size/num_threads;
 
@@ -278,12 +457,20 @@ dest1.resize(est_record_count);
         size_t size_hint = std::min(remaining, partition_size);
         remaining -= size_hint;
         int64_t* result = &results[i];
+
+        // worker(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num)
+        auto& worker = workers.emplace_back(data_start, partion_start, size_hint, i);
+        // initial_run(dest_tuple_type& dest, size_t dest_begin) {
+
+    //    threads[i] = std::thread(&worker<TupleType>::initial_run, &worker, std::ref(dest_tuple), 0ull);
+        threads[i] = std::thread([&]() {
+            worker.initial_run(std::ref(dest_tuple), 0ull);
+        });
+
         //void sum_extendedprice(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num, std::vector<uint64_t>& dst) 
-        if (i == 0) {
-            threads[0] = std::thread(&sum_extendedprice<true>, data_start, partion_start, size_hint, i, std::ref(dest1));
-        } else {
-            threads[i] = std::thread(&sum_extendedprice<false>, data_start, partion_start, size_hint, i, std::ref(dest1));
-        }
+//worker_thread<int32_t>(data_start, partion_start, size_hint, i, std::ref(dest_tuple));
+     //   threads[i] = std::thread(&worker_thread<decltype(dest_tuple)>, data_start, partion_start, size_hint, i, std::ref(dest_tuple));// std::ref(dest1));
+
         partion_start += size_hint;
     }
     for (size_t i = 0; i < num_threads; ++i) {
@@ -310,7 +497,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    parse(argv[1]);
+    using input_tuple = std::tuple<int32_t>;
+    parse<input_tuple>(argv[1]);
 
     return 0;
 }
