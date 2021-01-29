@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <chrono>
 #include <tuple>
 #include <vector>
@@ -47,6 +48,7 @@ inline uint64_t get_matches(uint64_t pattern, uint64_t block) {
 // len : remaining length of the partition
 // return : the position of the first matching character or -1 otherwise
 ssize_t find_first(uint64_t pattern, const char* begin, size_t len) {
+    assert(len > 0);
     // we may assume that reads from 'begin' within [len, len + 8) yield zero
     for (size_t i = 0; i < len; i += 8) {
         uint64_t block = *reinterpret_cast<const uint64_t*>(begin + i);
@@ -54,7 +56,8 @@ ssize_t find_first(uint64_t pattern, const char* begin, size_t len) {
         if (matches != 0) {
             uint64_t pos = __builtin_ctzll(matches) / 8;
             if (pos < 8) {
-                return (i + pos);
+                const auto real_pos = i + pos;
+                return (real_pos >= len) ? -1 : real_pos;
             }
         }
     }
@@ -166,9 +169,131 @@ cout << "col0: " << col0 << " col1: " << col1 << std::endl;
 }
 
 
+struct numeric {
+    uint64_t raw;
+};
+
 template<typename T>
-struct parser {
-    static T parse(const char* begin, size_t len);
+struct input_parser;
+/*
+struct lineitem_table_t {
+    std::vector<uint32_t> l_orderkey;
+    std::vector<uint32_t> l_partkey;
+    std::vector<uint32_t> l_suppkey;
+    std::vector<uint32_t> l_linenumber;
+    std::vector<int64_t> l_quantity;
+    std::vector<int64_t> l_extendedprice;
+    std::vector<int64_t> l_discount;
+    std::vector<int64_t> l_tax;
+    std::vector<char> l_returnflag;
+    std::vector<char> l_linestatus;
+    std::vector<uint32_t> l_shipdate;
+    std::vector<uint32_t> l_commitdate;
+    std::vector<uint32_t> l_receiptdate;
+    std::vector<std::array<char, 25>> l_shipinstruct;
+    std::vector<std::array<char, 10>> l_shipmode;
+    std::vector<std::array<char, 44>> l_comment;
+};
+*/
+template<>
+struct input_parser<int> {
+    static bool parse(const char* begin, size_t len, int& result) {
+        // TODO parse sign
+        bool invalid = (len < 1);
+        result = 0;
+        for (size_t i = 0; i < len; ++i) {
+            char c = begin[i];
+            invalid |= (c >= '0' && c <= '9');
+            result = result * 10 + (begin[i] - '0');
+        }
+        return !invalid;
+    }
+};
+
+template<>
+struct input_parser<uint32_t> {
+    static bool parse(const char* begin, size_t len, uint32_t& result) {
+        bool invalid = (len < 1);
+        result = 0;
+        for (size_t i = 0; i < len; ++i) {
+            char c = begin[i];
+            invalid |= (c >= '0' && c <= '9');
+            result = result * 10 + (begin[i] - '0');
+        }
+        return !invalid;
+    }
+};
+
+template<>
+struct input_parser<int64_t> {
+    static bool parse(const char* begin, size_t len, int64_t& result) {
+        // TODO parse sign
+        bool invalid = (len < 1);
+        result = 0;
+        for (size_t i = 0; i < len; ++i) {
+            char c = begin[i];
+            invalid |= (c >= '0' && c <= '9');
+            result = result * 10 + (begin[i] - '0');
+        }
+        return !invalid;
+    }
+};
+
+template<>
+struct input_parser<numeric> {
+    static bool parse(const char* begin, size_t len, numeric& result) {
+        /*
+result.raw = 0;
+return true;*/
+printf("parse numeric() len: %lu\n", len);
+        constexpr uint64_t period_pattern = 0x2E2E2E2E2E2E2E2Eull;
+        std::string_view numeric_view(begin, len);
+        ssize_t dot_position = find_first(period_pattern, begin, len);
+        std::cout << "dot_position: " << dot_position << std::endl;
+
+/*
+        if (dot_position < 1) {
+            std::cerr << "invalid numeric literal" << std::endl;
+            return false;
+        }
+        auto part1 = numeric_view.substr(0, dot_position);
+        auto part2 = numeric_view.substr(dot_position + 1);
+        int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO
+        result.raw = numeric_raw;
+        return true;*/
+        if (dot_position < 0) {
+            // no dot
+            int64_t numeric_raw = to_int(numeric_view.substr(0, len));
+            cout << "\nparse numeric without dot:  " << numeric_raw << std::endl;
+            result.raw = numeric_raw;
+        } else if (dot_position == 0) {
+            // TODO
+            assert(false);
+        } else {
+            auto part1 = numeric_view.substr(0, dot_position);
+            auto part2 = numeric_view.substr(dot_position + 1);
+            cout << "\nparse numeric: " << part1 << " . " << part2 << std::endl;
+            int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO
+            result.raw = numeric_raw;
+        }
+        return true;
+    }
+};
+
+template<>
+struct input_parser<char> {
+    static bool parse(const char* begin, size_t len, char& result) {
+        result = begin[0];
+        return (len == 1);
+    }
+};
+
+template<size_t N>
+struct input_parser<std::array<char, N>> {
+    static bool parse(const char* begin, size_t len, std::array<char, N>& result) {
+        std::memcpy(result.data(), begin, std::min(N, len));
+        return (N == len);
+    }
 };
 
 
@@ -200,17 +325,18 @@ constexpr decltype(auto) tuple_foreach(F&& f, Tuple&& t) {
 
 
 
-template<typename T, unsigned I>
+template<typename T, unsigned I, bool L>
 struct tuple_entry_descriptor {
     using type = T;
     static constexpr unsigned index = I;
+    static constexpr bool is_last = L;
 };
 
 template<class Tuple>
 struct tuple_foreach_type {
     template<class F, std::size_t... I>
     static constexpr decltype(auto) invoke_impl(F&& f, std::index_sequence<I...>) {
-        return (std::invoke(std::forward<F>(f), tuple_entry_descriptor<typename std::tuple_element<I, Tuple>::type, I>()), ...);
+        return (std::invoke(std::forward<F>(f), tuple_entry_descriptor<typename std::tuple_element<I, Tuple>::type, I, I+1 == sizeof...(I)>()), ...);
     }
 
     template<class F>
@@ -295,25 +421,31 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
     run(dest, dest_begin);
 }
 
+template<size_t N>
+ostream& operator<<(ostream& os, const std::array<char, N>& arr) {
+    os << std::string_view(arr.data(), N);
+    return os;
+}
+
+ostream& operator<<(ostream& os, const numeric& value) {
+    os << value.raw; // TODO
+    return os;
+}
+
 template<typename TupleType>
 void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t dest_begin) {
-
-    int64_t sum = 0;
-
-    size_t dest_index = dest_begin + thread_num_;
-
-
     constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
     constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
 
+    constexpr auto column_count = tuple_size<TupleType>::value;
+
+    const auto dest_limit = std::get<0>(dest)->size();
+    size_t dest_index = dest_begin + thread_num_;
     size_t i = 0;
 
-//const unsigned column_count = 16;
-const auto dest_limit = std::get<0>(dest)->size();
-std::cout << "dest_limit: " << dest_limit << std::endl;
+    std::cout << "dest_limit: " << dest_limit << std::endl;
 
     while (i < partition_size_ &&  dest_index < dest_limit) {
-    
         ssize_t bar_pos;
         unsigned bar_cnt = 0;
 
@@ -335,14 +467,23 @@ std::cout << "dest_limit: " << dest_limit << std::endl;
             using column_desc_type = decltype(column_desc_inst);
             using element_type = typename decltype(column_desc_inst)::type;
             constexpr auto index = column_desc_type::index;
-            printf("tuple index: %u\n", index);
+            //printf("\ntuple index: %u\n", index);
+       //     printf("\nis last: %d\n", column_desc_type::is_last);
+
+            if constexpr (column_desc_type::is_last) return;
 
             bar_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
             bar_cnt += (bar_pos >= 0);
             bar_pos = std::max(bar_pos, 0l);
-            auto value = read_int(partition_start_ + i, bar_pos); // TODO
-            (*std::get<index>(dest))[dest_index] = value;
-            std::cout << "col" << index << ": " << value << std::endl;
+/*
+            auto value = input_parser<element_type>::parse(partition_start_ + i, bar_pos);
+            (*std::get<index>(dest))[dest_index] = value;*/
+
+            auto& value = (*std::get<index>(dest))[dest_index];
+            bool valid = input_parser<element_type>::parse(partition_start_ + i, bar_pos, value);
+
+        //    std::cout << " col" << index << ": " << value;
+            std::cout << "|" << value;
 
             i += bar_pos + 1;
         });
@@ -367,24 +508,14 @@ std::cout << "dest_limit: " << dest_limit << std::endl;
 
         auto newline_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
         i += newline_pos + 1;
+        std::cout << std::endl;
 
-
-/*
-        int column0;
-        int column1;
-
-        ssize_t bar_pos;
-        for (unsigned column = 0; column < column_count; ++column) {
-            auto bar_pos = find_first(bar_pattern, partition_start + i, partition_size_ - i);
-            bar_cnt += (bar_pos >= 0);
-
-        }
-*/
-        if (bar_cnt != 2) {// column_count - 1) {
+/* TODO
+        if (bar_cnt != column_count - 1) {// column_count - 1) {
             std::cerr << "invalid line at char ..." << std::endl;
             return;
         }
-
+*/
         dest_index += thread_count_;
 
       //  if (i > 300) break;
@@ -537,7 +668,26 @@ std::vector<worker<TupleType>> workers;
 
 
 
-
+/*
+struct lineitem_table_t {
+    std::vector<uint32_t> l_orderkey;
+    std::vector<uint32_t> l_partkey;
+    std::vector<uint32_t> l_suppkey;
+    std::vector<uint32_t> l_linenumber;
+    std::vector<int64_t> l_quantity;
+    std::vector<int64_t> l_extendedprice;
+    std::vector<int64_t> l_discount;
+    std::vector<int64_t> l_tax;
+    std::vector<char> l_returnflag;
+    std::vector<char> l_linestatus;
+    std::vector<uint32_t> l_shipdate;
+    std::vector<uint32_t> l_commitdate;
+    std::vector<uint32_t> l_receiptdate;
+    std::vector<std::array<char, 25>> l_shipinstruct;
+    std::vector<std::array<char, 10>> l_shipmode;
+    std::vector<std::array<char, 44>> l_comment;
+};
+*/
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -557,7 +707,24 @@ tuple_for_index<tuple_type>::invoke([&](auto index) {
     printf("index: %lu\n", index);
 });
 
-    using lineitem_tuple = std::tuple<int32_t, int32_t>;
+    using lineitem_tuple = std::tuple<
+        uint32_t, // l_orderkey
+        uint32_t,
+        uint32_t,
+        uint32_t,
+        numeric, // l_quantity
+        numeric,
+        numeric,
+        numeric,
+        char, // l_returnflag
+        char,
+        uint32_t, // l_shipdate
+        uint32_t,
+        uint32_t,
+        std::array<char, 25>, // l_shipinstruct
+        std::array<char, 10>, // l_shipmode
+        std::array<char, 44>  // l_comment
+        >;
     parse<lineitem_tuple>(argv[1]);
 
     return 0;
