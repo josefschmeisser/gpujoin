@@ -91,11 +91,6 @@ int64_t read_numeric(const char* begin, size_t len) {
 
 static std::vector<int64_t> results;
 
-/*
-struct worker_state {
-};
-*/
-
 template<bool first_partition = false>
 void sum_extendedprice(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num, std::vector<uint64_t>& dst) {
     int64_t sum = 0;
@@ -176,13 +171,6 @@ struct parser {
     static T parse(const char* begin, size_t len);
 };
 
-/*
-template<typename... Ts>
-struct columns {
-    static constexpr std::size_t n = sizeof...(Ts);
-};
-*/
-
 
 template<template<typename T> class Mapper, typename... Ts>
 struct map_tuple;
@@ -217,19 +205,7 @@ struct tuple_entry_descriptor {
     using type = T;
     static constexpr unsigned index = I;
 };
-/*
-template<class F, class Tuple, std::size_t... I>
-constexpr decltype(auto) tuple_foreach_type_impl(F&& f, Tuple&& t, std::index_sequence<I...>) {
-    return (std::invoke(std::forward<F>(f), tuple_entry_descriptor<typename std::tuple_element<I, Tuple>::type, I>()), ...);
-}
 
-template<class F, class Tuple>
-constexpr decltype(auto) tuple_foreach_type(F&& f, Tuple&& t) {
-    return tuple_foreach_type_impl(
-        std::forward<F>(f), std::forward<Tuple>(t),
-        std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
-}
-*/
 template<class Tuple>
 struct tuple_foreach_type {
     template<class F, std::size_t... I>
@@ -246,19 +222,6 @@ struct tuple_foreach_type {
 };
 
 
-
-/*
-template<class F, std::size_t... I>
-constexpr decltype(auto) tuple_for_index_impl(F&& f, std::index_sequence<I...>) {
-    return (std::invoke(std::forward<F>(f), I), ...);
-}*/
-/*
-template<class F, class Tuple>
-constexpr decltype(auto) tuple_for_index(F&& f) {
-    return tuple_for_index_impl(
-        std::forward<F>(f),
-        std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
-}*/
 template<class Tuple>
 struct tuple_for_index {
     template<class F, std::size_t... I>
@@ -332,16 +295,6 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
     run(dest, dest_begin);
 }
 
-#if 0
-template<typename F, typename... TupleArgs>
-/*
-struct foreach_tuple_element {
-};*/
-void foreach_tuple_element(F&& f, std::tuple<Ts...> tuple) {
-    std::apply(f,
-}
-#endif
-
 template<typename TupleType>
 void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t dest_begin) {
 
@@ -383,8 +336,17 @@ std::cout << "dest_limit: " << dest_limit << std::endl;
             using element_type = typename decltype(column_desc_inst)::type;
             constexpr auto index = column_desc_type::index;
             printf("tuple index: %u\n", index);
-        });
 
+            bar_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
+            bar_cnt += (bar_pos >= 0);
+            bar_pos = std::max(bar_pos, 0l);
+            auto value = read_int(partition_start_ + i, bar_pos); // TODO
+            (*std::get<index>(dest))[dest_index] = value;
+            std::cout << "col" << index << ": " << value << std::endl;
+
+            i += bar_pos + 1;
+        });
+#if 0
         // parse column 0
         bar_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
         bar_cnt += (bar_pos >= 0);
@@ -398,11 +360,10 @@ std::cout << "dest_limit: " << dest_limit << std::endl;
         bar_pos = std::max(bar_pos, 0l);
         auto col1 = read_int(partition_start_ + i, bar_pos);
 
-
         cout << "col0: " << col0 << " col1: " << col1 << std::endl;
 
-
         // TODO
+#endif
 
         auto newline_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
         i += newline_pos + 1;
