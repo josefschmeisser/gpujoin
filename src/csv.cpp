@@ -92,83 +92,6 @@ int64_t read_numeric(const char* begin, size_t len) {
     return numeric;
 }
 
-static std::vector<int64_t> results;
-
-template<bool first_partition = false>
-void sum_extendedprice(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num, std::vector<uint64_t>& dst) {
-    int64_t sum = 0;
-
-    uint64_t dest_index = thread_num;
-
-    // correct partition size
-    if constexpr (!first_partition) {
-        size_t offset = 0;
-        const size_t max_offset = partition_start - data_start;
-        while (offset < partition_size_hint) {
-            if (offset > max_offset) {
-                return;
-            } else if (*(partition_start - offset) == '\n') {
-                break;
-            } else {
-                offset++;
-            }
-        }
-        partition_start -= offset;
-        partition_size_hint += offset;
-    }
-
-    constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
-    constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
-
-    size_t i = 0;
-
-const unsigned column_count = 16;
-const auto dest_limit = dst.size();
-    while (i < partition_size_hint &&  dest_index < dest_limit) {
-    
-        // parse column 0
-        auto bar_pos = find_first(bar_pattern, partition_start + i, partition_size_hint - i);
-        unsigned bar_cnt = (bar_pos >= 0);
-        bar_pos = std::max(bar_pos, 0l);
-        auto col0 = read_int(partition_start + i, bar_pos);
-        dst[dest_index] = col0;
-        i += bar_pos + 1;
-        // parse column 1
-        bar_pos = find_first(bar_pattern, partition_start + i, partition_size_hint - i);
-        bar_cnt += (bar_pos >= 0);
-        bar_pos = std::max(bar_pos, 0l);
-        auto col1 = read_int(partition_start + i, bar_pos);
-
-
-        // TODO
-
-        auto newline_pos = find_first(newline_pattern, partition_start + i, partition_size_hint - i);
-        i += newline_pos + 1;
-
-cout << "col0: " << col0 << " col1: " << col1 << std::endl;
-
-/*
-        int column0;
-        int column1;
-
-        ssize_t bar_pos;
-        for (unsigned column = 0; column < column_count; ++column) {
-            auto bar_pos = find_first(bar_pattern, partition_start + i, partition_size_hint - i);
-            bar_cnt += (bar_pos >= 0);
-
-        }
-*/
-        if (bar_cnt != 2) {// column_count - 1) {
-            std::cerr << "invalid line at char ..." << std::endl;
-            return;
-        }
-
-        if (i > 300) break;
-    }
-
-}
-
-
 struct numeric {
     uint64_t raw;
 };
@@ -245,11 +168,11 @@ struct input_parser<numeric> {
         /*
 result.raw = 0;
 return true;*/
-printf("parse numeric() len: %lu\n", len);
+//printf("parse numeric() len: %lu\n", len);
         constexpr uint64_t period_pattern = 0x2E2E2E2E2E2E2E2Eull;
         std::string_view numeric_view(begin, len);
         ssize_t dot_position = find_first(period_pattern, begin, len);
-        std::cout << "dot_position: " << dot_position << std::endl;
+      //  std::cout << "dot_position: " << dot_position << std::endl;
 
 /*
         if (dot_position < 1) {
@@ -264,7 +187,7 @@ printf("parse numeric() len: %lu\n", len);
         if (dot_position < 0) {
             // no dot
             int64_t numeric_raw = to_int(numeric_view.substr(0, len));
-            cout << "\nparse numeric without dot:  " << numeric_raw << std::endl;
+      //      cout << "\nparse numeric without dot:  " << numeric_raw << std::endl;
             result.raw = numeric_raw;
         } else if (dot_position == 0) {
             // TODO
@@ -272,7 +195,7 @@ printf("parse numeric() len: %lu\n", len);
         } else {
             auto part1 = numeric_view.substr(0, dot_position);
             auto part2 = numeric_view.substr(dot_position + 1);
-            cout << "\nparse numeric: " << part1 << " . " << part2 << std::endl;
+     //       cout << "\nparse numeric: " << part1 << " . " << part2 << std::endl;
             int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO
             result.raw = numeric_raw;
         }
@@ -446,8 +369,8 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     std::cout << "dest_limit: " << dest_limit << std::endl;
 
     while (i < partition_size_ &&  dest_index < dest_limit) {
-        ssize_t bar_pos;
-        unsigned bar_cnt = 0;
+        ssize_t sep_pos;
+        unsigned sep_cnt = 0;
 
 /*
         tuple_foreach([&](auto& element) {
@@ -463,6 +386,8 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             using element_type = typename decltype(column_type_inst)::type;
         }, todo);*/
 
+        const auto line_start = i;
+
         tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
             using column_desc_type = decltype(column_desc_inst);
             using element_type = typename decltype(column_desc_inst)::type;
@@ -470,52 +395,31 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             //printf("\ntuple index: %u\n", index);
        //     printf("\nis last: %d\n", column_desc_type::is_last);
 
-            if constexpr (column_desc_type::is_last) return;
-
-            bar_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
-            bar_cnt += (bar_pos >= 0);
-            bar_pos = std::max(bar_pos, 0l);
-/*
-            auto value = input_parser<element_type>::parse(partition_start_ + i, bar_pos);
-            (*std::get<index>(dest))[dest_index] = value;*/
+            if constexpr (column_desc_type::is_last) {
+                sep_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
+            } else {
+                sep_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
+            }
+            sep_cnt += (sep_pos >= 0);
+            sep_pos = std::max(sep_pos, 0l);
 
             auto& value = (*std::get<index>(dest))[dest_index];
-            bool valid = input_parser<element_type>::parse(partition_start_ + i, bar_pos, value);
+            bool valid = input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
 
-        //    std::cout << " col" << index << ": " << value;
             std::cout << "|" << value;
 
-            i += bar_pos + 1;
+            i += sep_pos + 1;
         });
-#if 0
-        // parse column 0
-        bar_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
-        bar_cnt += (bar_pos >= 0);
-        bar_pos = std::max(bar_pos, 0l);
-        auto col0 = read_int(partition_start_ + i, bar_pos);
-        (*std::get<0>(dest))[dest_index] = col0;
-        i += bar_pos + 1;
-        // parse column 1
-        bar_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
-        bar_cnt += (bar_pos >= 0);
-        bar_pos = std::max(bar_pos, 0l);
-        auto col1 = read_int(partition_start_ + i, bar_pos);
-
-        cout << "col0: " << col0 << " col1: " << col1 << std::endl;
-
-        // TODO
-#endif
 
         auto newline_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
         i += newline_pos + 1;
         std::cout << std::endl;
 
-/* TODO
-        if (bar_cnt != column_count - 1) {// column_count - 1) {
-            std::cerr << "invalid line at char ..." << std::endl;
+        if (sep_cnt != column_count) {
+            std::cerr << "invalid line at byte " << line_start << std::endl;
             return;
         }
-*/
+
         dest_index += thread_count_;
 
       //  if (i > 300) break;
@@ -618,7 +522,6 @@ std::vector<worker<TupleType>> workers;
 
   //  const auto partition_size = size/num_threads;
 
-    results.resize(num_threads, 0);
     std::thread threads[num_threads];
 
     size_t remaining = size;
@@ -631,7 +534,6 @@ std::vector<worker<TupleType>> workers;
     for (unsigned i = 0; i < num_threads; ++i) {
         size_t size_hint = std::min(remaining, partition_size);
         remaining -= size_hint;
-        int64_t* result = &results[i];
 
         // worker(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num)
         auto& worker = workers.emplace_back(data_start, partion_start, size_hint, num_threads, i);
@@ -658,11 +560,6 @@ std::vector<worker<TupleType>> workers;
     // cleanup
     munmap(data, mapping_size);
     close(handle);
-
-
-    // aggregate results of all workers
-    int64_t price_sum = 0;//std::accumulate(results.begin(), results.end(), 0ul);
-
 
 }
 
