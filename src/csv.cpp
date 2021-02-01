@@ -20,6 +20,8 @@
 
 using namespace std;
 
+static constexpr bool serialize = false;
+
 int64_t to_int(std::string_view s) {
     int64_t result = 0;
     for (auto c : s) result = result * 10 + (c - '0');
@@ -326,13 +328,15 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
         const size_t max_offset = partition_start_hint_ - data_start_;
         while (offset < partition_size_hint_) {
             if (offset > max_offset) {
-                return;
+                // partition to small
+                assert(false);
             } else if (*(partition_start_hint_ - offset) == '\n') {
                 break;
             } else {
                 offset++;
             }
         }
+        --offset; // skip over the newline character
         partition_start_ = partition_start_hint_ - offset;
         partition_size_ = partition_size_hint_ + offset;
     } else {
@@ -506,7 +510,7 @@ cout << "estimated line width: " << est_line_width << std::endl;
     const auto est_record_count = size/est_line_width;
 cout << "estimated line count: " << est_record_count << std::endl;
 
-    const auto num_threads = 1;// TODO std::thread::hardware_concurrency();
+    const auto num_threads = 2;// TODO std::thread::hardware_concurrency();
 
 
 std::vector<int32_t> dest1;
@@ -527,31 +531,39 @@ std::vector<worker<TupleType>> workers;
     size_t remaining = size;
     size_t partition_size = size / num_threads;
     const char* data_start = static_cast<const char*>(data);
-    const char* partion_start = data_start;
+    const char* partition_start = data_start;
 
 
 
     for (unsigned i = 0; i < num_threads; ++i) {
         size_t size_hint = std::min(remaining, partition_size);
         remaining -= size_hint;
-
+printf("outer partition_start: %p\n", partition_start);
         // worker(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num)
-        auto& worker = workers.emplace_back(data_start, partion_start, size_hint, num_threads, i);
+        auto& worker = workers.emplace_back(data_start, partition_start, size_hint, num_threads, i);
+printf("outer  worker.partition_start_hint_: %p\n", worker.partition_start_hint_);
+
         // initial_run(dest_tuple_type& dest, size_t dest_begin) {
 
     //    threads[i] = std::thread(&worker<TupleType>::initial_run, &worker, std::ref(dest_tuple), 0ull);
-        threads[i] = std::thread([&]() {
-            worker.initial_run(std::ref(dest_tuple), 0ull);
-        });
+        threads[i] = std::thread([&](unsigned thread_num) {
+            auto& my_worker = workers[thread_num];
+            my_worker.initial_run(std::ref(dest_tuple), 0ull);
+        }, i);
+        if constexpr (serialize) {
+            threads[i].join();
+        }
 
         //void sum_extendedprice(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num, std::vector<uint64_t>& dst) 
-//worker_thread<int32_t>(data_start, partion_start, size_hint, i, std::ref(dest_tuple));
-     //   threads[i] = std::thread(&worker_thread<decltype(dest_tuple)>, data_start, partion_start, size_hint, i, std::ref(dest_tuple));// std::ref(dest1));
+//worker_thread<int32_t>(data_start, partition_start, size_hint, i, std::ref(dest_tuple));
+     //   threads[i] = std::thread(&worker_thread<decltype(dest_tuple)>, data_start, partition_start, size_hint, i, std::ref(dest_tuple));// std::ref(dest1));
 
-        partion_start += size_hint;
+        partition_start += size_hint;
     }
-    for (size_t i = 0; i < num_threads; ++i) {
-        threads[i].join();
+    if constexpr (!serialize) {
+        for (size_t i = 0; i < num_threads; ++i) {
+            threads[i].join();
+        }
     }
 
 
