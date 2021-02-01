@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <chrono>
 #include <tuple>
@@ -316,9 +317,7 @@ struct worker {
         , partition_size_hint_(partition_size_hint)
         , thread_count_(thread_count)
         , thread_num_(thread_num)
-    {
-        printf("ctor partition_start_hint_: %p\n", partition_start_hint_);
-    }
+    {}
 
     void initial_run(dest_tuple_type& dest, size_t dest_begin);
 
@@ -329,8 +328,8 @@ struct worker {
 template<typename TupleType>
 void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
     printf("=== in worker #%u ===\n", thread_num_);
-//if (thread_num_ > 0) return;
-printf("initial_run partition_start_hint_: %p\n", partition_start_hint_);
+    //printf("initial_run partition_start_hint_: %p\n", partition_start_hint_);
+    fflush(stdout);
 
     // correct partition size
     if (thread_num_ > 0) {
@@ -354,9 +353,7 @@ printf("initial_run partition_start_hint_: %p\n", partition_start_hint_);
         partition_start_ = partition_start_hint_;
         partition_size_ = partition_size_hint_;
     }
-printf("initial_run partition_start_hint_: %p partition_start_: %p\n", partition_start_hint_, partition_start_);
-    //printf("new partition begin: %.*s\n", 100, partition_start_);
-//return;
+
     run(dest, dest_begin);
 }
 
@@ -383,34 +380,16 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     size_t dest_index = dest_begin + thread_num_;
     size_t i = 0;
 
-    std::cout << "dest_limit: " << dest_limit << std::endl;
-printf("partition_start: %p\n", partition_start_);
+    //std::cout << "dest_limit: " << dest_limit << std::endl;
     while (i < partition_size_ &&  dest_index < dest_limit) {
+        const auto line_start = i;
         ssize_t sep_pos;
         unsigned sep_cnt = 0;
-
-/*
-        tuple_foreach([&](auto& element) {
-            printf("tuple element\n");
-        }, dest);*/
-/*
-        tuple_for_index<TupleType>::invoke([&](const auto tuple_index) {
-        //    using element_type = typename std::tuple_element<N, TupleType>::type;
-            printf("tuple index: %lu\n", tuple_index);
-        });*/
-        /*
-        tuple_foreach_type([&](auto& column_type_inst) {
-            using element_type = typename decltype(column_type_inst)::type;
-        }, todo);*/
-
-        const auto line_start = i;
 
         tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
             using column_desc_type = decltype(column_desc_inst);
             using element_type = typename decltype(column_desc_inst)::type;
             constexpr auto index = column_desc_type::index;
-            //printf("\ntuple index: %u\n", index);
-       //     printf("\nis last: %d\n", column_desc_type::is_last);
 
             if constexpr (column_desc_type::is_last) {
                 sep_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
@@ -419,7 +398,7 @@ printf("partition_start: %p\n", partition_start_);
             }
             sep_cnt += (sep_pos >= 0);
             sep_pos = std::max(sep_pos, 0l);
-//if (index == 0) printf("SEP_POS: %u FIRST: %.*s\n", sep_pos, 15, partition_start_ + i);
+
             auto& value = (*std::get<index>(dest))[dest_index];
             bool valid = input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
 
@@ -449,29 +428,23 @@ printf("partition_start: %p\n", partition_start_);
 
 
 
-int32_t parse_int(const char* begin);
 
 unsigned sample_line_width(const char* data_start, size_t data_size) {
     constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
 
     ssize_t newline_pos;
-    size_t acc = 0, count = 0;//, last_newline = 0;
+    size_t acc = 0, count = 0;
     for (size_t i = 0; i < data_size && count < 10; i += newline_pos + 1) {
-//cout << "search start: " << i << std::endl;
         newline_pos = find_first(newline_pattern, data_start + i, data_size - i);
-
-//if (i > 0) std::cout << "char: " << (int) data_start[i] << std::endl;
 
         if (i == 0) continue; // skip first line
         else if (newline_pos < 0) break;
-//cout << "line width: " << newline_pos << std::endl;
+
         acc += newline_pos;
         ++count;
-    //    last_newline = newline_pos;
     }
 
     std::cout << "count: " << count << " acc: " << acc << std::endl;
- //   while (i < partition_size_hint &&  dest_index < dest_limit) {
 
     return (count > 0) ? acc/count : data_size;
 }
@@ -512,32 +485,23 @@ void parse(const std::string& file) {
     const char* input = reinterpret_cast<const char*>(data);
 //https://stackoverflow.com/questions/47604431/why-we-can-mmap-to-a-file-but-exceed-the-file-size
 
-/*
-    const uint8_t* input = nullptr;
-    size_t size = 0;
-*/
-
-
     const auto est_line_width = sample_line_width(input, size);
-cout << "estimated line width: " << est_line_width << std::endl;
+    cout << "estimated line width: " << est_line_width << std::endl;
     const auto est_record_count = size/est_line_width;
-cout << "estimated line count: " << est_record_count << std::endl;
+    cout << "estimated line count: " << est_record_count << std::endl;
 
     const auto num_threads = 2;// TODO std::thread::hardware_concurrency();
 
 
-std::vector<int32_t> dest1;
-dest1.resize(est_record_count);
+    std::vector<int32_t> dest1;
+    dest1.resize(est_record_count);
 
 
-///auto dest_tuple = std::make_tuple(&dest1);
 
 
-auto dest_tuple = create_vectors<TupleType>(est_record_count);
+    auto dest_tuple = create_vectors<TupleType>(est_record_count);
+    std::vector<worker<TupleType>> workers;
 
-std::vector<worker<TupleType>> workers;
-
-  //  const auto partition_size = size/num_threads;
 
     std::thread threads[num_threads];
 
@@ -546,19 +510,16 @@ std::vector<worker<TupleType>> workers;
     const char* data_start = static_cast<const char*>(data);
     const char* partition_start = data_start;
 
-
-
+    // create workers
     for (unsigned i = 0; i < num_threads; ++i) {
         size_t size_hint = std::min(remaining, partition_size);
         remaining -= size_hint;
-printf("outer partition_start: %p\n", partition_start);
         // worker(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num)
-        auto& worker = workers.emplace_back(data_start, partition_start, size_hint, num_threads, i);
-printf("outer  worker.partition_start_hint_: %p\n", worker.partition_start_hint_);
-
-        // initial_run(dest_tuple_type& dest, size_t dest_begin) {
-
-    //    threads[i] = std::thread(&worker<TupleType>::initial_run, &worker, std::ref(dest_tuple), 0ull);
+        workers.emplace_back(data_start, partition_start, size_hint, num_threads, i);
+        partition_start += size_hint;
+    }
+    // launch workers
+    for (unsigned i = 0; i < num_threads; ++i) {
         threads[i] = std::thread([&](unsigned thread_num) {
             auto& my_worker = workers[thread_num];
             my_worker.initial_run(std::ref(dest_tuple), 0ull);
@@ -566,12 +527,6 @@ printf("outer  worker.partition_start_hint_: %p\n", worker.partition_start_hint_
         if constexpr (serialize) {
             threads[i].join();
         }
-
-        //void sum_extendedprice(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num, std::vector<uint64_t>& dst) 
-//worker_thread<int32_t>(data_start, partition_start, size_hint, i, std::ref(dest_tuple));
-     //   threads[i] = std::thread(&worker_thread<decltype(dest_tuple)>, data_start, partition_start, size_hint, i, std::ref(dest_tuple));// std::ref(dest1));
-
-        partition_start += size_hint;
     }
     if constexpr (!serialize) {
         for (size_t i = 0; i < num_threads; ++i) {
@@ -579,13 +534,9 @@ printf("outer  worker.partition_start_hint_: %p\n", worker.partition_start_hint_
         }
     }
 
-
-
-
     // cleanup
     munmap(data, mapping_size);
     close(handle);
-
 }
 
 
@@ -617,19 +568,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-/*
-    auto t = std::make_tuple(1, 2u, true);
-    tuple_foreach([&](auto e) {
-        std::cout << e << std::endl;
-    }, t);
-*/
-/*
-auto t = std::make_tuple(1, 2u, true);
-using tuple_type = decltype(t);
-tuple_for_index<tuple_type>::invoke([&](auto index) {
-    printf("index: %lu\n", index);
-});
-*/
     using lineitem_tuple = std::tuple<
         uint32_t, // l_orderkey
         uint32_t,
