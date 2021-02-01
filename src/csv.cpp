@@ -50,6 +50,7 @@ inline uint64_t get_matches(uint64_t pattern, uint64_t block) {
 // len : remaining length of the partition
 // return : the position of the first matching character or -1 otherwise
 ssize_t find_first(uint64_t pattern, const char* begin, size_t len) {
+    //printf("find_first begin: %p length: %lu\n", begin, len);
     assert(len > 0);
     // we may assume that reads from 'begin' within [len, len + 8) yield zero
     for (size_t i = 0; i < len; i += 8) {
@@ -77,6 +78,7 @@ int32_t read_int(const char* begin, size_t len) {
     return result;
 }
 
+#if 0
 // begin : points somewhere into the partition
 // len : remaining length of the partition
 // return : 64-bit integer representation of the provided numeric
@@ -93,8 +95,12 @@ int64_t read_numeric(const char* begin, size_t len) {
     int64_t numeric = to_int(part1) * 100 + to_int(part2); // TODO
     return numeric;
 }
+#endif
 
+template<unsigned Precision, unsigned Scale>
 struct numeric {
+    static constexpr auto precision = Precision;
+    static constexpr auto scale = Scale;
     uint64_t raw;
 };
 
@@ -164,9 +170,9 @@ struct input_parser<int64_t> {
     }
 };
 
-template<>
-struct input_parser<numeric> {
-    static bool parse(const char* begin, size_t len, numeric& result) {
+template<unsigned Precision, unsigned Scale>
+struct input_parser<numeric<Precision, Scale>> {
+    static bool parse(const char* begin, size_t len, numeric<Precision, Scale>& result) {
         /*
 result.raw = 0;
 return true;*/
@@ -198,7 +204,7 @@ return true;*/
             auto part1 = numeric_view.substr(0, dot_position);
             auto part2 = numeric_view.substr(dot_position + 1);
      //       cout << "\nparse numeric: " << part1 << " . " << part2 << std::endl;
-            int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO
+            int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO scale
             result.raw = numeric_raw;
         }
         return true;
@@ -232,7 +238,7 @@ struct map_tuple<Mapper, std::tuple<Ts...>> {
 
 template<class T>
 struct to_unique_ptr_to_vector {
-    using type = std::unique_ptr<std::vector<T>>;// std::vector<T>*;
+    using type = std::unique_ptr<std::vector<T>>;
 };
 
 
@@ -310,7 +316,9 @@ struct worker {
         , partition_size_hint_(partition_size_hint)
         , thread_count_(thread_count)
         , thread_num_(thread_num)
-    {}
+    {
+        printf("ctor partition_start_hint_: %p\n", partition_start_hint_);
+    }
 
     void initial_run(dest_tuple_type& dest, size_t dest_begin);
 
@@ -320,7 +328,9 @@ struct worker {
 
 template<typename TupleType>
 void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
-    printf("in worker\n");
+    printf("=== in worker #%u ===\n", thread_num_);
+//if (thread_num_ > 0) return;
+printf("initial_run partition_start_hint_: %p\n", partition_start_hint_);
 
     // correct partition size
     if (thread_num_ > 0) {
@@ -344,7 +354,9 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
         partition_start_ = partition_start_hint_;
         partition_size_ = partition_size_hint_;
     }
-
+printf("initial_run partition_start_hint_: %p partition_start_: %p\n", partition_start_hint_, partition_start_);
+    //printf("new partition begin: %.*s\n", 100, partition_start_);
+//return;
     run(dest, dest_begin);
 }
 
@@ -354,7 +366,8 @@ ostream& operator<<(ostream& os, const std::array<char, N>& arr) {
     return os;
 }
 
-ostream& operator<<(ostream& os, const numeric& value) {
+template<unsigned Precision, unsigned Scale>
+ostream& operator<<(ostream& os, const numeric<Precision, Scale>& value) {
     os << value.raw; // TODO
     return os;
 }
@@ -371,7 +384,7 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     size_t i = 0;
 
     std::cout << "dest_limit: " << dest_limit << std::endl;
-
+printf("partition_start: %p\n", partition_start_);
     while (i < partition_size_ &&  dest_index < dest_limit) {
         ssize_t sep_pos;
         unsigned sep_cnt = 0;
@@ -406,7 +419,7 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             }
             sep_cnt += (sep_pos >= 0);
             sep_pos = std::max(sep_pos, 0l);
-
+//if (index == 0) printf("SEP_POS: %u FIRST: %.*s\n", sep_pos, 15, partition_start_ + i);
             auto& value = (*std::get<index>(dest))[dest_index];
             bool valid = input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
 
@@ -497,7 +510,7 @@ void parse(const std::string& file) {
     //auto data = mmap(nullptr, size, PROT_READ, MAP_SHARED, handle, 0);
     void* data = mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, handle, 0);
     const char* input = reinterpret_cast<const char*>(data);
-
+//https://stackoverflow.com/questions/47604431/why-we-can-mmap-to-a-file-but-exceed-the-file-size
 
 /*
     const uint8_t* input = nullptr;
@@ -610,21 +623,22 @@ int main(int argc, char* argv[]) {
         std::cout << e << std::endl;
     }, t);
 */
+/*
 auto t = std::make_tuple(1, 2u, true);
 using tuple_type = decltype(t);
 tuple_for_index<tuple_type>::invoke([&](auto index) {
     printf("index: %lu\n", index);
 });
-
+*/
     using lineitem_tuple = std::tuple<
         uint32_t, // l_orderkey
         uint32_t,
         uint32_t,
         uint32_t,
-        numeric, // l_quantity
-        numeric,
-        numeric,
-        numeric,
+        numeric<15, 2>, // l_quantity
+        numeric<15, 2>,
+        numeric<15, 2>,
+        numeric<15, 2>,
         char, // l_returnflag
         char,
         uint32_t, // l_shipdate
