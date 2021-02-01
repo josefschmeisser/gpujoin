@@ -14,6 +14,7 @@
 #include <iostream>
 #include <functional>
 
+#include <bits/stdint-uintn.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -21,7 +22,7 @@
 
 using namespace std;
 
-static constexpr bool serialize = false;
+static constexpr bool serialize = true;
 
 int64_t to_int(std::string_view s) {
     int64_t result = 0;
@@ -105,6 +106,10 @@ struct numeric {
     uint64_t raw;
 };
 
+struct date {
+    uint32_t raw;
+};
+
 template<typename T>
 struct input_parser;
 /*
@@ -135,7 +140,7 @@ struct input_parser<int> {
         result = 0;
         for (size_t i = 0; i < len; ++i) {
             char c = begin[i];
-            invalid |= (c >= '0' && c <= '9');
+            invalid |= (c < '0' || c > '9');
             result = result * 10 + (begin[i] - '0');
         }
         return !invalid;
@@ -149,7 +154,7 @@ struct input_parser<uint32_t> {
         result = 0;
         for (size_t i = 0; i < len; ++i) {
             char c = begin[i];
-            invalid |= (c >= '0' && c <= '9');
+            invalid |= (c < '0' || c > '9');
             result = result * 10 + (begin[i] - '0');
         }
         return !invalid;
@@ -164,7 +169,7 @@ struct input_parser<int64_t> {
         result = 0;
         for (size_t i = 0; i < len; ++i) {
             char c = begin[i];
-            invalid |= (c >= '0' && c <= '9');
+            invalid |= (c < '0' || c > '9');
             result = result * 10 + (begin[i] - '0');
         }
         return !invalid;
@@ -209,6 +214,53 @@ return true;*/
             result.raw = numeric_raw;
         }
         return true;
+    }
+};
+
+template<>
+struct input_parser<date> {
+    // source: https://stason.org/TULARC/society/calendars/2-15-1-Is-there-a-formula-for-calculating-the-Julian-day-nu.html
+    static constexpr uint32_t to_julian_day(uint32_t day, uint32_t month, uint32_t year) {
+        uint32_t a = (14 - month) / 12;
+        uint32_t y = year + 4800 - a;
+        uint32_t m = month + 12 * a - 3;
+        return day + (153 * m + 2) / 5 + y * 365 + y / 4 - y / 100 + y / 400 - 32045;
+    }
+    
+    static uint32_t parse(const char* begin, size_t len, date& result) {
+        if (len != 10) return false;
+/*
+        uint32_t day, month, year;
+        int parsed = sscanf(begin, "%4d-%2d-%2d", &year, &month, &day);
+        bool valid = parsed == 3;
+        result.raw = to_julian_day(day, month, year);
+        return valid;*/
+
+        bool valid = true;
+        uint32_t day = 0, month = 0, year = 0;
+        for (unsigned i = 0; i < 4; ++i) {
+            char c = begin[i];
+            valid &= (c >= '0' && c <= '9');
+            year = year * 10 + (begin[i] - '0');
+        }
+        valid &= begin[4] == '-';
+        // the month is expected to be zero-padded
+        for (unsigned i = 5; i < 7; ++i) {
+            char c = begin[i];
+            valid &= (c >= '0' && c <= '9');
+            month = month * 10 + (begin[i] - '0');
+        }
+        valid &= begin[7] == '-';
+        // the day is expected to be zero-padded
+        for (unsigned i = 8; i < 10; ++i) {
+            char c = begin[i];
+            valid &= (c >= '0' && c <= '9');
+            day = day * 10 + (begin[i] - '0');
+        }
+        result.raw = to_julian_day(day, month, year);
+        //std::cout << "\n" << year << "-" << month << "-" << day << " valid: " << valid << std::endl;
+
+        return valid;
     }
 };
 
@@ -363,6 +415,11 @@ ostream& operator<<(ostream& os, const std::array<char, N>& arr) {
     return os;
 }
 
+ostream& operator<<(ostream& os, const date& value) {
+    os << value.raw; // TODO
+    return os;
+}
+
 template<unsigned Precision, unsigned Scale>
 ostream& operator<<(ostream& os, const numeric<Precision, Scale>& value) {
     os << value.raw; // TODO
@@ -401,6 +458,7 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
 
             auto& value = (*std::get<index>(dest))[dest_index];
             bool valid = input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
+            // TODO
 
             std::cout << "|" << value;
 
@@ -579,7 +637,7 @@ int main(int argc, char* argv[]) {
         numeric<15, 2>,
         char, // l_returnflag
         char,
-        uint32_t, // l_shipdate
+        date, // l_shipdate
         uint32_t,
         uint32_t,
         std::array<char, 25>, // l_shipinstruct
