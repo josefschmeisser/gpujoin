@@ -276,7 +276,7 @@ template<size_t N>
 struct input_parser<std::array<char, N>> {
     static bool parse(const char* begin, size_t len, std::array<char, N>& result) {
         std::memcpy(result.data(), begin, std::min(N, len));
-        return (N == len);
+        return (N >= len);
     }
 };
 
@@ -440,8 +440,9 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     //std::cout << "dest_limit: " << dest_limit << std::endl;
     while (i < partition_size_ &&  dest_index < dest_limit) {
         const auto line_start = i;
-        ssize_t sep_pos;
+        ssize_t sep_pos, newline_pos;
         unsigned sep_cnt = 0;
+        bool line_valid = true;
 
         tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
             using column_desc_type = decltype(column_desc_inst);
@@ -450,33 +451,34 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
 
             if constexpr (column_desc_type::is_last) {
                 sep_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
+                sep_pos = (sep_pos < 0) ? partition_size_ : sep_pos;
+                newline_pos = sep_pos;
             } else {
                 sep_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
             }
             sep_cnt += (sep_pos >= 0);
             sep_pos = std::max(sep_pos, 0l);
+            //printf("\nvalue: %.*s\n", sep_pos, partition_start_ + i);
 
             auto& value = (*std::get<index>(dest))[dest_index];
-            bool valid = input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
-            // TODO
+            line_valid &= input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
+            if (!line_valid) {
+                printf("\ncolumn %u invalid\n", index);
+            }
 
             std::cout << "|" << value;
 
             i += sep_pos + 1;
         });
 
-        auto newline_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
-        i += newline_pos + 1;
         std::cout << std::endl;
-
-        if (sep_cnt != column_count) {
+        //printf("\n--- line done - next line start: %u ---\n", i);
+        if (sep_cnt != column_count || !line_valid) {
             std::cerr << "invalid line at byte " << line_start << std::endl;
             return;
         }
 
         dest_index += thread_count_;
-
-      //  if (i > 300) break;
     }
 }
 
@@ -542,6 +544,12 @@ void parse(const std::string& file) {
     void* data = mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, handle, 0);
     const char* input = reinterpret_cast<const char*>(data);
 //https://stackoverflow.com/questions/47604431/why-we-can-mmap-to-a-file-but-exceed-the-file-size
+
+/*
+input[size - 1] = 'a';
+if (input[size - 1] != '\n') {
+    std::cout << "no newline" << std::endl;
+}*/
 
     const auto est_line_width = sample_line_width(input, size);
     cout << "estimated line width: " << est_line_width << std::endl;
@@ -638,8 +646,8 @@ int main(int argc, char* argv[]) {
         char, // l_returnflag
         char,
         date, // l_shipdate
-        uint32_t,
-        uint32_t,
+        date,
+        date,
         std::array<char, 25>, // l_shipinstruct
         std::array<char, 10>, // l_shipmode
         std::array<char, 44>  // l_comment
