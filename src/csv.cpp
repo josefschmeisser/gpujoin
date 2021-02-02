@@ -53,7 +53,7 @@ inline uint64_t get_matches(uint64_t pattern, uint64_t block) {
 // return : the position of the first matching character or -1 otherwise
 ssize_t find_first(uint64_t pattern, const char* begin, size_t len) {
     //printf("find_first begin: %p length: %lu\n", begin, len);
-    //assert(len > 0);
+
     // we may assume that reads from 'begin' within [len, len + 8) yield zero
     for (size_t i = 0; i < len; i += 8) {
         uint64_t block = *reinterpret_cast<const uint64_t*>(begin + i);
@@ -80,25 +80,6 @@ int32_t read_int(const char* begin, size_t len) {
     return result;
 }
 
-#if 0
-// begin : points somewhere into the partition
-// len : remaining length of the partition
-// return : 64-bit integer representation of the provided numeric
-int64_t read_numeric(const char* begin, size_t len) {
-    constexpr uint64_t period_pattern = 0x2E2E2E2E2E2E2E2Eull;
-    std::string_view numeric_view(begin, len);
-    ssize_t dot_position = find_first(period_pattern, begin, len);
-    if (dot_position < 1) {
-        std::cerr << "invalid numeric literal" << std::endl;
-        return 0;
-    }
-    auto part1 = numeric_view.substr(0, dot_position);
-    auto part2 = numeric_view.substr(dot_position + 1);
-    int64_t numeric = to_int(part1) * 100 + to_int(part2); // TODO
-    return numeric;
-}
-#endif
-
 template<unsigned Precision, unsigned Scale>
 struct numeric {
     static constexpr auto precision = Precision;
@@ -112,26 +93,7 @@ struct date {
 
 template<typename T>
 struct input_parser;
-/*
-struct lineitem_table_t {
-    std::vector<uint32_t> l_orderkey;
-    std::vector<uint32_t> l_partkey;
-    std::vector<uint32_t> l_suppkey;
-    std::vector<uint32_t> l_linenumber;
-    std::vector<int64_t> l_quantity;
-    std::vector<int64_t> l_extendedprice;
-    std::vector<int64_t> l_discount;
-    std::vector<int64_t> l_tax;
-    std::vector<char> l_returnflag;
-    std::vector<char> l_linestatus;
-    std::vector<uint32_t> l_shipdate;
-    std::vector<uint32_t> l_commitdate;
-    std::vector<uint32_t> l_receiptdate;
-    std::vector<std::array<char, 25>> l_shipinstruct;
-    std::vector<std::array<char, 10>> l_shipmode;
-    std::vector<std::array<char, 44>> l_comment;
-};
-*/
+
 template<>
 struct input_parser<int> {
     static bool parse(const char* begin, size_t len, int& result) {
@@ -179,29 +141,13 @@ struct input_parser<int64_t> {
 template<unsigned Precision, unsigned Scale>
 struct input_parser<numeric<Precision, Scale>> {
     static bool parse(const char* begin, size_t len, numeric<Precision, Scale>& result) {
-        /*
-result.raw = 0;
-return true;*/
-//printf("parse numeric() len: %lu\n", len);
         constexpr uint64_t period_pattern = 0x2E2E2E2E2E2E2E2Eull;
         std::string_view numeric_view(begin, len);
         ssize_t dot_position = find_first(period_pattern, begin, len);
-      //  std::cout << "dot_position: " << dot_position << std::endl;
 
-/*
-        if (dot_position < 1) {
-            std::cerr << "invalid numeric literal" << std::endl;
-            return false;
-        }
-        auto part1 = numeric_view.substr(0, dot_position);
-        auto part2 = numeric_view.substr(dot_position + 1);
-        int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO
-        result.raw = numeric_raw;
-        return true;*/
         if (dot_position < 0) {
             // no dot
             int64_t numeric_raw = to_int(numeric_view.substr(0, len));
-      //      cout << "\nparse numeric without dot:  " << numeric_raw << std::endl;
             result.raw = numeric_raw;
         } else if (dot_position == 0) {
             // TODO
@@ -209,7 +155,6 @@ return true;*/
         } else {
             auto part1 = numeric_view.substr(0, dot_position);
             auto part2 = numeric_view.substr(dot_position + 1);
-     //       cout << "\nparse numeric: " << part1 << " . " << part2 << std::endl;
             int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO scale
             result.raw = numeric_raw;
         }
@@ -229,12 +174,6 @@ struct input_parser<date> {
     
     static uint32_t parse(const char* begin, size_t len, date& result) {
         if (len != 10) return false;
-/*
-        uint32_t day, month, year;
-        int parsed = sscanf(begin, "%4d-%2d-%2d", &year, &month, &day);
-        bool valid = parsed == 3;
-        result.raw = to_julian_day(day, month, year);
-        return valid;*/
 
         bool valid = true;
         uint32_t day = 0, month = 0, year = 0;
@@ -348,8 +287,6 @@ struct tuple_for_index {
 };
 
 
-
-//template<typename ColumnTypes, bool first_partition = false>
 template<typename TupleType>
 struct worker {
     using dest_tuple_type = typename map_tuple<to_unique_ptr_to_vector, TupleType>::mapped_type;
@@ -374,7 +311,6 @@ struct worker {
     void initial_run(dest_tuple_type& dest, size_t dest_begin);
 
     void run(dest_tuple_type& dest, size_t dest_begin);
-
 };
 
 template<typename TupleType>
@@ -430,14 +366,12 @@ template<typename TupleType>
 void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t dest_begin) {
     constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
     constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
-
     constexpr auto column_count = tuple_size<TupleType>::value;
 
     const auto dest_limit = std::get<0>(dest)->size();
     size_t dest_index = dest_begin + thread_num_;
     size_t i = 0;
 
-    //std::cout << "dest_limit: " << dest_limit << std::endl;
     while (i < partition_size_ && dest_index < dest_limit) {
         const auto line_start = i;
         ssize_t sep_pos, newline_pos;
@@ -451,7 +385,6 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
 
             if constexpr (column_desc_type::is_last) {
                 sep_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
-           //     sep_pos = (sep_pos < 0) ? partition_size_ : sep_pos;
                 sep_pos = std::max(sep_pos, 0l);
                 newline_pos = sep_pos;
             } else {
@@ -462,21 +395,20 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             //printf("\nvalue: %.*s\n", sep_pos, partition_start_ + i);
 
             auto& value = (*std::get<index>(dest))[dest_index];
-            line_valid &= input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
+            line_valid &= input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);/*
             if (!line_valid) {
                 const auto remaining = static_cast<long>(partition_size_) - i;
                 printf("\nworker #%u column %u invalid; remaining: %ld\n", thread_num_, index, remaining);
                 printf("worker #%u value: %.*s\n", thread_num_, sep_pos, partition_start_ + i);
                 printf("worker #%u line: %.*s\n", thread_num_, 120, partition_start_ + line_start);
-            }
+            }*/
 
-//            std::cout << "|" << value;
+            //std::cout << "|" << value;
 
             i += sep_pos + 1;
         });
 
-//        std::cout << std::endl;
-        //printf("\n--- line done - next line start: %u ---\n", i);
+        //std::cout << std::endl;
         if (i < partition_size_) {
             // partition exhausted
             printf("worker #%u partition exhausted\n", thread_num_);
@@ -491,12 +423,6 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
         dest_index += thread_count_;
     }
 }
-
-
-
-
-
-
 
 
 unsigned sample_line_width(const char* data_start, size_t data_size) {
@@ -521,7 +447,6 @@ unsigned sample_line_width(const char* data_start, size_t data_size) {
 
 void rebalance() {
 }
-
 
 
 template<typename... Ts>
@@ -559,18 +484,14 @@ void parse(const std::string& file) {
     const auto est_record_count = size/est_line_width;
     cout << "estimated line count: " << est_record_count << std::endl;
 
-    const auto num_threads = 8;// TODO std::thread::hardware_concurrency();
-
+    const auto num_threads = 8; // TODO std::thread::hardware_concurrency();
 
     std::vector<int32_t> dest1;
     dest1.resize(est_record_count);
 
 
-
-
     auto dest_tuple = create_vectors<TupleType>(est_record_count);
     std::vector<worker<TupleType>> workers;
-
 
     std::thread threads[num_threads];
 
