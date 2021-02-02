@@ -22,7 +22,7 @@
 
 using namespace std;
 
-static constexpr bool serialize = true;
+static constexpr bool serialize = false;
 
 int64_t to_int(std::string_view s) {
     int64_t result = 0;
@@ -53,7 +53,7 @@ inline uint64_t get_matches(uint64_t pattern, uint64_t block) {
 // return : the position of the first matching character or -1 otherwise
 ssize_t find_first(uint64_t pattern, const char* begin, size_t len) {
     //printf("find_first begin: %p length: %lu\n", begin, len);
-    assert(len > 0);
+    //assert(len > 0);
     // we may assume that reads from 'begin' within [len, len + 8) yield zero
     for (size_t i = 0; i < len; i += 8) {
         uint64_t block = *reinterpret_cast<const uint64_t*>(begin + i);
@@ -438,7 +438,7 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     size_t i = 0;
 
     //std::cout << "dest_limit: " << dest_limit << std::endl;
-    while (i < partition_size_ &&  dest_index < dest_limit) {
+    while (i < partition_size_ && dest_index < dest_limit) {
         const auto line_start = i;
         ssize_t sep_pos, newline_pos;
         unsigned sep_cnt = 0;
@@ -451,7 +451,8 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
 
             if constexpr (column_desc_type::is_last) {
                 sep_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
-                sep_pos = (sep_pos < 0) ? partition_size_ : sep_pos;
+           //     sep_pos = (sep_pos < 0) ? partition_size_ : sep_pos;
+                sep_pos = std::max(sep_pos, 0l);
                 newline_pos = sep_pos;
             } else {
                 sep_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
@@ -463,16 +464,25 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             auto& value = (*std::get<index>(dest))[dest_index];
             line_valid &= input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
             if (!line_valid) {
-                printf("\ncolumn %u invalid\n", index);
+                const auto remaining = static_cast<long>(partition_size_) - i;
+                printf("\nworker #%u column %u invalid; remaining: %ld\n", thread_num_, index, remaining);
+                printf("worker #%u value: %.*s\n", thread_num_, sep_pos, partition_start_ + i);
+                printf("worker #%u line: %.*s\n", thread_num_, 120, partition_start_ + line_start);
             }
 
-            std::cout << "|" << value;
+//            std::cout << "|" << value;
 
             i += sep_pos + 1;
         });
 
-        std::cout << std::endl;
+//        std::cout << std::endl;
         //printf("\n--- line done - next line start: %u ---\n", i);
+        if (i < partition_size_) {
+            // partition exhausted
+            printf("worker #%u partition exhausted\n", thread_num_);
+            break;
+        }
+
         if (sep_cnt != column_count || !line_valid) {
             std::cerr << "invalid line at byte " << line_start << std::endl;
             return;
@@ -525,7 +535,7 @@ template<typename TupleType>
 auto create_vectors(size_t n) {
     using mapped_type = typename map_tuple<to_unique_ptr_to_vector, TupleType>::mapped_type;
     mapped_type new_tuple;
-    allocate_vectors(new_tuple, 10); // TODO
+    allocate_vectors(new_tuple, n); // TODO
     return new_tuple;
 }
 
@@ -540,23 +550,16 @@ void parse(const std::string& file) {
     // ensure that the mapping size is a multiple of 8 (bytes beyound the file's
     // region are set to zero)
     auto mapping_size = size + 8;  // padding for the last partition
-    //auto data = mmap(nullptr, size, PROT_READ, MAP_SHARED, handle, 0);
+    // https://stackoverflow.com/questions/47604431/why-we-can-mmap-to-a-file-but-exceed-the-file-size
     void* data = mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, handle, 0);
     const char* input = reinterpret_cast<const char*>(data);
-//https://stackoverflow.com/questions/47604431/why-we-can-mmap-to-a-file-but-exceed-the-file-size
-
-/*
-input[size - 1] = 'a';
-if (input[size - 1] != '\n') {
-    std::cout << "no newline" << std::endl;
-}*/
 
     const auto est_line_width = sample_line_width(input, size);
     cout << "estimated line width: " << est_line_width << std::endl;
     const auto est_record_count = size/est_line_width;
     cout << "estimated line count: " << est_record_count << std::endl;
 
-    const auto num_threads = 2;// TODO std::thread::hardware_concurrency();
+    const auto num_threads = 8;// TODO std::thread::hardware_concurrency();
 
 
     std::vector<int32_t> dest1;
@@ -574,15 +577,18 @@ if (input[size - 1] != '\n') {
     size_t remaining = size;
     size_t partition_size = size / num_threads;
     const char* data_start = static_cast<const char*>(data);
-    const char* partition_start = data_start;
+    const char* partition_start_hint = data_start;
+
+    printf("estimated partition size: %lu\n", partition_size);
 
     // create workers
     for (unsigned i = 0; i < num_threads; ++i) {
         size_t size_hint = std::min(remaining, partition_size);
         remaining -= size_hint;
-        // worker(const char* data_start, const char* partition_start, size_t partition_size_hint, unsigned thread_num)
-        workers.emplace_back(data_start, partition_start, size_hint, num_threads, i);
-        partition_start += size_hint;
+        printf("partition #%u partition_start_hint: %p size_hint: %lu\n", i, partition_start_hint, size_hint);
+        // worker(const char* data_start, const char* partition_start_hint, size_t partition_size_hint, unsigned thread_num)
+        workers.emplace_back(data_start, partition_start_hint, size_hint, num_threads, i);
+        partition_start_hint += size_hint;
     }
     // launch workers
     for (unsigned i = 0; i < num_threads; ++i) {
