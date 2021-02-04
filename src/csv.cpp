@@ -173,7 +173,20 @@ struct input_parser<date> {
         uint32_t m = month + 12 * a - 3;
         return day + (153 * m + 2) / 5 + y * 365 + y / 4 - y / 100 + y / 400 - 32045;
     }
-    
+
+    static constexpr void from_julian_day(uint32_t julian_day, uint32_t& year, uint32_t& month, uint32_t& day) {
+        uint32_t a = julian_day + 32044;
+        uint32_t b = (4*a+3)/146097;
+        uint32_t c = a-((146097*b)/4);
+        uint32_t d = (4*c+3)/1461;
+        uint32_t e = c-((1461*d)/4);
+        uint32_t m = (5*e+2)/153;
+
+        day = e - ((153*m+2)/5) + 1;
+        month = m + 3 - (12*(m/10));
+        year = (100*b) + d - 4800 + (m/10);
+    }
+
     static uint32_t parse(const char* begin, size_t len, date& result) {
         if (len != 10) return false;
 
@@ -358,13 +371,22 @@ ostream& operator<<(ostream& os, const std::array<char, N>& arr) {
 }
 
 ostream& operator<<(ostream& os, const date& value) {
-    os << value.raw; // TODO
+    uint32_t year, month, day;
+    input_parser<date>::from_julian_day(value.raw, year, month, day);
+    //os << year << "-" << month << "-" << day;
+    char output[16];
+    snprintf(output, sizeof(output), "%04d-%02d-%02d", year, month, day);
+    os << output;
     return os;
 }
 
 template<unsigned Precision, unsigned Scale>
 ostream& operator<<(ostream& os, const numeric<Precision, Scale>& value) {
-    os << value.raw; // TODO
+    auto r = std::div(value.raw, 100);
+    os << r.quot;
+    if (r.rem != 0) {
+        os << "." << r.rem;
+    }
     return os;
 }
 
