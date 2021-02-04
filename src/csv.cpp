@@ -1,5 +1,6 @@
 //#pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -13,8 +14,8 @@
 #include <string_view>
 #include <iostream>
 #include <functional>
+#include <queue>
 
-#include <bits/stdint-uintn.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -300,6 +301,10 @@ struct worker {
     const char* partition_start_;
     size_t partition_size_;
 
+    size_t last_index_;
+
+    size_t count_ = 0;
+
     worker(const char* data_start, const char* partition_start_hint, size_t partition_size_hint, unsigned thread_count, unsigned thread_num)
         : data_start_(data_start)
         , partition_start_hint_(partition_start_hint)
@@ -409,7 +414,7 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
         });
 
         //std::cout << std::endl;
-        if (i < partition_size_) {
+        if (i >= partition_size_) {
             // partition exhausted
             printf("worker #%u partition exhausted\n", thread_num_);
             break;
@@ -420,7 +425,11 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             return;
         }
 
+        last_index_ = dest_index;
         dest_index += thread_count_;
+        //printf("dest_index: %lu\n", dest_index);
+
+        ++count_;
     }
 }
 
@@ -445,7 +454,69 @@ unsigned sample_line_width(const char* data_start, size_t data_size) {
     return (count > 0) ? acc/count : data_size;
 }
 
-void rebalance() {
+
+template<class TupleType>
+void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>::dest_tuple_type& dest) {
+
+    std::vector<unsigned> state; // worker ids
+    for (auto& worker : workers) {
+        state.emplace_back(worker.thread_num_);
+    }
+    std::sort(state.begin(), state.end(), [&workers](const auto& a, const auto& b) {
+        return workers[a].last_index_ < workers[b].last_index_;
+    });
+
+    for (unsigned id : state) {
+        const auto& worker = workers[id];
+        printf("densify: worker #%u end: %lu\n", id, worker.last_index_);
+    }
+
+    printf("start densifying...\n");
+    const auto num_workers = workers.size();
+
+    unsigned min_worker = 0; // worker with the least written elements
+    size_t dense_upper_limit = workers[0].last_index_;
+    for (unsigned i = 1; i < num_workers; ++i) {
+        if (workers[i].last_index_ < dense_upper_limit) {
+            min_worker = i;
+            dense_upper_limit = workers[i].last_index_;
+        }
+    }
+
+    auto occupied = [&workers](size_t pos, unsigned worker_in_charge_id) {
+        return workers[worker_in_charge_id].last_index_ > pos;
+    };
+
+    // densify
+    unsigned original_worker_id = dense_upper_limit % num_workers;
+    size_t i;
+    for (i = dense_upper_limit + 1; !state.empty(); ++i) {/*
+        ++original_worker_id;
+        original_worker_id = (original_worker_id == num_workers) ? 0 : num_workers;
+assert(i % num_workers == original_worker_id);*/
+
+original_worker_id = i % num_workers;
+        if (occupied(i, original_worker_id)) continue;
+
+        auto& last = state.back();
+        auto& last_index = workers[last].last_index_;
+
+        // move elements from last_index to i
+        tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
+            using column_desc_type = decltype(column_desc_inst);
+            constexpr auto index = column_desc_type::index;
+
+            auto& vec = (*std::get<index>(dest));
+            vec[i] = vec[last_index];
+        });
+
+        last_index -= num_workers;
+        if (last_index < i) {
+            state.pop_back();
+        }
+    }
+
+    printf("i: %lu\n", i);
 }
 
 
@@ -474,7 +545,7 @@ void parse(const std::string& file) {
     cout << "size: " << size << std::endl;
     // ensure that the mapping size is a multiple of 8 (bytes beyound the file's
     // region are set to zero)
-    auto mapping_size = size + 8;  // padding for the last partition
+    auto mapping_size = size + 8; // padding for the last partition
     // https://stackoverflow.com/questions/47604431/why-we-can-mmap-to-a-file-but-exceed-the-file-size
     void* data = mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, handle, 0);
     const char* input = reinterpret_cast<const char*>(data);
@@ -484,7 +555,7 @@ void parse(const std::string& file) {
     const auto est_record_count = size/est_line_width;
     cout << "estimated line count: " << est_record_count << std::endl;
 
-    const auto num_threads = 8; // TODO std::thread::hardware_concurrency();
+    const auto num_threads = 4; // TODO std::thread::hardware_concurrency();
 
     std::vector<int32_t> dest1;
     dest1.resize(est_record_count);
@@ -526,6 +597,25 @@ void parse(const std::string& file) {
             threads[i].join();
         }
     }
+
+    size_t count = 0;
+    for (unsigned i = 0; i < num_threads; ++i) {
+        const auto& worker = workers[i];
+        printf("worker #%u end: %lu count: %lu\n", i, worker.last_index_, worker.count_);
+        count += worker.count_;
+    }
+    printf("final count: %lu\n", count);
+
+    // fill potential gaps in the result vectors
+    densify(workers, dest_tuple);
+
+    count = 0;
+    for (unsigned i = 0; i < num_threads; ++i) {
+        const auto& worker = workers[i];
+        printf("worker #%u end: %lu count: %lu\n", i, worker.last_index_, worker.count_);
+        count += worker.count_;
+    }
+    printf("final count: %lu\n", count);
 
     // cleanup
     munmap(data, mapping_size);
