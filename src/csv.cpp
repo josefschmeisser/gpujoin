@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <chrono>
 #include <tuple>
 #include <vector>
@@ -148,7 +149,7 @@ struct input_parser<numeric<Precision, Scale>> {
 
         if (dot_position < 0) {
             // no dot
-            int64_t numeric_raw = to_int(numeric_view.substr(0, len));
+            int64_t numeric_raw = 100*to_int(numeric_view.substr(0, len));
             result.raw = numeric_raw;
         } else if (dot_position == 0) {
             // TODO
