@@ -171,3 +171,5 @@ auto copy_relation(const part_table_t& src) {
 }
 
 void sort_relation(part_table_t& part);
+
+void sort_relation(lineitem_table_t& lineitem);

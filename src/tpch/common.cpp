@@ -266,3 +266,26 @@ void sort_relation(part_table_t& part) {
     auto permutation = compute_permutation(part.p_partkey, std::less<>{});
     apply_permutation(permutation, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment);
 }
+
+void sort_relation(lineitem_table_t& lineitem) {
+    auto permutation = compute_permutation(lineitem.l_orderkey, std::less<>{});
+    apply_permutation(
+        permutation,
+        lineitem.l_orderkey,
+        lineitem.l_partkey,
+        lineitem.l_suppkey,
+        lineitem.l_linenumber,
+        lineitem.l_quantity,
+        lineitem.l_extendedprice,
+        lineitem.l_discount,
+        lineitem.l_tax,
+        lineitem.l_returnflag,
+        lineitem.l_linestatus,
+        lineitem.l_shipdate,
+        lineitem.l_commitdate,
+        lineitem.l_receiptdate,
+        lineitem.l_shipinstruct,
+        lineitem.l_shipmode,
+        lineitem.l_comment
+    );
+}
