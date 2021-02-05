@@ -1,4 +1,4 @@
-//#pragma once
+#pragma once
 
 #include <algorithm>
 #include <cassert>
@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
-#include <chrono>
 #include <tuple>
 #include <vector>
 #include <thread>
@@ -15,78 +14,20 @@
 #include <string_view>
 #include <iostream>
 #include <functional>
-#include <queue>
-
-#include <fstream>
 
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "utils.hpp"
-#include "tpch/common.hpp"
-
-using namespace std;
-
 static constexpr bool serialize = false;
 static constexpr size_t min_partition_size = 32*1024*1024;
 
-int64_t to_int(std::string_view s) {
-    int64_t result = 0;
-    for (auto c : s) result = result * 10 + (c - '0');
-    return result;
-}
+unsigned sample_line_width(const char* data_start, size_t data_size);
 
+ssize_t find_first(uint64_t pattern, const char* begin, size_t len);
 
-/**
- * @brief Get all matches in the given character block
- * 
- * @param pattern the character to search broadcasted into a 64-bit integer
- * @param block memory block in which to search
- * @return uint64_t 64-bit integer with all the matches
- */
-inline uint64_t get_matches(uint64_t pattern, uint64_t block) {
-    constexpr uint64_t high = 0x8080808080808080ull;
-    constexpr uint64_t low = 0x7F7F7F7F7F7F7F7Full;
-    uint64_t lowChars = (~block) & high;
-    uint64_t foundChars = ~((((block & low) ^ pattern) + low) & high);
-    uint64_t matches = foundChars & lowChars;
-    return matches;
-}
-
-// pattern : the character to search broadcasted into a 64bit integer
-// begin : points somewhere into the partition
-// len : remaining length of the partition
-// return : the position of the first matching character or -1 otherwise
-ssize_t find_first(uint64_t pattern, const char* begin, size_t len) {
-    //printf("find_first begin: %p length: %lu\n", begin, len);
-
-    // we may assume that reads from 'begin' within [len, len + 8) yield zero
-    for (size_t i = 0; i < len; i += 8) {
-        uint64_t block = *reinterpret_cast<const uint64_t*>(begin + i);
-        uint64_t matches = get_matches(pattern, block);
-        if (matches != 0) {
-            uint64_t pos = __builtin_ctzll(matches) / 8;
-            if (pos < 8) {
-                const auto real_pos = i + pos;
-                return (real_pos >= len) ? -1 : real_pos;
-            }
-        }
-    }
-    return -1;
-}
-
-int32_t read_int(const char* begin, size_t len) {
-    bool invalid = (len < 1);
-    int32_t result = 0;
-    for (size_t i = 0; i < len; ++i) {
-        char c = begin[i];
-        invalid |= (c >= '0' && c <= '9');
-        result = result * 10 + (begin[i] - '0');
-    }
-    return result;
-}
+int64_t to_int(std::string_view s);
 
 template<unsigned Precision, unsigned Scale>
 struct numeric {
@@ -267,7 +208,6 @@ constexpr decltype(auto) tuple_foreach(F&& f, Tuple&& t) {
 }
 
 
-
 template<typename T, unsigned I, bool L>
 struct tuple_entry_descriptor {
     using type = T;
@@ -371,24 +311,17 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
     run(dest, dest_begin);
 }
 
+std::ostream& operator<<(std::ostream& os, const date& value);
+
 template<size_t N>
-ostream& operator<<(ostream& os, const std::array<char, N>& arr) {
+std::ostream& operator<<(std::ostream& os, const std::array<char, N>& arr) {
     const auto len = strnlen(arr.data(), N);
     os << std::string_view(arr.data(), len);
     return os;
 }
 
-ostream& operator<<(ostream& os, const date& value) {
-    uint32_t year, month, day;
-    input_parser<date>::from_julian_day(value.raw, year, month, day);
-    char output[16];
-    snprintf(output, sizeof(output), "%04d-%02d-%02d", year, month, day);
-    os << output;
-    return os;
-}
-
 template<unsigned Precision, unsigned Scale>
-ostream& operator<<(ostream& os, const numeric<Precision, Scale>& value) {
+std::ostream& operator<<(std::ostream& os, const numeric<Precision, Scale>& value) {
     auto r = std::div(value.raw, 100);
     os << r.quot;
     if (r.rem != 0) {
@@ -401,7 +334,7 @@ template<typename TupleType>
 void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t dest_begin) {
     constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
     constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
-    constexpr auto column_count = tuple_size<TupleType>::value;
+    constexpr auto column_count = std::tuple_size<TupleType>::value;
 
     const bool is_last_partition = (thread_num_ + 1 == thread_count_);
     const auto dest_limit = std::get<0>(dest)->size();
@@ -464,27 +397,7 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     }
 }
 
-
-unsigned sample_line_width(const char* data_start, size_t data_size) {
-    constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
-
-    ssize_t newline_pos;
-    size_t acc = 0, count = 0;
-    for (size_t i = 0; i < data_size && count < 10; i += newline_pos + 1) {
-        newline_pos = find_first(newline_pattern, data_start + i, data_size - i);
-
-        if (i == 0) continue; // skip first line
-        else if (newline_pos < 0) break;
-
-        acc += newline_pos;
-        ++count;
-    }
-
-    std::cout << "count: " << count << " acc: " << acc << std::endl;
-
-    return (count > 0) ? acc/count : data_size;
-}
-
+unsigned sample_line_width(const char* data_start, size_t data_size);
 
 template<class TupleType>
 void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>::dest_tuple_type& dest) {
@@ -579,7 +492,7 @@ auto parse(const std::string& file) {
     int handle = open(file.c_str(), O_RDONLY);
     lseek(handle, 0, SEEK_END);
     auto size = lseek(handle, 0, SEEK_CUR);
-    cout << "size: " << size << std::endl;
+    std::cout << "size: " << size << std::endl;
     // ensure that the mapping size is a multiple of 8 (bytes beyound the file's
     // region are set to zero)
     auto mapping_size = size + 8; // padding for the last partition
@@ -588,9 +501,9 @@ auto parse(const std::string& file) {
     const char* input = reinterpret_cast<const char*>(data);
 
     const auto est_line_width = sample_line_width(input, size);
-    cout << "estimated line width: " << est_line_width << std::endl;
+    std::cout << "estimated line width: " << est_line_width << std::endl;
     const auto est_record_count = size/est_line_width;
-    cout << "estimated line count: " << est_record_count << std::endl;
+    std::cout << "estimated line count: " << est_record_count << std::endl;
 
     const auto num_threads = std::min<size_t>(std::thread::hardware_concurrency(), size/min_partition_size);
 
@@ -677,7 +590,7 @@ void do_sort(Tuple&& t) {
 }
 
 template<class Tuple>
-void write_out(Tuple&& t, ostream& os) {
+void write_out(Tuple&& t, std::ostream& os) {
     auto& vec0 = *std::get<0>(t);
 
     for (size_t i = 0; i < vec0.size(); ++i) {
@@ -691,60 +604,4 @@ void write_out(Tuple&& t, ostream& os) {
         }, t);
         os << "\n";
     }
-}
-
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cout << "Usage: " << argv[0] << " <lineitem.tbl>" << std::endl;
-        return 1;
-    }
-
-    using lineitem_tuple = std::tuple<
-        uint32_t, // l_orderkey
-        uint32_t,
-        uint32_t,
-        uint32_t,
-        numeric<15, 2>, // l_quantity
-        numeric<15, 2>,
-        numeric<15, 2>,
-        numeric<15, 2>,
-        char, // l_returnflag
-        char,
-        date, // l_shipdate
-        date,
-        date,
-        std::array<char, 25>, // l_shipinstruct
-        std::array<char, 10>, // l_shipmode
-        std::array<char, 44>  // l_comment
-        >;
-    auto result = parse<lineitem_tuple>(argv[1]);
-
-    printf("sorting relation...\n");
-    do_sort(result);
-
-/*
-    ofstream myfile;
-    myfile.open ("example.txt");
-    write_out(result, myfile);
-    myfile.close();
-
-    return 0;
-*/
-
-    printf("loading ground truth...\n");
-
-    Database db;
-    load_tables(db, argv[2]);
-    sort_relation(db.lineitem);
-
-    printf("comparing...\n");
-    auto& my_l_orderkey = *std::get<0>(result);
-    for (size_t i = 0; i < db.lineitem.l_orderkey.size(); ++i) {
-        if (my_l_orderkey[i] != db.lineitem.l_orderkey[i]) {
-            printf("for i == %lu (my_l_orderkey[i] == %u) != (db.lineitem.l_orderkey[i] == %u)\n", i, my_l_orderkey[i], db.lineitem.l_orderkey[i]);
-            throw 0;
-        }
-    }
-
-    return 0;
 }

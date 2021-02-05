@@ -13,12 +13,14 @@
 #include "common.hpp"
 #include "thirdparty/parser.hpp"
 
+#include "parser.hpp"
+
 using namespace std;
 using namespace aria::csv;
 
 //std::unordered_map<uint32_t, size_t> part_partkey_index;
 
-static int64_t to_int(std::string_view s) {
+static int64_t to_int64(std::string_view s) {
     int64_t result = 0;
     for (auto c : s) result = result * 10 + (c - '0');
     return result;
@@ -47,7 +49,7 @@ static int64_t to_numeric(std::string_view s, size_t scale) {
     assert(s[dot_position] == '.');
     auto part1 = s.substr(0, dot_position);
     auto part2 = s.substr(dot_position + 1);
-    int64_t value = to_int(part1) * exp10[scale & 15] + to_int(part2);
+    int64_t value = to_int64(part1) * exp10[scale & 15] + to_int64(part2);
     return value;
 }
 
@@ -69,7 +71,7 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
         table.l_partkey.push_back(static_cast<uint32_t>(std::stoul(row[1])));
         table.l_suppkey.push_back(static_cast<uint32_t>(std::stoul(row[2])));
         table.l_linenumber.push_back(static_cast<uint32_t>(std::stoul(row[3])));
-        table.l_quantity.push_back(to_int(std::string_view(row[4])));
+        table.l_quantity.push_back(to_int64(std::string_view(row[4])));
         table.l_extendedprice.push_back(to_numeric(std::string_view(row[5]), 2));
         table.l_discount.push_back(to_numeric(std::string_view(row[6]), 2));
         table.l_tax.push_back(to_numeric(std::string_view(row[7]), 2));

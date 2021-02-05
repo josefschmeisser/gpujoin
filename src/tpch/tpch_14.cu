@@ -17,10 +17,10 @@
 #include "btree.cu"
 #include "rs.cu"
 
-using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
-using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
+using vector_copy_policy = vector_to_managed_array;// vector_to_managed_array;
+using rs_placement_policy = vector_to_managed_array;// vector_to_managed_array;
 
-static constexpr bool prefetch_index = true;
+static constexpr bool prefetch_index = false;
 static constexpr bool sort_indexed_relation = true;
 static constexpr int block_size = 128;
 static int num_sms;
@@ -454,6 +454,7 @@ int main(int argc, char** argv) {
         }
         default:
             std::cerr << "unknown index type: " << index_type << std::endl;
+            return 0;
     }
 #endif
 

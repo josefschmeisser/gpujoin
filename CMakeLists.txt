@@ -50,3 +50,6 @@ target_include_directories(rs_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INC
 add_subdirectory(src/tpch)
 
 add_executable(bf_search src/bf_search.cpp)
+
+#add_executable(parser src/csv.cpp src/tpch/common.cpp)
+#target_link_libraries(parser pthread)
