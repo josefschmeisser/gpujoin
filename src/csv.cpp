@@ -337,7 +337,9 @@ struct worker {
 template<typename TupleType>
 void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
     printf("=== in worker #%u ===\n", thread_num_);
-    //printf("initial_run partition_start_hint_: %p\n", partition_start_hint_);
+    printf("worker #%u initial_run partition_start_hint_: %p\n", thread_num_, partition_start_hint_);
+    printf("worker #%u hinted first line: %.*s\n", thread_num_, 120, partition_start_hint_);
+
     fflush(stdout);
 
     // correct partition size
@@ -363,6 +365,7 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
         partition_size_ = partition_size_hint_;
     }
 
+    printf("worker #%u initial_run partition_start_: %p\n", thread_num_, partition_start_);
     run(dest, dest_begin);
 }
 
@@ -397,28 +400,31 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
     constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
     constexpr auto column_count = tuple_size<TupleType>::value;
-
+const bool is_last_partition = (thread_num_ + 1 == thread_count_);
     const auto dest_limit = std::get<0>(dest)->size();
     size_t dest_index = dest_begin + thread_num_;
     size_t i = 0;
-
+printf("worker #%u first line: %.*s\n", thread_num_, 120, partition_start_);
     while (i < partition_size_ && dest_index < dest_limit) {
+//std::cout << "line: " << count_ << " ";
         const auto line_start = i;
         ssize_t sep_pos, newline_pos;
         unsigned sep_cnt = 0;
         bool line_valid = true;
-
+//if (count_ > 1500310) { std::cout << std::endl; exit(0); }
         tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
             using column_desc_type = decltype(column_desc_inst);
             using element_type = typename decltype(column_desc_inst)::type;
             constexpr auto index = column_desc_type::index;
 
+            const auto remaining = partition_size_ - i;
             if constexpr (column_desc_type::is_last) {
-                sep_pos = find_first(newline_pattern, partition_start_ + i, partition_size_ - i);
-                sep_pos = std::max(sep_pos, 0l);
+                sep_pos = find_first(newline_pattern, partition_start_ + i, remaining);
+        //        sep_pos = std::max(sep_pos, 0l);
+                sep_pos = (is_last_partition && sep_pos < 0) ? remaining : sep_pos;
                 newline_pos = sep_pos;
             } else {
-                sep_pos = find_first(bar_pattern, partition_start_ + i, partition_size_ - i);
+                sep_pos = find_first(bar_pattern, partition_start_ + i, remaining);
             }
             sep_cnt += (sep_pos >= 0);
             sep_pos = std::max(sep_pos, 0l);
@@ -439,9 +445,13 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
         });
 
         //std::cout << std::endl;
+#if 0
         if (i >= partition_size_) {
+printf("worker #%u last line: %.*s\n", thread_num_, 120, partition_start_ + line_start);
+
+long remaining = static_cast<long>(i) - partition_size_;
             // partition exhausted
-            printf("worker #%u partition exhausted\n", thread_num_);
+            printf("worker #%u partition exhausted - remaining: %ld\n", thread_num_, remaining);
             break;
         }
 
@@ -449,6 +459,20 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             std::cerr << "invalid line at byte " << line_start << std::endl;
             return;
         }
+#endif
+line_valid &= sep_cnt == column_count;
+if (!line_valid && i >= partition_size_) {
+    // incomplete line at the end of this partition
+    long remaining = static_cast<long>(i) - partition_size_;
+    printf("worker #%u partition exhausted - remaining: %ld\n", thread_num_, remaining);
+    break;
+} else if (!line_valid) {
+    // invalid line somewhere in the partion
+    std::cerr << "invalid line at byte " << line_start << std::endl;
+    return;
+}
+
+
 
         last_index_ = dest_index;
         dest_index += thread_count_;
@@ -482,9 +506,10 @@ unsigned sample_line_width(const char* data_start, size_t data_size) {
 
 template<class TupleType>
 void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>::dest_tuple_type& dest) {
-
+    size_t count = 0;
     std::vector<unsigned> state; // worker ids
     for (auto& worker : workers) {
+        count += worker.count_;
         state.emplace_back(worker.thread_num_);
     }
     std::sort(state.begin(), state.end(), [&workers](const auto& a, const auto& b) {
@@ -499,32 +524,45 @@ void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>
     printf("start densifying...\n");
     const auto num_workers = workers.size();
 
-    unsigned min_worker = 0; // worker with the least written elements
-    size_t dense_upper_limit = workers[0].last_index_;
+    size_t dense_upper_limit = workers[0].last_index_; // the vectors are dense up to this index
     for (unsigned i = 1; i < num_workers; ++i) {
         if (workers[i].last_index_ < dense_upper_limit) {
-            min_worker = i;
             dense_upper_limit = workers[i].last_index_;
         }
     }
 
     auto occupied = [&workers](size_t pos, unsigned worker_in_charge_id) {
-        return workers[worker_in_charge_id].last_index_ > pos;
+        return workers[worker_in_charge_id].last_index_ >= pos;
     };
 
     // densify
     unsigned original_worker_id = dense_upper_limit % num_workers;
     size_t i;
-    for (i = dense_upper_limit + 1; !state.empty(); ++i) {/*
+    for (i = dense_upper_limit + 1;; ++i) {
         ++original_worker_id;
-        original_worker_id = (original_worker_id == num_workers) ? 0 : num_workers;
-assert(i % num_workers == original_worker_id);*/
+        original_worker_id = (original_worker_id >= num_workers) ? 0 : original_worker_id;
+assert(i % num_workers == original_worker_id);
 
 original_worker_id = i % num_workers;
+
+
+        unsigned last_id;
+        size_t* last_index;
+
+        while (!state.empty()) {
+            last_id = state.back();
+            last_index = &workers[last_id].last_index_;
+            if (*last_index <= i) {
+                state.pop_back();
+            } else {
+                break;
+            }
+        }
+        if (state.empty()) break;
+
         if (occupied(i, original_worker_id)) continue;
 
-        auto& last = state.back();
-        auto& last_index = workers[last].last_index_;
+        assert(i < *last_index);
 
         // move elements from last_index to i
         tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
@@ -532,16 +570,21 @@ original_worker_id = i % num_workers;
             constexpr auto index = column_desc_type::index;
 
             auto& vec = (*std::get<index>(dest));
-            vec[i] = vec[last_index];
+            vec[i] = vec[*last_index];
         });
 
-        last_index -= num_workers;
-        if (last_index < i) {
-            state.pop_back();
-        }
+        *last_index -= num_workers;
     }
 
-    printf("i: %lu\n", i);
+    printf("i: %lu count: %lu\n", i, count);
+
+
+    // truncate vectors
+    tuple_foreach([&](auto& element) {
+        element->resize(count);
+    }, dest);
+
+    printf("vec size: %lu\n", std::get<0>(dest)->size());
 }
 
 
