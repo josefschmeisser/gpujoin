@@ -217,7 +217,6 @@ struct input_parser<date> {
             day = day * 10 + (begin[i] - '0');
         }
         result.raw = to_julian_day(day, month, year);
-        //std::cout << "\n" << year << "-" << month << "-" << day << " valid: " << valid << std::endl;
 
         return valid;
     }
@@ -338,10 +337,10 @@ struct worker {
 
 template<typename TupleType>
 void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
-    printf("=== in worker #%u ===\n", thread_num_);
+    printf("=== in worker #%u ===\n", thread_num_);/*
     printf("worker #%u initial_run partition_start_hint_: %p\n", thread_num_, partition_start_hint_);
     printf("worker #%u hinted first line: %.*s\n", thread_num_, 120, partition_start_hint_);
-
+*/
     fflush(stdout);
 
     // correct partition size
@@ -367,7 +366,7 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
         partition_size_ = partition_size_hint_;
     }
 
-    printf("worker #%u initial_run partition_start_: %p\n", thread_num_, partition_start_);
+    //printf("worker #%u initial_run partition_start_: %p\n", thread_num_, partition_start_);
     run(dest, dest_begin);
 }
 
@@ -380,7 +379,6 @@ ostream& operator<<(ostream& os, const std::array<char, N>& arr) {
 ostream& operator<<(ostream& os, const date& value) {
     uint32_t year, month, day;
     input_parser<date>::from_julian_day(value.raw, year, month, day);
-    //os << year << "-" << month << "-" << day;
     char output[16];
     snprintf(output, sizeof(output), "%04d-%02d-%02d", year, month, day);
     os << output;
@@ -411,7 +409,7 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     while (i < partition_size_ && dest_index < dest_limit) {
         //std::cout << "line: " << count_ << " ";
         const auto line_start = i;
-        ssize_t sep_pos, newline_pos;
+        ssize_t sep_pos;//, newline_pos;
         unsigned sep_cnt = 0;
         bool line_valid = true;
         tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
@@ -422,23 +420,16 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
             const auto remaining = partition_size_ - i;
             if constexpr (column_desc_type::is_last) {
                 sep_pos = find_first(newline_pattern, partition_start_ + i, remaining);
-                sep_pos = (is_last_partition && sep_pos < 0) ? remaining : sep_pos;
-                newline_pos = sep_pos;
+                sep_pos = (is_last_partition && sep_pos < 0) ? remaining : sep_pos; // treat the end of file as a regular separator
             } else {
                 sep_pos = find_first(bar_pattern, partition_start_ + i, remaining);
             }
             sep_cnt += (sep_pos >= 0);
-            sep_pos = std::max(sep_pos, 0l);
+            sep_pos = (sep_pos < 0) ? remaining : sep_pos;
             //printf("\nvalue: %.*s\n", sep_pos, partition_start_ + i);
 
             auto& value = (*std::get<index>(dest))[dest_index];
-            line_valid &= input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);/*
-            if (!line_valid) {
-                const auto remaining = static_cast<long>(partition_size_) - i;
-                printf("\nworker #%u column %u invalid; remaining: %ld\n", thread_num_, index, remaining);
-                printf("worker #%u value: %.*s\n", thread_num_, sep_pos, partition_start_ + i);
-                printf("worker #%u line: %.*s\n", thread_num_, 120, partition_start_ + line_start);
-            }*/
+            line_valid &= input_parser<element_type>::parse(partition_start_ + i, sep_pos, value);
 
             //std::cout << "|" << value;
 
@@ -446,38 +437,26 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
         });
 
         //std::cout << std::endl;
-#if 0
-        if (i >= partition_size_) {
-printf("worker #%u last line: %.*s\n", thread_num_, 120, partition_start_ + line_start);
 
-long remaining = static_cast<long>(i) - partition_size_;
-            // partition exhausted
+        line_valid &= sep_cnt == column_count;
+        if (!line_valid && i >= partition_size_) {
+            // incomplete line at the end of this partition
+            long remaining = static_cast<long>(partition_size_) - i;
             printf("worker #%u partition exhausted - remaining: %ld\n", thread_num_, remaining);
             break;
-        }
-
-        if (sep_cnt != column_count || !line_valid) {
-            std::cerr << "invalid line at byte " << line_start << std::endl;
+        } else if (!line_valid) {
+            // invalid line somewhere in the partion
+            std::cerr << "invalid line at byte " << line_start << std::endl;/*
+            long remaining = static_cast<long>(partition_size_) - i;
+            printf("worker #%u invalid line - remaining: %ld sep_pos: %ld\n", thread_num_, remaining, sep_pos);
+            size_t to_print = partition_size_ - line_start;
+            printf("worker #%u linep: %.*s\n", thread_num_, to_print, partition_start_ + line_start);
+            printf("worker #%u liner: %.*s\n", thread_num_, 130, partition_start_ + line_start);*/
             return;
         }
-#endif
-line_valid &= sep_cnt == column_count;
-if (!line_valid && i >= partition_size_) {
-    // incomplete line at the end of this partition
-    long remaining = static_cast<long>(i) - partition_size_;
-    printf("worker #%u partition exhausted - remaining: %ld\n", thread_num_, remaining);
-    break;
-} else if (!line_valid) {
-    // invalid line somewhere in the partion
-    std::cerr << "invalid line at byte " << line_start << std::endl;
-    return;
-}
-
-
 
         last_index_ = dest_index;
         dest_index += thread_count_;
-        //printf("dest_index: %lu\n", dest_index);
 
         ++count_;
     }
