@@ -8,7 +8,6 @@
 #include <cstring>
 #include <cstdlib>
 #include <chrono>
-//#include <limits>
 #include <tuple>
 #include <vector>
 #include <thread>
@@ -24,6 +23,9 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "utils.hpp"
+#include "tpch/common.hpp"
 
 using namespace std;
 
@@ -400,18 +402,18 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
     constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
     constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
     constexpr auto column_count = tuple_size<TupleType>::value;
-const bool is_last_partition = (thread_num_ + 1 == thread_count_);
+
+    const bool is_last_partition = (thread_num_ + 1 == thread_count_);
     const auto dest_limit = std::get<0>(dest)->size();
     size_t dest_index = dest_begin + thread_num_;
     size_t i = 0;
-printf("worker #%u first line: %.*s\n", thread_num_, 120, partition_start_);
+    //printf("worker #%u first line: %.*s\n", thread_num_, 120, partition_start_);
     while (i < partition_size_ && dest_index < dest_limit) {
-//std::cout << "line: " << count_ << " ";
+        //std::cout << "line: " << count_ << " ";
         const auto line_start = i;
         ssize_t sep_pos, newline_pos;
         unsigned sep_cnt = 0;
         bool line_valid = true;
-//if (count_ > 1500310) { std::cout << std::endl; exit(0); }
         tuple_foreach_type<TupleType>::invoke([&](auto column_desc_inst) {
             using column_desc_type = decltype(column_desc_inst);
             using element_type = typename decltype(column_desc_inst)::type;
@@ -420,7 +422,6 @@ printf("worker #%u first line: %.*s\n", thread_num_, 120, partition_start_);
             const auto remaining = partition_size_ - i;
             if constexpr (column_desc_type::is_last) {
                 sep_pos = find_first(newline_pattern, partition_start_ + i, remaining);
-        //        sep_pos = std::max(sep_pos, 0l);
                 sep_pos = (is_last_partition && sep_pos < 0) ? remaining : sep_pos;
                 newline_pos = sep_pos;
             } else {
@@ -541,10 +542,7 @@ void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>
     for (i = dense_upper_limit + 1;; ++i) {
         ++original_worker_id;
         original_worker_id = (original_worker_id >= num_workers) ? 0 : original_worker_id;
-assert(i % num_workers == original_worker_id);
-
-original_worker_id = i % num_workers;
-
+        //assert(i % num_workers == original_worker_id);
 
         unsigned last_id;
         size_t* last_index;
@@ -578,7 +576,6 @@ original_worker_id = i % num_workers;
 
     printf("i: %lu count: %lu\n", i, count);
 
-
     // truncate vectors
     tuple_foreach([&](auto& element) {
         element->resize(count);
@@ -599,7 +596,7 @@ template<typename TupleType>
 auto create_vectors(size_t n) {
     using mapped_type = typename map_tuple<to_unique_ptr_to_vector, TupleType>::mapped_type;
     mapped_type new_tuple;
-    allocate_vectors(new_tuple, n); // TODO
+    allocate_vectors(new_tuple, n);
     return new_tuple;
 }
 
@@ -693,51 +690,6 @@ auto parse(const std::string& file) {
 }
 
 
-
-/*
-struct lineitem_table_t {
-    std::vector<uint32_t> l_orderkey;
-    std::vector<uint32_t> l_partkey;
-    std::vector<uint32_t> l_suppkey;
-    std::vector<uint32_t> l_linenumber;
-    std::vector<int64_t> l_quantity;
-    std::vector<int64_t> l_extendedprice;
-    std::vector<int64_t> l_discount;
-    std::vector<int64_t> l_tax;
-    std::vector<char> l_returnflag;
-    std::vector<char> l_linestatus;
-    std::vector<uint32_t> l_shipdate;
-    std::vector<uint32_t> l_commitdate;
-    std::vector<uint32_t> l_receiptdate;
-    std::vector<std::array<char, 25>> l_shipinstruct;
-    std::vector<std::array<char, 10>> l_shipmode;
-    std::vector<std::array<char, 44>> l_comment;
-};
-*/
-
-#include "utils.hpp"
-/*
-void sort_relation(part_table_t& part) {
-    auto permutation = compute_permutation(part.p_partkey, std::less<>{});
-    apply_permutation(permutation, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment);
-}
-
-template<class F, class Tuple, std::size_t... I>
-constexpr decltype(auto) tuple_foreach_impl(F&& f, Tuple&& t, std::index_sequence<I...>) {
-    return (std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))), ...);
-}
-
-template<class F, class Tuple>
-constexpr decltype(auto) tuple_foreach(F&& f, Tuple&& t) {
-    return tuple_foreach_impl(
-        std::forward<F>(f), std::forward<Tuple>(t),
-        std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
-}
-
-
-*/
-
-
 template<class Tuple, std::size_t... I>
 void do_sort_impl(Tuple&& tuple, std::index_sequence<I...>) {
     auto& key_vec = *std::get<0>(tuple);
@@ -745,16 +697,8 @@ void do_sort_impl(Tuple&& tuple, std::index_sequence<I...>) {
     apply_permutation(permutation, (*std::get<I>(tuple))...);
 }
 
-/*
-template<class... Ts>
-void do_sort(std::tuple<std::unique_ptr<std::vector<Ts>>...>& tuple) {*/
 template<class Tuple>
 void do_sort(Tuple&& t) {
-    /*
-    auto& key_vec = *std::get<0>(tuple);
-    auto permutation = compute_permutation(key_vec, std::less<>{});
-    apply_permutation(permutation, *std::get<0>(tuple);
-    */
     do_sort_impl(
         std::forward<Tuple>(t),
         std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
@@ -765,20 +709,6 @@ void write_out(Tuple&& t, ostream& os) {
     auto& vec0 = *std::get<0>(t);
 
     for (size_t i = 0; i < vec0.size(); ++i) {
-        /*
-        tuple_foreach_type<Tuple>::invoke([&](auto column_desc_inst) { // FIXME
-            using column_desc_type = decltype(column_desc_inst);
-            constexpr auto index = column_desc_type::index;
-
-            auto& vec = (*std::get<index>(t));
-
-            if constexpr (index > 0) {
-                os << "|";
-            }
-            os << vec[i];
-        });
-        */
-
         bool first = true;
         tuple_foreach([&](auto& vec) {
             if (!first) {
@@ -790,10 +720,6 @@ void write_out(Tuple&& t, ostream& os) {
         os << "\n";
     }
 }
-
-#ifndef NO_MAIN
-
-#include "tpch/common.hpp"
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -853,4 +779,3 @@ auto& my_l_orderkey = *std::get<0>(result);
 
     return 0;
 }
-#endif
