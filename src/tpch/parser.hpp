@@ -20,6 +20,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "common.hpp"
+
 static constexpr bool serialize = false;
 static constexpr size_t min_partition_size = 32*1024*1024;
 
@@ -28,17 +30,6 @@ unsigned sample_line_width(const char* data_start, size_t data_size);
 ssize_t find_first(uint64_t pattern, const char* begin, size_t len);
 
 int64_t to_int(std::string_view s);
-
-template<unsigned Precision, unsigned Scale>
-struct numeric {
-    static constexpr auto precision = Precision;
-    static constexpr auto scale = Scale;
-    uint64_t raw;
-};
-
-struct date {
-    uint32_t raw;
-};
 
 template<typename T>
 struct input_parser;
@@ -99,12 +90,12 @@ struct input_parser<numeric<Precision, Scale>> {
             int64_t numeric_raw = 100*to_int(numeric_view.substr(0, len));
             result.raw = numeric_raw;
         } else if (dot_position == 0) {
-            // TODO
-            assert(false);
+            auto part2 = numeric_view.substr(dot_position + 1); // TODO limit number of digits
+            int64_t numeric_raw = to_int(part2);
         } else {
             auto part1 = numeric_view.substr(0, dot_position);
             auto part2 = numeric_view.substr(dot_position + 1);
-            int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO scale
+            int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO scale and limit number of digits
             result.raw = numeric_raw;
         }
         return true;
@@ -493,6 +484,7 @@ auto parse(const std::string& file) {
     lseek(handle, 0, SEEK_END);
     auto size = lseek(handle, 0, SEEK_CUR);
     std::cout << "size: " << size << std::endl;
+    assert(size > 0);
     // ensure that the mapping size is a multiple of 8 (bytes beyound the file's
     // region are set to zero)
     auto mapping_size = size + 8; // padding for the last partition

@@ -55,7 +55,7 @@ int32_t read_int(const char* begin, size_t len) {
     return result;
 }
 
-ostream& operator<<(ostream& os, const date& value) {
+std::ostream& operator<<(std::ostream& os, const date& value) {
     uint32_t year, month, day;
     input_parser<date>::from_julian_day(value.raw, year, month, day);
     char output[16];

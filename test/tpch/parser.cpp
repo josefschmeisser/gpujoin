@@ -1,5 +1,6 @@
 
 // TODO
+#include "tpch/parser.hpp"
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -42,7 +43,7 @@ int main(int argc, char* argv[]) {
     printf("loading ground truth...\n");
 
     Database db;
-    load_tables(db, argv[2]);
+    load_tables(db, argv[2]); // FIXME this uses the same implementation
     sort_relation(db.lineitem);
 
     printf("comparing...\n");
