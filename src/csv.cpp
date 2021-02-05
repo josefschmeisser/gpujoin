@@ -17,6 +17,8 @@
 #include <functional>
 #include <queue>
 
+#include <fstream>
+
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -316,7 +318,6 @@ struct worker {
     size_t partition_size_;
 
     size_t last_index_;
-
     size_t count_ = 0;
 
     worker(const char* data_start, const char* partition_start_hint, size_t partition_size_hint, unsigned thread_count, unsigned thread_num)
@@ -667,6 +668,55 @@ struct lineitem_table_t {
     std::vector<std::array<char, 44>> l_comment;
 };
 */
+
+#include "utils.hpp"
+/*
+void sort_relation(part_table_t& part) {
+    auto permutation = compute_permutation(part.p_partkey, std::less<>{});
+    apply_permutation(permutation, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment);
+}
+
+template<class F, class Tuple, std::size_t... I>
+constexpr decltype(auto) tuple_foreach_impl(F&& f, Tuple&& t, std::index_sequence<I...>) {
+    return (std::invoke(std::forward<F>(f), std::get<I>(std::forward<Tuple>(t))), ...);
+}
+
+template<class F, class Tuple>
+constexpr decltype(auto) tuple_foreach(F&& f, Tuple&& t) {
+    return tuple_foreach_impl(
+        std::forward<F>(f), std::forward<Tuple>(t),
+        std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
+}
+
+
+*/
+
+
+template<class Tuple, std::size_t... I>
+void do_sort_impl(Tuple&& tuple, std::index_sequence<I...>) {
+    auto& key_vec = *std::get<0>(tuple);
+    auto permutation = compute_permutation(key_vec, std::less<>{});
+    apply_permutation(permutation, (*std::get<I>(tuple))...);
+}
+
+/*
+template<class... Ts>
+void do_sort(std::tuple<std::unique_ptr<std::vector<Ts>>...>& tuple) {*/
+template<class Tuple>
+void do_sort(Tuple&& t) {
+    /*
+    auto& key_vec = *std::get<0>(tuple);
+    auto permutation = compute_permutation(key_vec, std::less<>{});
+    apply_permutation(permutation, *std::get<0>(tuple);
+    */
+    do_sort_impl(
+        std::forward<Tuple>(t),
+        std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
+}
+
+#ifndef NO_MAIN
+
+#include "tpch/common.hpp"
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
