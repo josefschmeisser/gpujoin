@@ -30,6 +30,7 @@
 using namespace std;
 
 static constexpr bool serialize = false;
+static constexpr size_t min_partition_size = 32*1024*1024;
 
 int64_t to_int(std::string_view s) {
     int64_t result = 0;
@@ -372,7 +373,8 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
 
 template<size_t N>
 ostream& operator<<(ostream& os, const std::array<char, N>& arr) {
-    os << std::string_view(arr.data(), N);
+    const auto len = strnlen(arr.data(), N);
+    os << std::string_view(arr.data(), len);
     return os;
 }
 
@@ -496,11 +498,6 @@ void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>
         return workers[a].last_index_ < workers[b].last_index_;
     });
 
-    for (unsigned id : state) {
-        const auto& worker = workers[id];
-        printf("densify: worker #%u end: %lu\n", id, worker.last_index_);
-    }
-
     printf("start densifying...\n");
     const auto num_workers = workers.size();
 
@@ -553,14 +550,10 @@ void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>
         *last_index -= num_workers;
     }
 
-    printf("i: %lu count: %lu\n", i, count);
-
     // truncate vectors
     tuple_foreach([&](auto& element) {
         element->resize(count);
     }, dest);
-
-    printf("vec size: %lu\n", std::get<0>(dest)->size());
 }
 
 
@@ -599,7 +592,7 @@ auto parse(const std::string& file) {
     const auto est_record_count = size/est_line_width;
     cout << "estimated line count: " << est_record_count << std::endl;
 
-    const auto num_threads = 4; // TODO std::thread::hardware_concurrency();
+    const auto num_threads = std::min<size_t>(std::thread::hardware_concurrency(), size/min_partition_size);
 
     std::vector<int32_t> dest1;
     dest1.resize(est_record_count);
@@ -729,26 +722,23 @@ int main(int argc, char* argv[]) {
     printf("sorting relation...\n");
     do_sort(result);
 
-//return 0;
-
 /*
-  ofstream myfile;
-  myfile.open ("example.txt");
-  write_out(result, myfile);
-  myfile.close();
+    ofstream myfile;
+    myfile.open ("example.txt");
+    write_out(result, myfile);
+    myfile.close();
 
-return 0;
+    return 0;
 */
 
-    printf("load comp\n");
-
+    printf("loading ground truth...\n");
 
     Database db;
     load_tables(db, argv[2]);
     sort_relation(db.lineitem);
 
     printf("comparing...\n");
-auto& my_l_orderkey = *std::get<0>(result);
+    auto& my_l_orderkey = *std::get<0>(result);
     for (size_t i = 0; i < db.lineitem.l_orderkey.size(); ++i) {
         if (my_l_orderkey[i] != db.lineitem.l_orderkey[i]) {
             printf("for i == %lu (my_l_orderkey[i] == %u) != (db.lineitem.l_orderkey[i] == %u)\n", i, my_l_orderkey[i], db.lineitem.l_orderkey[i]);
