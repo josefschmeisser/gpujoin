@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <chrono>
+//#include <limits>
 #include <tuple>
 #include <vector>
 #include <thread>
@@ -561,7 +562,7 @@ auto create_vectors(size_t n) {
 
 
 template<typename TupleType>
-void parse(const std::string& file) {
+auto parse(const std::string& file) {
 
     int handle = open(file.c_str(), O_RDONLY);
     lseek(handle, 0, SEEK_END);
@@ -644,6 +645,8 @@ void parse(const std::string& file) {
     // cleanup
     munmap(data, mapping_size);
     close(handle);
+
+    return dest_tuple;
 }
 
 
@@ -714,6 +717,37 @@ void do_sort(Tuple&& t) {
         std::make_index_sequence<std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
 }
 
+template<class Tuple>
+void write_out(Tuple&& t, ostream& os) {
+    auto& vec0 = *std::get<0>(t);
+
+    for (size_t i = 0; i < vec0.size(); ++i) {
+        /*
+        tuple_foreach_type<Tuple>::invoke([&](auto column_desc_inst) { // FIXME
+            using column_desc_type = decltype(column_desc_inst);
+            constexpr auto index = column_desc_type::index;
+
+            auto& vec = (*std::get<index>(t));
+
+            if constexpr (index > 0) {
+                os << "|";
+            }
+            os << vec[i];
+        });
+        */
+
+        bool first = true;
+        tuple_foreach([&](auto& vec) {
+            if (!first) {
+                os << "|";
+            }
+            os << (*vec)[i];
+            first = false;
+        }, t);
+        os << "\n";
+    }
+}
+
 #ifndef NO_MAIN
 
 #include "tpch/common.hpp"
@@ -742,7 +776,38 @@ int main(int argc, char* argv[]) {
         std::array<char, 10>, // l_shipmode
         std::array<char, 44>  // l_comment
         >;
-    parse<lineitem_tuple>(argv[1]);
+    auto result = parse<lineitem_tuple>(argv[1]);
+
+    printf("sorting relation...\n");
+    do_sort(result);
+
+//return 0;
+
+/*
+  ofstream myfile;
+  myfile.open ("example.txt");
+  write_out(result, myfile);
+  myfile.close();
+
+return 0;
+*/
+
+    printf("load comp\n");
+
+
+    Database db;
+    load_tables(db, argv[2]);
+    sort_relation(db.lineitem);
+
+    printf("comparing...\n");
+auto& my_l_orderkey = *std::get<0>(result);
+    for (size_t i = 0; i < db.lineitem.l_orderkey.size(); ++i) {
+        if (my_l_orderkey[i] != db.lineitem.l_orderkey[i]) {
+            printf("for i == %lu (my_l_orderkey[i] == %u) != (db.lineitem.l_orderkey[i] == %u)\n", i, my_l_orderkey[i], db.lineitem.l_orderkey[i]);
+            throw 0;
+        }
+    }
 
     return 0;
 }
+#endif
