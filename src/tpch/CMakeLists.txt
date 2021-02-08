@@ -1,15 +1,18 @@
 message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
 
-set(CPU_TPCH_SRC_FILES cpu_bench.cpp common.cpp cpu_only.cpp parser.cpp)
+add_library(tpch_common STATIC common.cpp parser.cpp)
+target_link_libraries(tpch_common pthread)
+
+set(CPU_TPCH_SRC_FILES cpu_bench.cpp cpu_only.cpp)
 add_executable(tpch ${CPU_TPCH_SRC_FILES})
 target_include_directories(tpch PRIVATE $<BUILD_INTERFACE:${JEVENTS_INCLUDE_DIR}>)
-target_link_libraries(tpch ${JEVENTS_LIBRARY_PATH} pthread)
+target_link_libraries(tpch tpch_common ${JEVENTS_LIBRARY_PATH} pthread)
 if(ENABLE_PERFBENCHMARKING)
     add_dependencies(tpch jevents)
 endif(ENABLE_PERFBENCHMARKING)
 
-add_executable(cuda_tpch_1 tpch_1.cu common.cpp parser.cpp) # TODO refactor into own library
-target_link_libraries(cuda_tpch_1 numa pthread)
+add_executable(cuda_tpch_1 tpch_1.cu)
+target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 
 #list(APPEND CUDA_NVCC_FLAGS -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70)
 #string(APPEND CMAKE_CUDA_FLAGS " -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_70,code=compute_70")
@@ -19,12 +22,12 @@ target_link_libraries(cuda_tpch_1 numa pthread)
 #target_link_libraries(cuda_tpch_14 numa)
 
 # index join executable
-add_executable(cuda_tpch_14 tpch_14.cu common.cpp parser.cpp) # TODO refactor into own library
-target_link_libraries(cuda_tpch_14 numa pthread)
+add_executable(cuda_tpch_14 tpch_14.cu)
+target_link_libraries(cuda_tpch_14 tpch_common numa pthread)
 target_include_directories(cuda_tpch_14 PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
 
 # hash join executable
-add_executable(cuda_hj_tpch_14 tpch_14.cu common.cpp parser.cpp) # TODO refactor into own library
+add_executable(cuda_hj_tpch_14 tpch_14.cu)
 target_compile_definitions(cuda_hj_tpch_14 PUBLIC USE_HJ)
-target_link_libraries(cuda_hj_tpch_14 numa pthread)
+target_link_libraries(cuda_hj_tpch_14 tpch_common numa pthread)
 target_include_directories(cuda_hj_tpch_14 PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
