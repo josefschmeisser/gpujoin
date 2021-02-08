@@ -497,7 +497,7 @@ auto parse(const std::string& file) {
     const auto est_record_count = size/est_line_width;
     std::cout << "estimated line count: " << est_record_count << std::endl;
 
-    const auto num_threads = std::min<size_t>(std::thread::hardware_concurrency(), size/min_partition_size);
+    const auto num_threads = std::max<size_t>(1, std::min<size_t>(std::thread::hardware_concurrency(), size/min_partition_size));
 
     std::vector<int32_t> dest1;
     dest1.resize(est_record_count);
