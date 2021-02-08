@@ -51,5 +51,5 @@ add_subdirectory(src/tpch)
 
 add_executable(bf_search src/bf_search.cpp)
 
-#add_executable(parser src/csv.cpp src/tpch/common.cpp)
-#target_link_libraries(parser pthread)
+add_executable(parser test/tpch/parser.cpp src/tpch/parser.cpp src/tpch/common.cpp)
+target_link_libraries(parser pthread)

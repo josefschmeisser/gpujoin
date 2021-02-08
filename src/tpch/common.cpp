@@ -59,7 +59,8 @@ static uint32_t to_julian_day(const std::string& date) {
     return to_julian_day(day, month, year);
 }
 
-static void load_lineitem_table(const std::string& file_name, lineitem_table_t& table) {
+#if 0
+static void load_lineitem_table_with_aria_parser(const std::string& file_name, lineitem_table_t& table) {
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
 
@@ -88,6 +89,45 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
         std::strncpy(l_comment.data(), row[15].c_str(), sizeof(l_comment));
         table.l_comment.push_back(l_comment);
     }
+}
+#endif
+
+static void load_lineitem_table(const std::string& file_name, lineitem_table_t& table) {
+    using lineitem_tuple = std::tuple<
+        uint32_t, // l_orderkey
+        uint32_t,
+        uint32_t,
+        uint32_t,
+        numeric<15, 2>, // l_quantity
+        numeric<15, 2>,
+        numeric<15, 2>,
+        numeric<15, 2>,
+        char, // l_returnflag
+        char,
+        date, // l_shipdate
+        date,
+        date,
+        std::array<char, 25>, // l_shipinstruct
+        std::array<char, 10>, // l_shipmode
+        std::array<char, 44>  // l_comment
+        >;
+    auto result = parse<lineitem_tuple>(file_name);
+    table.l_orderkey.swap(*std::get<0>(result));
+    table.l_partkey.swap(*std::get<1>(result));
+    table.l_suppkey.swap(*std::get<2>(result));
+    table.l_linenumber.swap(*std::get<3>(result));
+    table.l_quantity.swap(*std::get<4>(result));
+    table.l_extendedprice.swap(*std::get<5>(result));
+    table.l_discount.swap(*std::get<6>(result));
+    table.l_tax.swap(*std::get<7>(result));
+    table.l_returnflag.swap(*std::get<8>(result));
+    table.l_linestatus.swap(*std::get<9>(result));
+    table.l_shipdate.swap(*std::get<10>(result));
+    table.l_commitdate.swap(*std::get<11>(result));
+    table.l_receiptdate.swap(*std::get<12>(result));
+    table.l_shipinstruct.swap(*std::get<13>(result));
+    table.l_shipmode.swap(*std::get<14>(result));
+    table.l_comment.swap(*std::get<15>(result));
 }
 
 static void load_part_table(const std::string& file_name, part_table_t& table) {

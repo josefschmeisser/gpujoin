@@ -79,7 +79,7 @@ void query_1(Database& db) {
 
     auto& lineitem = db.lineitem;
     for (size_t i = 0; i < lineitem.l_returnflag.size(); ++i) {
-        if (lineitem.l_shipdate[i] > threshold_date) continue;
+        if (lineitem.l_shipdate[i].raw > threshold_date) continue;
 
         uint16_t k = static_cast<uint16_t>(lineitem.l_returnflag[i]) << 8;
         k |= lineitem.l_linestatus[i];
@@ -97,13 +97,13 @@ void query_1(Database& db) {
             groupPtr->l_linestatus = lineitem.l_linestatus[i];
         }
 
-        auto l_extendedprice = lineitem.l_extendedprice[i];
-        auto l_discount = lineitem.l_discount[i];
-        auto l_quantity = lineitem.l_quantity[i];
+        auto l_extendedprice = lineitem.l_extendedprice[i].raw;
+        auto l_discount = lineitem.l_discount[i].raw;
+        auto l_quantity = lineitem.l_quantity[i].raw;
         groupPtr->sum_qty += l_quantity;
         groupPtr->sum_base_price += l_extendedprice;
         groupPtr->sum_disc_price += l_extendedprice * (100 - l_discount); // sum(l_extendedprice * (1 - l_discount))
-        groupPtr->sum_charge += l_extendedprice * (100 - l_discount) * (100 * lineitem.l_tax[i]); // sum(l_extendedprice * (1 - l_discount) * (1 + l_tax))
+        groupPtr->sum_charge += l_extendedprice * (100 - l_discount) * (100 * lineitem.l_tax[i].raw); // sum(l_extendedprice * (1 - l_discount) * (1 + l_tax))
         groupPtr->avg_qty += l_quantity;
         groupPtr->avg_price += l_extendedprice;
         groupPtr->avg_disc += l_discount;
@@ -203,8 +203,8 @@ void query_14_part_build(Database& db) {
 
     // aggregation loop
     for (size_t i = 0; i < lineitem.l_partkey.size(); ++i) {
-        if (lineitem.l_shipdate[i] < lower_shipdate ||
-            lineitem.l_shipdate[i] >= upper_shipdate) {
+        if (lineitem.l_shipdate[i].raw < lower_shipdate ||
+            lineitem.l_shipdate[i].raw >= upper_shipdate) {
             continue;
         }
 
@@ -215,8 +215,8 @@ void query_14_part_build(Database& db) {
         }
         size_t j = it->second;
 
-        auto extendedprice = lineitem.l_extendedprice[i];
-        auto discount = lineitem.l_discount[i];
+        auto extendedprice = lineitem.l_extendedprice[i].raw;
+        auto discount = lineitem.l_discount[i].raw;
         auto summand = extendedprice * (100 - discount);
         sum2 += summand;
 
@@ -248,8 +248,8 @@ void query_14_lineitem_build(Database& db) {
 
     std::unordered_multimap<uint32_t, size_t> ht(part.p_partkey.size());// lineitem.l_partkey.size());
     for (size_t i = 0; i < lineitem.l_partkey.size(); ++i) {
-        if (lineitem.l_shipdate[i] < lower_shipdate ||
-            lineitem.l_shipdate[i] >= upper_shipdate) {
+        if (lineitem.l_shipdate[i].raw < lower_shipdate ||
+            lineitem.l_shipdate[i].raw >= upper_shipdate) {
             continue;
         }
         ht.emplace(lineitem.l_partkey[i], i);
@@ -262,8 +262,8 @@ void query_14_lineitem_build(Database& db) {
         for (auto it = range.first; it != range.second; ++it) {
             size_t j = it->second;
 
-            auto extendedprice = lineitem.l_extendedprice[j];
-            auto discount = lineitem.l_discount[j];
+            auto extendedprice = lineitem.l_extendedprice[j].raw;
+            auto discount = lineitem.l_discount[j].raw;
             auto summand = extendedprice * (100 - discount);
             sum2 += summand;
 

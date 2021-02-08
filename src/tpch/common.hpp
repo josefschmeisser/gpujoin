@@ -14,20 +14,36 @@
 
 #include "utils.hpp"
 
+template<unsigned Precision, unsigned Scale>
+struct numeric {
+    static constexpr auto precision = Precision;
+    static constexpr auto scale = Scale;
+    using my_type = numeric<Precision, Scale>;
+    using raw_type = int64_t;
+    raw_type raw;
+};
+static_assert(sizeof(numeric<0, 0>) == sizeof(numeric<0, 0>::raw_type));
+
+struct date {
+    using raw_type = uint32_t;
+    raw_type raw;
+};
+static_assert(sizeof(date) == sizeof(date::raw_type));
+
 struct lineitem_table_t {
     std::vector<uint32_t> l_orderkey;
     std::vector<uint32_t> l_partkey;
     std::vector<uint32_t> l_suppkey;
     std::vector<uint32_t> l_linenumber;
-    std::vector<int64_t> l_quantity;
-    std::vector<int64_t> l_extendedprice;
-    std::vector<int64_t> l_discount;
-    std::vector<int64_t> l_tax;
+    std::vector<numeric<15, 2>> l_quantity;
+    std::vector<numeric<15, 2>> l_extendedprice;
+    std::vector<numeric<15, 2>> l_discount;
+    std::vector<numeric<15, 2>> l_tax;
     std::vector<char> l_returnflag;
     std::vector<char> l_linestatus;
-    std::vector<uint32_t> l_shipdate;
-    std::vector<uint32_t> l_commitdate;
-    std::vector<uint32_t> l_receiptdate;
+    std::vector<date> l_shipdate;
+    std::vector<date> l_commitdate;
+    std::vector<date> l_receiptdate;
     std::vector<std::array<char, 25>> l_shipinstruct;
     std::vector<std::array<char, 10>> l_shipmode;
     std::vector<std::array<char, 44>> l_comment;
@@ -122,15 +138,15 @@ auto copy_relation(const lineitem_table_t& src) {
     plain->l_partkey = f(src.l_partkey);
     plain->l_suppkey = f(src.l_suppkey);
     plain->l_linenumber = f(src.l_linenumber);
-    plain->l_quantity = f(src.l_quantity);
-    plain->l_extendedprice = f(src.l_extendedprice);
-    plain->l_discount = f(src.l_discount);
-    plain->l_tax = f(src.l_tax);
+    plain->l_quantity = reinterpret_cast<typename decltype(src.l_quantity)::value_type::raw_type*>(f(src.l_quantity));
+    plain->l_extendedprice = reinterpret_cast<typename decltype(src.l_extendedprice)::value_type::raw_type*>(f(src.l_extendedprice));
+    plain->l_discount = reinterpret_cast<typename decltype(src.l_discount)::value_type::raw_type*>(f(src.l_discount));
+    plain->l_tax = reinterpret_cast<typename decltype(src.l_tax)::value_type::raw_type*>(f(src.l_tax));
     plain->l_returnflag = f(src.l_returnflag);
     plain->l_linestatus = f(src.l_linestatus);
-    plain->l_shipdate = f(src.l_shipdate);
-    plain->l_commitdate = f(src.l_commitdate);
-    plain->l_receiptdate = f(src.l_receiptdate);
+    plain->l_shipdate = reinterpret_cast<typename decltype(src.l_shipdate)::value_type::raw_type*>(f(src.l_shipdate));
+    plain->l_commitdate = reinterpret_cast<typename decltype(src.l_commitdate)::value_type::raw_type*>(f(src.l_commitdate));
+    plain->l_receiptdate = reinterpret_cast<typename decltype(src.l_receiptdate)::value_type::raw_type*>(f(src.l_receiptdate));
     plain->l_shipinstruct = f(src.l_shipinstruct);
     plain->l_shipmode = f(src.l_shipmode);
     plain->l_comment = f(src.l_comment);
