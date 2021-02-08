@@ -44,22 +44,23 @@ static constexpr int64_t exp10[] = {
     100000000000000ul,
 };
 
-static int64_t to_numeric(std::string_view s, size_t scale) {
-    size_t dot_position = s.size() - scale - 1;
+template<unsigned Precision, unsigned Scale>
+static numeric<Precision, Scale> to_numeric(std::string_view s) {
+    size_t dot_position = s.size() - Scale - 1;
     assert(s[dot_position] == '.');
     auto part1 = s.substr(0, dot_position);
     auto part2 = s.substr(dot_position + 1);
-    int64_t value = to_int64(part1) * exp10[scale & 15] + to_int64(part2);
-    return value;
+    int64_t value = to_int64(part1) * exp10[Scale & 15] + to_int64(part2);
+    return numeric<Precision, Scale>{ value };
 }
 
-static uint32_t to_julian_day(const std::string& date) {
+static date to_date(const std::string& date_str) {
     uint32_t day, month, year;
-    sscanf(date.c_str(), "%4d-%2d-%2d", &year, &month, &day);
-    return to_julian_day(day, month, year);
+    sscanf(date_str.c_str(), "%4d-%2d-%2d", &year, &month, &day);
+    const auto jd = to_julian_day(day, month, year);
+    return date{ jd };
 }
 
-#if 0
 static void load_lineitem_table_with_aria_parser(const std::string& file_name, lineitem_table_t& table) {
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
@@ -72,15 +73,15 @@ static void load_lineitem_table_with_aria_parser(const std::string& file_name, l
         table.l_partkey.push_back(static_cast<uint32_t>(std::stoul(row[1])));
         table.l_suppkey.push_back(static_cast<uint32_t>(std::stoul(row[2])));
         table.l_linenumber.push_back(static_cast<uint32_t>(std::stoul(row[3])));
-        table.l_quantity.push_back(to_int64(std::string_view(row[4])));
-        table.l_extendedprice.push_back(to_numeric(std::string_view(row[5]), 2));
-        table.l_discount.push_back(to_numeric(std::string_view(row[6]), 2));
-        table.l_tax.push_back(to_numeric(std::string_view(row[7]), 2));
+        table.l_quantity.push_back(to_numeric<15, 2>(std::string_view(row[4])));
+        table.l_extendedprice.push_back(to_numeric<15, 2>(std::string_view(row[5])));
+        table.l_discount.push_back(to_numeric<15, 2>(std::string_view(row[6])));
+        table.l_tax.push_back(to_numeric<15, 2>(std::string_view(row[7])));
         table.l_returnflag.push_back(row[8][0]);
         table.l_linestatus.push_back(row[9][0]);
-        table.l_shipdate.push_back(to_julian_day(row[10]));
-        table.l_commitdate.push_back(to_julian_day(row[11]));
-        table.l_receiptdate.push_back(to_julian_day(row[12]));
+        table.l_shipdate.push_back(to_date(row[10]));
+        table.l_commitdate.push_back(to_date(row[11]));
+        table.l_receiptdate.push_back(to_date(row[12]));
         std::strncpy(l_shipinstruct.data(), row[13].c_str(),
                      sizeof(l_shipinstruct));
         table.l_shipinstruct.push_back(l_shipinstruct);
@@ -90,7 +91,6 @@ static void load_lineitem_table_with_aria_parser(const std::string& file_name, l
         table.l_comment.push_back(l_comment);
     }
 }
-#endif
 
 static void load_lineitem_table(const std::string& file_name, lineitem_table_t& table) {
     using lineitem_tuple = std::tuple<
@@ -130,7 +130,6 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
     table.l_comment.swap(*std::get<15>(result));
 }
 
-#if 0
 static void load_part_table_with_aria_parser(const std::string& file_name, part_table_t& table) {
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
@@ -156,7 +155,7 @@ static void load_part_table_with_aria_parser(const std::string& file_name, part_
         table.p_size.push_back(std::stoi(row[5]));
         std::strncpy(p_container.data(), row[6].c_str(), sizeof(p_container));
         table.p_container.push_back(p_container);
-        table.p_retailprice.push_back(to_numeric(std::string_view(row[7]), 2));
+        table.p_retailprice.push_back(to_numeric<15, 2>(std::string_view(row[7])));
         std::strncpy(p_comment.data(), row[8].c_str(), sizeof(p_comment));
         table.p_comment.push_back(p_comment);
 
@@ -164,7 +163,6 @@ static void load_part_table_with_aria_parser(const std::string& file_name, part_
         //part_partkey_index[table.p_partkey.back()] = tid++;
     }
 }
-#endif
 
 static void load_part_table(const std::string& file_name, part_table_t& table) {
     using part_tuple = std::tuple<
@@ -193,6 +191,11 @@ static void load_part_table(const std::string& file_name, part_table_t& table) {
 void load_tables(Database& db, const std::string& path) {
     load_lineitem_table(path + "lineitem.tbl", db.lineitem);
     load_part_table(path + "part.tbl", db.part);
+}
+
+void load_tables_with_aria_parser(Database& db, const std::string& path) {
+    load_lineitem_table_with_aria_parser(path + "lineitem.tbl", db.lineitem);
+    load_part_table_with_aria_parser(path + "part.tbl", db.part);
 }
 
 #if false

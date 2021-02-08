@@ -113,6 +113,8 @@ struct Database {
 
 void load_tables(Database& db, const std::string& path);
 
+void load_tables_with_aria_parser(Database& db, const std::string& path);
+
 void query_1(Database& db);
 
 void query_14_part_build(Database& db);
