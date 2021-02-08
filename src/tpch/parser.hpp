@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <bits/stdint-intn.h>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -84,19 +85,18 @@ struct input_parser<numeric<Precision, Scale>> {
         constexpr uint64_t period_pattern = 0x2E2E2E2E2E2E2E2Eull;
         std::string_view numeric_view(begin, len);
         ssize_t dot_position = find_first(period_pattern, begin, len);
+        int64_t& numeric_raw = result.raw;
 
         if (dot_position < 0) {
             // no dot
-            int64_t numeric_raw = 100*to_int(numeric_view.substr(0, len));
-            result.raw = numeric_raw;
+            numeric_raw = 100*to_int(numeric_view.substr(0, len));
         } else if (dot_position == 0) {
             auto part2 = numeric_view.substr(dot_position + 1); // TODO limit number of digits
-            int64_t numeric_raw = to_int(part2);
+            numeric_raw = to_int(part2);
         } else {
             auto part1 = numeric_view.substr(0, dot_position);
             auto part2 = numeric_view.substr(dot_position + 1);
-            int64_t numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO scale and limit number of digits
-            result.raw = numeric_raw;
+            numeric_raw = to_int(part1) * 100 + to_int(part2); // TODO scale and limit number of digits
         }
         return true;
     }

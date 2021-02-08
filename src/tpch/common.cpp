@@ -46,12 +46,30 @@ static constexpr int64_t exp10[] = {
 
 template<unsigned Precision, unsigned Scale>
 static numeric<Precision, Scale> to_numeric(std::string_view s) {
+/*
     size_t dot_position = s.size() - Scale - 1;
     assert(s[dot_position] == '.');
     auto part1 = s.substr(0, dot_position);
     auto part2 = s.substr(dot_position + 1);
     int64_t value = to_int64(part1) * exp10[Scale & 15] + to_int64(part2);
     return numeric<Precision, Scale>{ value };
+*/
+    constexpr uint64_t period_pattern = 0x2E2E2E2E2E2E2E2Eull;
+    int64_t numeric_raw = 0;
+    ssize_t dot_position = find_first(period_pattern, s.data(), s.size());
+
+    if (dot_position < 0) {
+        // no dot
+        int64_t numeric_raw = exp10[Scale & 15] * to_int(s.substr(0, s.size()));
+    } else if (dot_position == 0) {
+        auto part2 = s.substr(dot_position + 1); // TODO limit number of digits
+        int64_t numeric_raw = to_int(part2);
+    } else {
+        auto part1 = s.substr(0, dot_position);
+        auto part2 = s.substr(dot_position + 1);
+        int64_t numeric_raw = to_int(part1) * exp10[Scale & 15] + to_int(part2); // TODO scale and limit number of digits
+    }
+    return numeric<Precision, Scale>{ numeric_raw };
 }
 
 static date to_date(const std::string& date_str) {

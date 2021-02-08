@@ -34,6 +34,7 @@ if(ENABLE_PERFBENCHMARKING)
 endif(ENABLE_PERFBENCHMARKING)
 
 include(lib/RadixSpline.cmake)
+include(lib/gtest.cmake)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/src
@@ -48,8 +49,9 @@ add_dependencies(rs_lookup RadixSpline)
 target_include_directories(rs_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
 
 add_subdirectory(src/tpch)
+add_subdirectory(test)
 
 add_executable(bf_search src/bf_search.cpp)
 
-add_executable(parser test/tpch/parser.cpp src/tpch/parser.cpp src/tpch/common.cpp)
-target_link_libraries(parser pthread)
+#add_executable(parser test/tpch/parser.cpp src/tpch/parser.cpp src/tpch/common.cpp)
+#target_link_libraries(parser pthread)
