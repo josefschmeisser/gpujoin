@@ -130,7 +130,8 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
     table.l_comment.swap(*std::get<15>(result));
 }
 
-static void load_part_table(const std::string& file_name, part_table_t& table) {
+#if 0
+static void load_part_table_with_aria_parser(const std::string& file_name, part_table_t& table) {
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
 
@@ -162,6 +163,31 @@ static void load_part_table(const std::string& file_name, part_table_t& table) {
         // add index entry
         //part_partkey_index[table.p_partkey.back()] = tid++;
     }
+}
+#endif
+
+static void load_part_table(const std::string& file_name, part_table_t& table) {
+    using part_tuple = std::tuple<
+        uint32_t, // p_partkey
+        std::array<char, 55>,
+        std::array<char, 25>,
+        std::array<char, 10>,
+        std::array<char, 25>,
+        int32_t,
+        std::array<char, 10>,
+        numeric<15, 2>,
+        std::array<char, 23>
+        >;
+    auto result = parse<part_tuple>(file_name);
+    table.p_partkey.swap(*std::get<0>(result));
+    table.p_name.swap(*std::get<1>(result));
+    table.p_mfgr.swap(*std::get<2>(result));
+    table.p_brand.swap(*std::get<3>(result));
+    table.p_type.swap(*std::get<4>(result));
+    table.p_size.swap(*std::get<5>(result));
+    table.p_container.swap(*std::get<6>(result));
+    table.p_retailprice.swap(*std::get<7>(result));
+    table.p_comment.swap(*std::get<8>(result));
 }
 
 void load_tables(Database& db, const std::string& path) {

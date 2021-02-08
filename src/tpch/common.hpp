@@ -90,7 +90,7 @@ struct part_table_t {
     std::vector<std::array<char, 25>> p_type;
     std::vector<int32_t> p_size;
     std::vector<std::array<char, 10>> p_container;
-    std::vector<int64_t> p_retailprice;
+    std::vector<numeric<15, 2>> p_retailprice;
     std::vector<std::array<char, 23>> p_comment;
 };
 
@@ -173,7 +173,7 @@ auto copy_relation(const part_table_t& src) {
     plain->p_type = f(src.p_type);
     plain->p_size = f(src.p_size);
     plain->p_container = f(src.p_container);
-    plain->p_retailprice = f(src.p_retailprice);
+    plain->p_retailprice = reinterpret_cast<typename decltype(src.p_retailprice)::value_type::raw_type*>(f(src.p_retailprice));
     plain->p_comment = f(src.p_comment);
 
     part_table_plain_t* dst;
