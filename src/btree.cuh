@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 #include <limits>
@@ -11,10 +12,22 @@ using payload_t = uintptr_t;
 
 static constexpr payload_t invalidTid = std::numeric_limits<btree::payload_t>::max();
 
+/*
 struct NodeBase {
     bool isLeaf;
     uint16_t count;
 };
+*/
+struct NodeBase {
+    union {
+        struct {
+            uint16_t count;
+            bool isLeaf;
+        } header;
+        uint8_t header_with_padding[128];
+    };
+};
+static_assert(sizeof(NodeBase) == 128);
 
 struct Node : public NodeBase {
     static const uint64_t pageSize = 4 * 1024;
@@ -23,6 +36,7 @@ struct Node : public NodeBase {
     key_t keys[maxEntries];
     payload_t payloads[maxEntries + 1];
 };
+//static_assert(offsetof(Node, keys) == 128);
 
 Node* construct(const std::vector<uint32_t>& keys, float loadFactor);
 

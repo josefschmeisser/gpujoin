@@ -1,7 +1,9 @@
 #include "btree.cuh"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <stdexcept>
 #include <vector>
 #include <iostream>
 #include <tuple>
@@ -13,6 +15,8 @@
 
 using namespace std;
 
+static const size_t cache_line_size = 128;
+
 namespace btree {
 
 Node* create_node(bool isLeaf) {
@@ -20,7 +24,11 @@ Node* create_node(bool isLeaf) {
     void** dst = reinterpret_cast<void**>(&node);
     cudaMallocManaged(dst, Node::pageSize);
     //node = reinterpret_cast<Node*>(numa_alloc_onnode(Node::pageSize, 0));
-    node->isLeaf = isLeaf;
+    node->header.isLeaf = isLeaf;
+
+    // validate alignment
+    if ((reinterpret_cast<uintptr_t>(node) & cache_line_size-1) != 0) { throw std::runtime_error("unaligned memory"); }
+    if ((reinterpret_cast<uintptr_t>(&node->keys[0]) & cache_line_size-1) != 0) { throw std::runtime_error("unaligned memory"); }
 
     // initialize key vector with the largest key value possible
     static constexpr auto maxKey = std::numeric_limits<key_t>::max();
@@ -32,19 +40,19 @@ Node* create_node(bool isLeaf) {
 }
 
 bool append_into(Node* dst, key_t key, payload_t value) {
-    if (dst->count >= Node::maxEntries) { return false; }
+    if (dst->header.count >= Node::maxEntries) { return false; }
 
-    dst->keys[dst->count] = key;
-    dst->payloads[dst->count] = value;
-    dst->count += 1;
+    dst->keys[dst->header.count] = key;
+    dst->payloads[dst->header.count] = value;
+    dst->header.count += 1;
     return true;
 }
 
 static key_t max_key(Node* tree) {
-    if (tree->isLeaf) {
-        return tree->keys[tree->count - 1];
+    if (tree->header.isLeaf) {
+        return tree->keys[tree->header.count - 1];
     }
-    return max_key(reinterpret_cast<Node*>(tree->payloads[tree->count]));
+    return max_key(reinterpret_cast<Node*>(tree->payloads[tree->header.count]));
 }
 
 Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
@@ -57,11 +65,11 @@ Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
     for (unsigned i = 0; i < lowerLevel.size() - 1; i++) {
         Node* curr = lowerLevel[i];
         key_t sep = max_key(curr);
-        bool full = node->count >= Node::maxEntries;
-        full = full || static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) > loadFactor;
+        bool full = node->header.count >= Node::maxEntries;
+        full = full || static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) > loadFactor;
         if (full) {
             //node->upperOrNext = curr;
-            node->payloads[node->count] = reinterpret_cast<payload_t>(curr);
+            node->payloads[node->header.count] = reinterpret_cast<payload_t>(curr);
             currentLevel.push_back(node);
             node = create_node(false);
         } else {
@@ -71,9 +79,9 @@ Node* construct_inner_nodes(vector<Node*> lowerLevel, float loadFactor) {
         }
     }
     //node->upperOrNext = lowerLevel[lowerLevel.size() - 1];
-    node->payloads[node->count] = reinterpret_cast<payload_t>(lowerLevel[lowerLevel.size() - 1]);
+    node->payloads[node->header.count] = reinterpret_cast<payload_t>(lowerLevel[lowerLevel.size() - 1]);
     currentLevel.push_back(node);
-    cout << "count per inner node: " << lowerLevel.size() / currentLevel.size() << endl;
+    cout << "header.count per inner node: " << lowerLevel.size() / currentLevel.size() << endl;
 
     return construct_inner_nodes(currentLevel, loadFactor);
 }
@@ -87,10 +95,10 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
     for (uint64_t i = 0; i < n; i++) {
         auto k = keys[i];
         payload_t value = i;
-        bool full = node->count >= Node::maxEntries;
+        bool full = node->header.count >= Node::maxEntries;
 
-        full = full || static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) > loadFactor;
-//	std::cout << "current load: " << static_cast<float>(node->count) / static_cast<float>(Node::maxEntries) << std::endl;
+        full = full || static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) > loadFactor;
+//	std::cout << "current load: " << static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) << std::endl;
         if (full) {
             leaves.push_back(node);
             node = create_node(true);
@@ -106,7 +114,7 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
     }
     leaves.push_back(node);
 
-    cout << "count per leaf node: " << n / leaves.size() << endl;
+    cout << "header.count per leaf node: " << n / leaves.size() << endl;
 
     Node* root = construct_inner_nodes(leaves, loadFactor);
 
@@ -121,9 +129,9 @@ Node* construct_dense(uint32_t numElements, float loadFactor) {
 }
 
 static unsigned lower_bound(Node* node, key_t key) {
-    //cout << "search key: " << key << " in [" << node->keys[0] << ", " << node->keys[node->count - 1] << "]" << endl;
+    //cout << "search key: " << key << " in [" << node->keys[0] << ", " << node->keys[node->header.count - 1] << "]" << endl;
     unsigned lower = 0;
-    unsigned upper = node->count;
+    unsigned upper = node->header.count;
     do {
         unsigned mid = ((upper - lower) / 2) + lower;
         if (key < node->keys[mid]) {
@@ -139,7 +147,7 @@ static unsigned lower_bound(Node* node, key_t key) {
 
 bool lookup(Node* tree, key_t key, payload_t& result) {
     Node* node = tree;
-    while (!node->isLeaf) {
+    while (!node->header.isLeaf) {
         unsigned pos = lower_bound(node, key);
         //cout << "inner pos: " << pos << endl;
         node = reinterpret_cast<Node*>(node->payloads[pos]);
@@ -150,7 +158,7 @@ bool lookup(Node* tree, key_t key, payload_t& result) {
 
     unsigned pos = lower_bound(node, key);
     //cout << "pos: " << pos << endl;
-    if ((pos < node->count) && (node->keys[pos] == key)) {
+    if ((pos < node->header.count) && (node->keys[pos] == key)) {
         result = node->payloads[pos];
         return true;
     }
@@ -159,10 +167,10 @@ bool lookup(Node* tree, key_t key, payload_t& result) {
 }
 
 size_t tree_size_in_byte(Node* tree) {
-    if (tree->isLeaf) { return Node::pageSize; }
+    if (tree->header.isLeaf) { return Node::pageSize; }
 
     size_t size = Node::pageSize;
-    for (unsigned i = 0; i <= tree->count; ++i) {
+    for (unsigned i = 0; i <= tree->header.count; ++i) {
         Node* child = reinterpret_cast<Node*>(tree->payloads[i]);
         assert(child);
         size += tree_size_in_byte(child);
@@ -181,8 +189,8 @@ void prefetchTree(Node* tree, int device) {
         cudaMemAdvise(node, Node::pageSize, cudaMemAdviseSetReadMostly, device);
         cudaMemPrefetchAsync(node, btree::Node::pageSize, device);
 
-        if (node->isLeaf) return;
-        for (unsigned i = 0; i <= node->count; ++i) {
+        if (node->header.isLeaf) return;
+        for (unsigned i = 0; i <= node->header.count; ++i) {
             Node* child = reinterpret_cast<Node*>(node->payloads[i]);
             assert(child);
             self(self, child);
@@ -193,10 +201,10 @@ void prefetchTree(Node* tree, int device) {
 #endif
 
 void prefetchSubtree(Node* node, int device) {
-    bool isLeaf = node->isLeaf;
+    bool isLeaf = node->header.isLeaf;
 
     if (!isLeaf) {
-        for (unsigned i = 0; i <= node->count; ++i) {
+        for (unsigned i = 0; i <= node->header.count; ++i) {
             Node* child = reinterpret_cast<Node*>(node->payloads[i]);
             assert(child);
             prefetchSubtree(child, device);
@@ -285,9 +293,9 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n
 __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     const Node* node = tree;
-    while (!node->isLeaf) {
+    while (!node->header.isLeaf) {
         //unsigned pos = naive_lower_bound(node, key);
-        unsigned pos = branch_free_binary_search(key, node->keys, node->count);
+        unsigned pos = branch_free_binary_search(key, node->keys, node->header.count);
         //printf("inner pos: %d\n", pos);
         node = reinterpret_cast<const Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
@@ -296,9 +304,9 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     }
 
     //unsigned pos = naive_lower_bound(node, key);
-    unsigned pos = branch_free_binary_search(key, node->keys, node->count);
+    unsigned pos = branch_free_binary_search(key, node->keys, node->header.count);
     //printf("leaf pos: %d\n", pos);
-    if ((pos < node->count) && (node->keys[pos] == key)) {
+    if ((pos < node->header.count) && (node->keys[pos] == key)) {
         return node->payloads[pos];
     }
 
@@ -310,9 +318,9 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     float hint = 0.5f;
     const Node* node = tree;
-    while (!node->isLeaf) {
-        unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
-        if (pos > 0 && pos < node->count) {
+    while (!node->header.isLeaf) {
+        unsigned pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
+        if (pos > 0 && pos < node->header.count) {
             const auto prev = static_cast<float>(node->keys[pos - 1]);
             const auto current = static_cast<float>(node->keys[pos]);
             hint = (static_cast<float>(key) - prev)/(current - prev);
@@ -329,15 +337,15 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     }
 
     //unsigned pos = naive_lower_bound(node, key);
-    unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+    unsigned pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
     //printf("leaf pos: %d\n", pos);
 /*
-    if ((pos < node->count) && (node->keys[pos] == key)) {
+    if ((pos < node->header.count) && (node->keys[pos] == key)) {
         return node->payloads[pos];
     }
     return invalidTid;
 */
-    return (pos < node->count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
+    return (pos < node->header.count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
 }
 #endif
 
@@ -346,20 +354,20 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     float hint = 0.5f;
     const Node* node = tree;
-    while (!node->isLeaf) {
-        unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+    while (!node->header.isLeaf) {
+        unsigned pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
 
         const auto prev = (pos > 0) ? node->keys[pos - 1] : key>>1;
-        const auto current = (pos < node->count) ? node->keys[pos] : key + 1;
+        const auto current = (pos < node->header.count) ? node->keys[pos] : key + 1;
         hint = (static_cast<float>(key) - prev)/(current - prev);
 
         node = reinterpret_cast<const Node*>(node->payloads[pos]);
     }
 
     //unsigned pos = naive_lower_bound(node, key);
-    unsigned pos = branch_free_exponential_search(key, node->keys, node->count, hint);
+    unsigned pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
 
-    return (pos < node->count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
+    return (pos < node->header.count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
 }
 #endif
 
@@ -373,8 +381,8 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     do {
         node = reinterpret_cast<const Node*>(payload);
 
-        pos = branch_free_exponential_search(key, node->keys, node->count, hint);
-        if (pos > 0 && pos < node->count) {
+        pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
+        if (pos > 0 && pos < node->header.count) {
             const auto prev = static_cast<float>(node->keys[pos - 1]);
             const auto current = static_cast<float>(node->keys[pos]);
             hint = (static_cast<float>(key) - prev)/(current - prev);
@@ -383,9 +391,9 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
         }
 
         payload = node->payloads[pos];
-    } while (!node->isLeaf);
+    } while (!node->header.isLeaf);
 
-    if ((pos < node->count) && (node->keys[pos] == key)) {
+    if ((pos < node->header.count) && (node->keys[pos] == key)) {
         return payload;
     }
 
