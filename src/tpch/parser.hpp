@@ -269,7 +269,8 @@ struct worker {
 
 template<typename TupleType>
 void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
-    printf("=== in worker #%u ===\n", thread_num_);/*
+    //printf("=== in worker #%u ===\n", thread_num_);
+/*
     printf("worker #%u initial_run partition_start_hint_: %p\n", thread_num_, partition_start_hint_);
     printf("worker #%u hinted first line: %.*s\n", thread_num_, 120, partition_start_hint_);
 */
@@ -367,8 +368,9 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
         line_valid &= sep_cnt == column_count;
         if (!line_valid && i >= partition_size_) {
             // incomplete line at the end of this partition
+            /*
             long remaining = static_cast<long>(partition_size_) - i;
-            printf("worker #%u partition exhausted - remaining: %ld\n", thread_num_, remaining);
+            printf("worker #%u partition exhausted - remaining: %ld\n", thread_num_, remaining);*/
             break;
         } else if (!line_valid) {
             // invalid line somewhere in the partion
@@ -402,7 +404,7 @@ void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>
         return workers[a].last_index_ < workers[b].last_index_;
     });
 
-    printf("start densifying...\n");
+    //printf("start densifying...\n");
     const auto num_workers = workers.size();
 
     size_t dense_upper_limit = workers[0].last_index_; // the vectors are dense up to this index
@@ -483,7 +485,7 @@ auto parse(const std::string& file) {
     int handle = open(file.c_str(), O_RDONLY);
     lseek(handle, 0, SEEK_END);
     auto size = lseek(handle, 0, SEEK_CUR);
-    std::cout << "size: " << size << std::endl;
+    //std::cout << "size: " << size << std::endl;
     assert(size > 0);
     // ensure that the mapping size is a multiple of 8 (bytes beyound the file's
     // region are set to zero)
@@ -493,9 +495,9 @@ auto parse(const std::string& file) {
     const char* input = reinterpret_cast<const char*>(data);
 
     const auto est_line_width = sample_line_width(input, size);
-    std::cout << "estimated line width: " << est_line_width << std::endl;
+    //std::cout << "estimated line width: " << est_line_width << std::endl;
     const auto est_record_count = size/est_line_width;
-    std::cout << "estimated line count: " << est_record_count << std::endl;
+    //std::cout << "estimated line count: " << est_record_count << std::endl;
 
     const auto num_threads = std::max<size_t>(1, std::min<size_t>(std::thread::hardware_concurrency(), size/min_partition_size));
 
@@ -513,13 +515,13 @@ auto parse(const std::string& file) {
     const char* data_start = static_cast<const char*>(data);
     const char* partition_start_hint = data_start;
 
-    printf("estimated partition size: %lu\n", partition_size);
+    //printf("estimated partition size: %lu\n", partition_size);
 
     // create workers
     for (unsigned i = 0; i < num_threads; ++i) {
         size_t size_hint = std::min(remaining, partition_size);
         remaining -= size_hint;
-        printf("partition #%u partition_start_hint: %p size_hint: %lu\n", i, partition_start_hint, size_hint);
+        //printf("partition #%u partition_start_hint: %p size_hint: %lu\n", i, partition_start_hint, size_hint);
         // worker(const char* data_start, const char* partition_start_hint, size_t partition_size_hint, unsigned thread_num)
         workers.emplace_back(data_start, partition_start_hint, size_hint, num_threads, i);
         partition_start_hint += size_hint;
@@ -540,24 +542,8 @@ auto parse(const std::string& file) {
         }
     }
 
-    size_t count = 0;
-    for (unsigned i = 0; i < num_threads; ++i) {
-        const auto& worker = workers[i];
-        printf("worker #%u end: %lu count: %lu\n", i, worker.last_index_, worker.count_);
-        count += worker.count_;
-    }
-    printf("final count: %lu\n", count);
-
     // fill potential gaps in the result vectors
     densify(workers, dest_tuple);
-
-    count = 0;
-    for (unsigned i = 0; i < num_threads; ++i) {
-        const auto& worker = workers[i];
-        printf("worker #%u end: %lu count: %lu\n", i, worker.last_index_, worker.count_);
-        count += worker.count_;
-    }
-    printf("final count: %lu\n", count);
 
     // cleanup
     munmap(data, mapping_size);

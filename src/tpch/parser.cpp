@@ -79,7 +79,7 @@ unsigned sample_line_width(const char* data_start, size_t data_size) {
         ++count;
     }
 
-    std::cout << "count: " << count << " acc: " << acc << std::endl;
+    //std::cout << "count: " << count << " acc: " << acc << std::endl;
 
     return (count > 0) ? acc/count : data_size;
 }
