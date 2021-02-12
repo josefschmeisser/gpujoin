@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
     return RUN_ALL_TESTS();
 }
 
-TEST(test_parser, lineite_test) {
+TEST(test_parser, lineitem_test) {
     std::string lineitem_file = std::string(g_tpch_path) + "lineitem.tbl";
     using lineitem_tuple = std::tuple<
         uint32_t, // l_orderkey
