@@ -17,10 +17,10 @@
 #include "btree.cu"
 #include "rs.cu"
 
-using vector_copy_policy = vector_to_managed_array;// vector_to_managed_array;
-using rs_placement_policy = vector_to_managed_array;// vector_to_managed_array;
+using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
+using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
 
-static constexpr bool prefetch_index = false;
+static constexpr bool prefetch_index = true;
 static constexpr bool sort_indexed_relation = true;
 static constexpr int block_size = 128;
 static int num_sms;
@@ -126,7 +126,7 @@ struct btree_index {
 
     __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
         return btree::cuda::btree_lookup(tree_, key);
-   //     return btree::cuda::btree_lookup_with_hints(tree_, key);
+    //    return btree::cuda::btree_lookup_with_hints(tree_, key); // TODO
     }
 };
 
@@ -384,14 +384,14 @@ struct helper {
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 
-/*
     void run_two_phase_ij() {
         JoinEntry* join_entries;
         cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
 
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 
-        ij_lookup_kernel<<<numBlocks, block_size>>>(lineitem_device, lineitem_size, index_structure, join_entries);
+        int num_blocks = (part_size + block_size - 1) / block_size;
+        ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure, join_entries);
         cudaDeviceSynchronize();
 
         decltype(output_index) matches;
@@ -399,20 +399,26 @@ struct helper {
         assert(error == cudaSuccess);
         //printf("join matches: %u\n", matches);
 
-        ij_join_kernel<<<numBlocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
+        num_blocks = (lineitem_size + block_size - 1) / block_size;
+        ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
-    }*/
+    }
 };
 
 template<class IndexType>
-void load_and_run_ij(const std::string& path) {
+void load_and_run_ij(const std::string& path, bool as_full_pipline_breaker) {
     helper<IndexType> h;
     h.load_database(path);
-    h.run_ij();
+    if (as_full_pipline_breaker) {
+        printf("full pipline breaker\n");
+        h.run_two_phase_ij();
+    } else {
+        h.run_ij();
+    }
 }
 
 int main(int argc, char** argv) {
@@ -430,26 +436,27 @@ int main(int argc, char** argv) {
     h.load_database(argv[1]);
     h.run_hj();
 #else
-    if (argc != 3) {
-        printf("%s <tpch dataset path> <index type: {0: btree, 1: radixspline, 2: lowerbound>\n", argv[0]);
+    if (argc < 3) {
+        printf("%s <tpch dataset path> <index type: {0: btree, 1: radixspline, 2: lowerbound> <1: full pipline breaker>\n", argv[0]);
         return 0;
     }
     enum IndexType : unsigned { btree, radixspline, lowerbound } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
+    bool full_pipline_breaker = (argc < 4) ? false : std::stoi(argv[3]) != 0;
 
     switch (index_type) {
         case IndexType::btree: {
             printf("using btree\n");
-            load_and_run_ij<btree_index>(argv[1]);
+            load_and_run_ij<btree_index>(argv[1], full_pipline_breaker);
             break;
         }
         case IndexType::radixspline: {
             printf("using radixspline\n");
-            load_and_run_ij<radix_spline_index>(argv[1]);
+            load_and_run_ij<radix_spline_index>(argv[1], full_pipline_breaker);
             break;
         }
         case IndexType::lowerbound: {
             printf("using lower bound search\n");
-            load_and_run_ij<lower_bound_index>(argv[1]);
+            load_and_run_ij<lower_bound_index>(argv[1], full_pipline_breaker);
             break;
         }
         default:
