@@ -17,13 +17,16 @@
 #include "btree.cu"
 #include "rs.cu"
 
-using vector_copy_policy = vector_to_device_array;// vector_to_managed_array;
-using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
+using vector_copy_policy = vector_to_managed_array;
+using rs_placement_policy = vector_to_managed_array;
 
-static constexpr bool prefetch_index = true;
+static constexpr bool prefetch_index = false;
 static constexpr bool sort_indexed_relation = true;
 static constexpr int block_size = 128;
 static int num_sms;
+
+const uint32_t lower_shipdate = 2449962; // 1995-09-01
+const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
@@ -69,8 +72,6 @@ __forceinline__ __device__ unsigned lane_id() {
 
 __global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__ part, const lineitem_table_plain_t* __restrict__ lineitem, device_ht_t ht) {
     const char* prefix = "PROMO";
-    const uint32_t lower_shipdate = 2449962; // 1995-09-01
-    const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
     int64_t sum1 = 0;
     int64_t sum2 = 0;
@@ -179,8 +180,6 @@ using chosen_index_structure = radix_spline_index;// btree_index;// radix_spline
 template<class IndexStructureType>
 __global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
     const char* prefix = "PROMO";
-    const uint32_t lower_shipdate = 2449962; // 1995-09-01
-    const uint32_t upper_shipdate = 2449992; // 1995-10-01
 
     int64_t sum1 = 0;
     int64_t sum2 = 0;
@@ -244,9 +243,6 @@ __device__ int atomicAggInc(int *ptr) {
 
 template<class IndexStructureType>
 __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
-    const uint32_t lower_shipdate = 2449962; // 1995-09-01
-    const uint32_t upper_shipdate = 2449992; // 1995-10-01
-
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int i = index; i < lineitem_size + 31; i += stride) {
