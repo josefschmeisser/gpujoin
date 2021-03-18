@@ -37,6 +37,7 @@ struct Node : public NodeBase {
     payload_t payloads[maxEntries + 1];
 };
 //static_assert(offsetof(Node, keys) == 128);
+static_assert(sizeof(Node) < Node::pageSize);
 
 Node* construct(const std::vector<uint32_t>& keys, float loadFactor);
 

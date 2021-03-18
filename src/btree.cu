@@ -99,7 +99,6 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
         auto k = keys[i];
         payload_t value = i;
         bool full = node->header.count >= Node::maxEntries;
-
         full = full || static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) > loadFactor;
         if (full) {
             leaves.push_back(node);
@@ -248,7 +247,7 @@ Node* copy_btree_to_gpu(Node* tree) {
 namespace cuda {
 
 template<class T>
-__device__ unsigned branchy_binary_search(T x, const T* arr, unsigned size) {
+__device__ unsigned branchy_binary_search(T x, const T* arr, const unsigned size) {
     unsigned lower = 0;
     unsigned upper = size;
     do {
@@ -265,7 +264,7 @@ __device__ unsigned branchy_binary_search(T x, const T* arr, unsigned size) {
 }
 
 template<class T>
-__device__ unsigned branch_free_binary_search(T x, const T* arr, unsigned size) {
+__device__ unsigned branch_free_binary_search(T x, const T* arr, const unsigned size) {
     if (size < 1) { return 0; }
 
     const unsigned steps = 31 - __clz(size - 1);
@@ -284,7 +283,7 @@ __device__ unsigned branch_free_binary_search(T x, const T* arr, unsigned size) 
 }
 
 template<class T, unsigned max_step = 4> // TODO find optimal limit
-__device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n, float hint) {
+__device__ unsigned branch_free_exponential_search(T x, const T* arr, const unsigned n, const float hint) {
     //if (size < 1) return;
 
     const int last = n - 1;
@@ -311,7 +310,7 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n
 }
 
 template<class T>
-__device__ unsigned exponential_search(T x, const T* arr, unsigned size) {
+__device__ unsigned exponential_search(T x, const T* arr, const unsigned size) {
     assert(size > 0);
     int bound = 1;
     while (bound < size && arr[bound] < x) {
@@ -321,12 +320,20 @@ __device__ unsigned exponential_search(T x, const T* arr, unsigned size) {
     return lower + branchy_binary_search(x, arr + lower, min(bound + 1, size - lower));
 }
 
+template<class T>
+__device__ unsigned linear_search(T x, const T* arr, const unsigned size) {
+    for (unsigned i = 0; i < size; ++i) {
+        if (arr[i] >= x) return i;
+    }
+    return size;
+}
+
 __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     const Node* node = tree;
     while (!node->header.isLeaf) {
-        unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
-        //unsigned pos = exponential_search(key, node->keys, node->header.count);
+        //unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+        unsigned pos = linear_search(key, node->keys, node->header.count);
         //printf("inner pos: %d\n", pos);
         node = reinterpret_cast<const Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
@@ -334,8 +341,8 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
         }*/
     }
 
-    unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
-    //unsigned pos = exponential_search(key, node->keys, node->header.count);
+    //unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+    unsigned pos = linear_search(key, node->keys, node->header.count);
     //printf("leaf pos: %d\n", pos);
     if ((pos < node->header.count) && (node->keys[pos] == key)) {
         return node->payloads[pos];

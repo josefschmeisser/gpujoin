@@ -24,15 +24,15 @@ __global__ void btree_bulk_lookup(const Node* __restrict__ tree, unsigned n, con
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {
-        //tids[i] = btree_lookup(tree, keys[i]);
-        tids[i] = btree::cuda::btree_lookup_with_hints(tree, keys[i]);
+        tids[i] = btree_lookup(tree, keys[i]);
+        //tids[i] = btree::cuda::btree_lookup_with_hints(tree, keys[i]);
     }
 }
 
 int main(int argc, char** argv) {
     if (argc > 1) {
         std::string::size_type sz;
-        numElements = std::stod(argv[1],& sz);
+        numElements = std::stod(argv[1], &sz);
     }
 
     std::vector<btree::key_t> keys(numElements);
