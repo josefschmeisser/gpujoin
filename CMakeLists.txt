@@ -41,8 +41,8 @@ include_directories(
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
 )
 
-add_executable(btree_monolithic src/btree_monolithic.cu)
-target_link_libraries(btree_monolithic ${CUDART_LIBRARY} numa)
+add_executable(btree_lookup src/btree_lookup.cu)
+target_link_libraries(btree_lookup ${CUDART_LIBRARY} numa)
 
 add_executable(rs_lookup src/rs_lookup.cu)
 add_dependencies(rs_lookup RadixSpline)

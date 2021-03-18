@@ -274,7 +274,6 @@ void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
     printf("worker #%u initial_run partition_start_hint_: %p\n", thread_num_, partition_start_hint_);
     printf("worker #%u hinted first line: %.*s\n", thread_num_, 120, partition_start_hint_);
 */
-    fflush(stdout);
 
     // correct partition size
     if (thread_num_ > 0) {

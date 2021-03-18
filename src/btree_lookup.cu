@@ -1,15 +1,16 @@
-#include "btree.cuh"
-
 #include <cstdint>
 #include <cstdio>
 #include <cuda_runtime.h>
 #include <functional>
 #include <iostream>
 #include <numeric>
-#include <sys/types.h>
 #include <chrono>
+#include <memory>
 
 #include "zipf.hpp"
+
+#include "btree.cuh"
+#include "btree.cu"
 
 using namespace std;
 
@@ -19,7 +20,7 @@ static unsigned numElements = 1e8;
 using namespace btree;
 using namespace btree::cuda;
 
-__global__ void btree_bulk_lookup(const Node* tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+__global__ void btree_bulk_lookup(const Node* __restrict__ tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for (int i = index; i < n; i += stride) {
@@ -37,8 +38,7 @@ int main(int argc, char** argv) {
     std::vector<btree::key_t> keys(numElements);
     std::iota(keys.begin(), keys.end(), 0);
 
-//    auto tree = btree::construct_dense(1e6, 0.7);
-    auto tree = btree::construct(keys, 0.7);
+    auto tree = btree::construct(keys, 0.9);
     for (unsigned i = 0; i < numElements; ++i) {
         //printf("lookup %d\n", i);
         btree::payload_t value;
@@ -47,11 +47,11 @@ int main(int argc, char** argv) {
     }
 
     int blockSize = 32;
-   // int numBlocks = (numElements + blockSize - 1) / blockSize;
-
+    int numBlocks = (numElements + blockSize - 1) / blockSize;
+    /*
     int numSMs;
     cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
-    int numBlocks = 32*numSMs;
+    int numBlocks = 32*numSMs;*/
     printf("numblocks: %d\n", numBlocks);
 
     // shuffle keys
@@ -63,14 +63,17 @@ int main(int argc, char** argv) {
     cudaMalloc(&lookupKeys, numElements*sizeof(btree::key_t));
     // TODO shuffle keys/Zipfian lookup patterns
     cudaMemcpy(lookupKeys, keys.data(), numElements*sizeof(btree::key_t), cudaMemcpyHostToDevice);
-    btree::payload_t* tids;
-    cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
+    btree::payload_t* d_tids;
+    cudaMalloc(&d_tids, numElements*sizeof(decltype(d_tids)));
 
-    btree::prefetchTree(tree, 0);
+    //btree::prefetchTree(tree, 0);
+    auto d_tree = tree;
+    d_tree = btree::copy_btree_to_gpu(tree);
 
+    printf("executing kernel...\n");
     const auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-        btree_bulk_lookup<<<numBlocks, blockSize>>>(tree, numElements, lookupKeys, tids);
+        btree_bulk_lookup<<<numBlocks, blockSize>>>(d_tree, numElements, lookupKeys, d_tids);
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
@@ -79,10 +82,13 @@ int main(int argc, char** argv) {
     std::cout << "GPU MOps: " << (maxRepetitions*numElements/1e6)/(kernelTime/1e3) << endl;
 
     // validate results
+    printf("validating results...\n");
+    std::unique_ptr<btree::payload_t[]> h_tids(new btree::payload_t[numElements]);
+    cudaMemcpy(h_tids.get(), d_tids, numElements*sizeof(decltype(d_tids)), cudaMemcpyDeviceToHost);
     for (unsigned i = 0; i < numElements; ++i) {
-        //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(tids[i]), keys[i]);
-        if (reinterpret_cast<uint64_t>(tids[i]) != keys[i]) {
-            printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(tids[i]), keys[i]);
+        //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(h_tids[i]), keys[i]);
+        if (reinterpret_cast<uint64_t>(h_tids[i]) != keys[i]) {
+            printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(h_tids[i]), keys[i]);
             throw;
         }
     }
