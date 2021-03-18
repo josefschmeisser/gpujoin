@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 #include <iostream>
@@ -10,6 +12,7 @@
 #include <cassert>
 #include <numeric>
 #include <limits>
+#include <memory>
 
 #include <numa.h>
 
@@ -98,14 +101,12 @@ Node* construct(const vector<key_t>& keys, float loadFactor) {
         bool full = node->header.count >= Node::maxEntries;
 
         full = full || static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) > loadFactor;
-//	std::cout << "current load: " << static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) << std::endl;
         if (full) {
             leaves.push_back(node);
             node = create_node(true);
             bool inserted = append_into(node, k, value);
             (void)inserted;
             assert(inserted);
-            //leaves.back()->upperOrNext = node;
         } else {
             bool appended = append_into(node, k, value);
             (void)appended;
@@ -225,6 +226,25 @@ void prefetchTree(Node* tree, int device) {
     cudaDeviceSynchronize();
 }
 
+Node* copy_btree_to_gpu(Node* tree) {
+    Node* newTree;
+    cudaMalloc(&newTree, Node::pageSize);
+    if (!tree->header.isLeaf) {
+        std::unique_ptr<uint8_t[]> tmpMem { new uint8_t[Node::pageSize] };
+        Node* tmp = reinterpret_cast<Node*>(tmpMem.get());
+        std::memcpy(tmp, tree, Node::pageSize);
+        for (unsigned i = 0; i <= tree->header.count; ++i) {
+            Node* child = reinterpret_cast<Node*>(tree->payloads[i]);
+            Node* newChild = copy_btree_to_gpu(child);
+            tmp->payloads[i] = reinterpret_cast<decltype(tmp->payloads[0])>(newChild);
+        }
+        cudaMemcpy(newTree, tmp, Node::pageSize, cudaMemcpyHostToDevice);
+    } else {
+        cudaMemcpy(newTree, tree, Node::pageSize, cudaMemcpyHostToDevice);
+    }
+    return newTree;
+}
+
 namespace cuda {
 
 template<class T>
@@ -265,7 +285,7 @@ __device__ unsigned branch_free_binary_search(T x, const T* arr, unsigned size) 
 
 template<class T, unsigned max_step = 4> // TODO find optimal limit
 __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n, float hint) {
-//    if (size < 1) { return 0; }
+    //if (size < 1) return;
 
     const int last = n - 1;
     const int start = static_cast<int>(last*hint);
@@ -290,12 +310,23 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, unsigned n
 //    return lower + branch_free_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
 }
 
+template<class T>
+__device__ unsigned exponential_search(T x, const T* arr, unsigned size) {
+    assert(size > 0);
+    int bound = 1;
+    while (bound < size && arr[bound] < x) {
+        bound <<= 1;
+    }
+    const auto lower = bound>>1;
+    return lower + branchy_binary_search(x, arr + lower, min(bound + 1, size - lower));
+}
+
 __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     const Node* node = tree;
     while (!node->header.isLeaf) {
-        //unsigned pos = naive_lower_bound(node, key);
-        unsigned pos = branch_free_binary_search(key, node->keys, node->header.count);
+        unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+        //unsigned pos = exponential_search(key, node->keys, node->header.count);
         //printf("inner pos: %d\n", pos);
         node = reinterpret_cast<const Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
@@ -303,8 +334,8 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
         }*/
     }
 
-    //unsigned pos = naive_lower_bound(node, key);
-    unsigned pos = branch_free_binary_search(key, node->keys, node->header.count);
+    unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+    //unsigned pos = exponential_search(key, node->keys, node->header.count);
     //printf("leaf pos: %d\n", pos);
     if ((pos < node->header.count) && (node->keys[pos] == key)) {
         return node->payloads[pos];
@@ -345,6 +376,32 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     }
     return invalidTid;
 */
+    return (pos < node->header.count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
+}
+#endif
+
+#if 0
+__device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
+    unsigned pos = branch_free_binary_search(key, tree->keys, tree->header.count);
+
+    auto prev = (pos > 0) ? tree->keys[pos - 1] : key>>1;
+    auto current = (pos < tree->header.count) ? tree->keys[pos] : key + 1;
+    //auto current = tree->keys[pos];
+    float hint = (static_cast<float>(key) - prev)/(current - prev);
+
+    const Node* node = reinterpret_cast<const Node*>(tree->payloads[pos]);
+    while (!node->header.isLeaf) {
+        pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
+
+        auto prev = (pos > 0) ? node->keys[pos - 1] : key>>1;
+        auto current = (pos < node->header.count) ? node->keys[pos] : key + 1;
+        //auto current = node->keys[pos];
+        hint = (static_cast<float>(key) - prev)/(current - prev);
+
+        node = reinterpret_cast<const Node*>(node->payloads[pos]);
+    }
+
+    pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
     return (pos < node->header.count) && (node->keys[pos] == key) ? node->payloads[pos] : invalidTid;
 }
 #endif
@@ -400,17 +457,6 @@ __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     return invalidTid;
 }
 #endif
-
-/*
-__global__ void btree_bulk_lookup(const Node* tree, unsigned n, uint32_t* keys, payload_t* tids) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < n; i += stride) {
-        //tids[i] = btree_lookup(tree, keys[i]);
-        tids[i] = btree_lookup_with_hints(tree, keys[i]);
-    }
-}
-*/
 
 } // namespace cuda
 
