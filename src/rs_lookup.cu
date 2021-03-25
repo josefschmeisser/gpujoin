@@ -25,8 +25,8 @@ using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
 
 static constexpr int device_id = 0;
 static constexpr unsigned maxRepetitions = 10;
-static constexpr unsigned numElements = 1e8;
 static constexpr payload_t invalidTid = std::numeric_limits<payload_t>::max();
+static unsigned numElements = 1e8;
 
 struct Relation {
     size_t count;
@@ -71,6 +71,12 @@ __global__ void validate_results(const payload_t* __restrict__ tids, unsigned n,
 }
 
 int main(int argc, char** argv) {
+    if (argc > 1) {
+        std::string::size_type sz;
+        numElements = std::stod(argv[1], &sz);
+    }
+    std::cout << "index size: " << numElements << std::endl;
+
     (void)device_id;
 
     Relation rel;

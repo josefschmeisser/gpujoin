@@ -54,5 +54,7 @@ add_subdirectory(test)
 
 add_executable(bf_search src/bf_search.cpp)
 
+add_executable(random_access src/random_access.cu)
+
 #add_executable(parser test/tpch/parser.cpp src/tpch/parser.cpp src/tpch/common.cpp)
 #target_link_libraries(parser pthread)
