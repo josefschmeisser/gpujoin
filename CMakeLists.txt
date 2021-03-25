@@ -46,6 +46,7 @@ target_link_libraries(btree_lookup ${CUDART_LIBRARY} numa)
 
 add_executable(rs_lookup src/rs_lookup.cu)
 add_dependencies(rs_lookup RadixSpline)
+target_link_libraries(rs_lookup ${CUDART_LIBRARY} numa)
 target_include_directories(rs_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
 
 add_subdirectory(src/tpch)
