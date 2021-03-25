@@ -35,6 +35,13 @@ __global__ void random_access(const lookup_t* __restrict__ src, const lookup_t* 
 }
 
 int main(int argc, char** argv) {
+    int blockSize = 512;
+    int numBlocks = (numElements + blockSize - 1) / blockSize;
+    if (argc > 1) {
+        blockSize = std::atoi(argv[1]);
+    }
+    printf("numblocks: %d\n", numBlocks);
+
     double transfered_gib = accessRounds*numElements*sizeof(lookup_t)/std::pow(1024, 3.);
     std::cout << "total size: " << transfered_gib << " GiB" << std::endl;
 
@@ -55,11 +62,6 @@ int main(int argc, char** argv) {
 
         cudaMalloc(&d_dst, numElements*sizeof(lookup_t));
     }
-
-    int blockSize = 512;
-    int numBlocks = (numElements + blockSize - 1) / blockSize;
-
-    printf("numblocks: %d\n", numBlocks);
 
     printf("executing kernel...\n");
     const auto kernelStart = std::chrono::high_resolution_clock::now();
