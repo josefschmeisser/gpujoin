@@ -9,6 +9,7 @@
 #include <chrono>
 #include <memory>
 #include <random>
+#include <algorithm>
 
 #include "utils.hpp"
 
