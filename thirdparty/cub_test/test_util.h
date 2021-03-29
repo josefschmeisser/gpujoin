@@ -46,16 +46,17 @@
 #include <sstream>
 #include <iostream>
 #include <limits>
+#include <random>
 
-#include "mersenne.h"
+//#include "mersenne.h"
 #include "half.h"
 
-#include "cub/util_debug.cuh"
-#include "cub/util_device.cuh"
-#include "cub/util_type.cuh"
-#include "cub/util_macro.cuh"
-#include "cub/util_math.cuh"
-#include "cub/iterator/discard_output_iterator.cuh"
+#include <cub/util_debug.cuh>
+#include <cub/util_device.cuh>
+#include <cub/util_type.cuh>
+#include <cub/util_macro.cuh>
+//#include <cub/util_math.cuh>
+#include <cub/iterator/discard_output_iterator.cuh>
 
 /******************************************************************************
  * Type conversion macros
@@ -110,11 +111,11 @@ struct CommandLineArgs
         values(10)
     {
         using namespace std;
-
+/* TODO:
         // Initialize mersenne generator
         unsigned int mersenne_init[4]=  {0x123, 0x234, 0x345, 0x456};
         mersenne::init_by_array(mersenne_init, 4);
-
+*/
         for (int i = 1; i < argc; i++)
         {
             string arg = argv[i];
@@ -443,6 +444,9 @@ void RandomBits(
 
     unsigned int word_buff[NUM_WORDS];
 
+    static std::random_device dev;
+    static std::mt19937 rng(dev());
+
     if (entropy_reduction == -1)
     {
         memset((void *) &key, 0, sizeof(key));
@@ -466,7 +470,8 @@ void RandomBits(
             for (int i = 0; i <= entropy_reduction; i++)
             {
                 // Grab some of the higher bits from rand (better entropy, supposedly)
-                word &= mersenne::genrand_int32();
+                //word &= mersenne::genrand_int32();
+                word &= rng();
                 g_num_rand_samples++;
             }
 
@@ -1544,7 +1549,7 @@ void DisplayDeviceResults(
     if (h_data) free(h_data);
 }
 
-
+#if 0 // TODO
 /******************************************************************************
  * Segment descriptor generation
  ******************************************************************************/
@@ -1579,7 +1584,7 @@ void InitializeSegments(
         DisplayResults(h_segment_offsets, num_segments + 1);
     }
 }
-
+#endif
 
 /******************************************************************************
  * Timing
