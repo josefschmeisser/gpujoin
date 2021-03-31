@@ -138,7 +138,14 @@ struct radix_spline_index {
     __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
         d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
+
+        // copy radix spline
+        const auto start = std::chrono::high_resolution_clock::now();
         d_rs_ = rs::copy_radix_spline<rs_placement_policy>(h_rs);
+        const auto finish = std::chrono::high_resolution_clock::now();
+        const auto duration = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
+        std::cout << "radixspline transfer time: " << duration << " ms\n";
+
         auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
     }
