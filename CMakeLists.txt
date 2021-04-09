@@ -37,6 +37,7 @@ include(lib/RadixSpline.cmake)
 include(lib/gtest.cmake)
 
 include_directories(
+    ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
 )
@@ -55,6 +56,8 @@ add_subdirectory(test)
 add_executable(bf_search src/bf_search.cpp)
 
 add_executable(random_access src/random_access.cu)
+
+add_executable(cub_sort src/example_block_radix_sort.cu)
 
 #add_executable(parser test/tpch/parser.cpp src/tpch/parser.cpp src/tpch/common.cpp)
 #target_link_libraries(parser pthread)
