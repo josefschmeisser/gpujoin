@@ -41,6 +41,9 @@
 #include <iostream>
 #include <algorithm>
 
+//#include <format>
+#include <bitset>
+
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_store.cuh>
 #include <cub/block/block_radix_sort.cuh>
@@ -114,7 +117,7 @@ __global__ void BlockSortKernel(
     clock_t start = clock();
 
     // Sort keys
-    BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(items);
+    BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(items, 20, 32);
 
     // Stop cycle timer
     clock_t stop = clock();
@@ -225,8 +228,20 @@ void Test()
     printf("\tOutput items: ");
     int compare = CompareDeviceResults(h_reference, d_out, TILE_SIZE, g_verbose, g_verbose);
     printf("%s\n", compare ? "FAIL" : "PASS");
-    AssertEquals(0, compare);
+//    AssertEquals(0, compare);
     fflush(stdout);
+
+    {
+        const auto numItems = TILE_SIZE*g_grid_size;
+        Key *h_out = new Key[numItems];
+        cudaMemcpy(h_out, d_out, numItems*sizeof(Key), cudaMemcpyDeviceToHost);
+        for (size_t i = 0; i < numItems; ++i) {
+            //std::cout << std::format("{:b}", h_out[i]) << std::endl;
+            std::cout << std::bitset<32>(h_out[i]) << std::endl;
+        }
+    }
+
+
 
     // Run this several times and average the performance results
     GpuTimer            timer;
@@ -311,7 +326,7 @@ int main(int argc, char** argv)
     printf("\nuint32:\n"); fflush(stdout);
     Test<unsigned int, 128, 13>();
     printf("\n"); fflush(stdout);
-
+/*
     printf("\nfp32:\n"); fflush(stdout);
     Test<float, 128, 13>();
     printf("\n"); fflush(stdout);
@@ -319,7 +334,7 @@ int main(int argc, char** argv)
     printf("\nuint8:\n"); fflush(stdout);
     Test<unsigned char, 128, 13>();
     printf("\n"); fflush(stdout);
-
+*/
     return 0;
 }
 
