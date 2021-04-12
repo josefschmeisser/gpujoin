@@ -1,6 +1,7 @@
 #include "common.hpp"
 
 #include <algorithm>
+#include <bits/stdint-uintn.h>
 #include <cstddef>
 #include <cstdio>
 #include <device_atomic_functions.h>
@@ -269,26 +270,36 @@ template<
     int   ITEMS_PER_THREAD,
     class IndexStructureType >
 __launch_bounds__ (BLOCK_THREADS)
-__global__ void ij_full_kernel_2(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
+__global__ void ij_full_kernel_2(
+    const lineitem_table_plain_t* __restrict__ lineitem,
+    const unsigned lineitem_size,
+//    const part_table_plain_t* __restrict__ part,
+    IndexStructureType index_structure)
+{
 /*
-    if (blockIdx.x == gridDim.x - 1) {
-        printf("last block - todo\n");
-        return;
-    }
-*/
-
     const char* prefix = "PROMO";
 
     int64_t sum1 = 0;
     int64_t sum2 = 0;
+*/
 
-    enum { TILE_SIZE = BLOCK_THREADS * ITEMS_PER_THREAD, WARPS_PER_BLOCK = ?, MAX_ITERATIONS = ? };
+    enum {
+        TILE_SIZE = BLOCK_THREADS * ITEMS_PER_THREAD,
+        MAX_ITEMS_PER_WARP = ITEMS_PER_THREAD * 32,
+        WARPS_PER_BLOCK = BLOCK_THREADS / 32,
+        BUFFER_SIZE = MAX_ITEMS_PER_WARP*WARPS_PER_BLOCK
+    };
     typedef BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
 
-    __shared__ uint32_t p_partkey_buffer[TILE_SIZE]; // TODO size
-    __shared__ uint32_t lineitem_tid_buffer[TILE_SIZE];
+    __shared__ uint32_t p_partkey_buffer[BUFFER_SIZE];
+    __shared__ uint32_t lineitem_tid_buffer[BUFFER_SIZE];
     __shared__ uint32_t bufferIdx = 0;
+
     __shared__ uint16_t fully_occupied_warps = 0;
+    __shared__ uint16_t exhausted_warps = 0;
+
+    __shared__ uint16_t items_per_warp[WARPS_PER_BLOCK];
+
     __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
     union {
@@ -304,127 +315,134 @@ __global__ void ij_full_kernel_2(const lineitem_table_plain_t* __restrict__ line
    // int block_offset = blockIdx.x * TILE_SIZE;
     const unsigned thread_offset = blockIdx.x * TILE_SIZE;
 
-    const unsigned limit = 0;
-    unsigned register_items = 0;
-    uint32_t lanes_not_done = FULL_MASK;
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
 
-    unsigned tid = threadIdx.x + thread_offset;
-    while (lanes_not_done) {
+    while (exhausted_warps < WARPS_PER_BLOCK) {
+        uint16_t register_items = 0;
+    //    uint16_t warp_buffered_items = 0;
+        uint32_t underfull_lanes = FULL_MASK; // lanes that have less than ITEMS_PER_THREAD items in their registers
+        uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
 
-        // filter predicate
-        int active = lineitem->l_shipdate[tid] >= lower_shipdate && lineitem->l_shipdate[tid] < upper_shipdate;
+        unsigned tid = threadIdx.x + thread_offset;
+        while (unexhausted_lanes && underfull_lanes && items_per_warp[warp_id] < MAX_ITEMS_PER_WARP) {
+            int active = tid < lineitem_size;
 
-        // fetch attributes
-        uint32_t p_partkey;
-        if (active) {
-            p_partkey = part->p_partkey[tid];
+            // filter predicate
+            if (active) {
+                active = lineitem->l_shipdate[tid] >= lower_shipdate && lineitem->l_shipdate[tid] < upper_shipdate;
+            }
+
+            // fetch attributes
+            uint32_t p_partkey;
+            if (active) {
+                p_partkey = part->p_partkey[tid];
+            }
+
+            // negotiate buffer target positions among all threads in this warp
+            unsigned mask = __ballot_sync(FULL_MASK, register_items > ITEMS_PER_THREAD);
+            unsigned right = __funnelshift_l(0xffffffff, 0, lane_id()); // TODO replace lane_id call
+            unsigned offset = __popc(mask & right);
+            unsigned dest_idx = 0;
+            if (lane_id() == 0) {
+                dest_idx = atomicAdd(&bufferIdx, __popc(mask));
+            }
+            dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0);
+
+            // matrialize attributes
+            if (active && register_items > ITEMS_PER_THREAD) {
+                // buffer items
+                lineitem_tid_buffer[dest_idx] = tid;
+                p_partkey_buffer[dest_idx] = p_partkey;
+            } else if (active) {
+                // store items in registers
+                auto& p = join_pairs[register_items++];
+                p.lineitem_tid = tid;
+                p.p_partkey = p_partkey;
+            }
+
+            underfull_lanes = __ballot_sync(FULL_MASK, register_items < ITEMS_PER_THREAD);
+            unexhausted_lanes = __ballot_sync(FULL_MASK, tid < lineitem_size);
+/*
+            if (unexhausted_lanes == 0) {
+                atomicInc(&exhausted_warps);
+            }
+*/
+/*
+            if (active) {
+                atomicInc(&items_per_warp[warp_id]);
+            }*/
+
+            active_lanes = __ballot_sync(FULL_MASK, active);
+            if (lane_id() == 0) {
+                atomicAdd(&items_per_warp[warp_id], __popcnt(active_lanes);
+            }
+            __syncwarp();
+
+            tid += thread_offset; // TODO
         }
 
-        // negotiate buffer target positions among all threads in this warp
-        unsigned mask = __ballot_sync(FULL_MASK, register_items > ITEMS_PER_THREAD);
-        unsigned right = __funnelshift_l(0xffffffff, 0, lane_id());
-        unsigned offset = __popc(mask & right);
-        unsigned dest_idx = 0;
-        if (lane_id() == 0) {
-            dest_idx = atomicAdd(&bufferIdx, __popc(mask));
-        }
-        dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0);
+        __syncthreads(); // wait until all threads have gathered enough elements
 
-        __syncwarp();
-
-        // matrialize attributes
-        if (active && register_items > ITEMS_PER_THREAD) {
-            // buffer items
-            lineitem_tid_buffer[dest_idx] = tid;
-            p_partkey_buffer[dest_idx] = p_partkey;
-        } else if (active) {
-            // store items in registers
-            auto& p = join_pairs[register_items++];
-            p.lineitem_tid = tid;
-            p.p_partkey = p_partkey;
-        }
-
-        lanes_not_done = __ballot_sync(FULL_MASK, register_items < ITEMS_PER_THREAD);
-        __syncwarp();
-    }
-
-    __syncthreads(); // wait until all threads have gathered enough elements
-
-
-    // determine the number of items required to fully populate this warp
-    unsigned refill_cnt = 0;
-    #pragma unroll
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        refill_cnt += __shfl_down_sync(FULL_MASK, ITEMS_PER_THREAD - register_items, offset);
-    }
-
-
-// TODO add condition
-    // distribute buffered items among the threads in this warp
-    if (refill_cnt > 0) {
-    /*
-        // Specialize WarpScan for type int
-        typedef cub::WarpScan<int> WarpScan;
-        // Allocate WarpScan shared memory for 4 warps
-        __shared__ typename WarpScan::TempStorage temp_storage[4];
-        // Obtain one input item per thread
-        int thread_data = ...
-        // Compute warp-wide prefix sums
-        int warp_id = threadIdx.x / 32;
-        WarpScan(temp_storage[warp_id]).ExclusiveSum(thread_data, thread_data);
-    */
-
-        int available_cnt = 0;
-        if (lane_id() == 0) {
-            available_cnt = atomic_sub_sat(bufferIdx, refill_cnt, 0);
-        }
-        // TODO _syncwarp(); ?
-        //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
-        available_cnt = __shfl_sync(FULL_MASK, available_cnt, 0);
-
-        __syncwarp();
-
-
-        int prefix_sum = ITEMS_PER_THREAD - register_items;
-        // calculate the inclusive prefix sum among all threads in this warp
+        // determine the number of items required to fully populate this warp
+        unsigned refill_cnt = 0;
         #pragma unroll
-        for (int offset = 1; offset <= 32; offset <<= 1) {
-            prefix_sum += __shfl_up_sync(FULL_MASK, prefix_sum, offset);
-        }
-        // calculate the exclusive prefix sum
-        prefix_sum -= ITEMS_PER_THREAD - register_items;
-
-        // refill registers with buffered elements
-        const auto limit = prefix_sum + ITEMS_PER_THREAD - register_items;
-        for (; prefix_sum < limit; ++prefix_sum) {
-            auto& p = join_pairs[register_items++];
-            p.lineitem_tid = lineitem_tid_buffer[prefix_sum];
-            p.p_partkey = p_partkey_buffer[prefix_sum];
+        for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+            refill_cnt += __shfl_down_sync(FULL_MASK, ITEMS_PER_THREAD - register_items, offset);
         }
 
-        refill_cnt -= available_cnt;
-    }
+        // distribute buffered items among the threads in this warp
+        if (refill_cnt > 0) {
+            int available_cnt = 0;
+            if (lane_id() == 0) {
+                available_cnt = atomic_sub_sat(bufferIdx, refill_cnt, 0);
+            }
 
-    if (refill_cnt == 0 && lane_id() == 0) {
-        atomicAdd(&fully_occupied_warps, 1);
-    }
+            //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
+            available_cnt = __shfl_sync(FULL_MASK, available_cnt, 0);
 
-    __syncthreads(); // wait until all threads have gathered enough elements
+            int prefix_sum = ITEMS_PER_THREAD - register_items;
+            // calculate the inclusive prefix sum among all threads in this warp
+            #pragma unroll
+            for (int offset = 1; offset <= 32; offset <<= 1) {
+                prefix_sum += __shfl_up_sync(FULL_MASK, prefix_sum, offset);
+            }
+            // calculate the exclusive prefix sum
+            prefix_sum -= ITEMS_PER_THREAD - register_items;
+
+            // refill registers with buffered elements
+            const auto limit = prefix_sum + ITEMS_PER_THREAD - register_items;
+            for (; prefix_sum < limit; ++prefix_sum) {
+                auto& p = join_pairs[register_items++];
+                p.lineitem_tid = lineitem_tid_buffer[prefix_sum];
+                p.p_partkey = p_partkey_buffer[prefix_sum];
+            }
+
+            refill_cnt -= available_cnt;
+        }
+
+        if (refill_cnt == 0 && lane_id() == 0) {
+            atomicAdd(&fully_occupied_warps, 1);
+        }
+
+        __syncthreads(); // wait until all threads have gathered enough elements
 
 /* TODO
-//    if (element == ITEMS_PER_THREAD) {
-    if (fully_occupied_warps == WARPS_PER_BLOCK)
-        printf("sorting...\n");
-        BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs, 20, 32); // TODO
-    }
+        if (fully_occupied_warps == WARPS_PER_BLOCK)
+            printf("sorting...\n");
+            BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs, 20, 32); // TODO
+        }
 */
 
+        for (unsigned i = 0; i < actual_items; ++i) {
+            btree::payload_t payload = btree::invalidTid;
+            payload = index_structure();
+        }
 
-    for (unsigned i = 0; i < actual_items; ++i) {
-        btree::payload_t payload = btree::invalidTid;
-        payload = index_structure();
+        // reset state
+        fully_occupied_warps = 0;
+        __syncthreads();
     }
-
 }
 
 
