@@ -239,30 +239,17 @@ __global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineit
 }
 
 
-/*
-#if __CUDA_ARCH__ < 600
-__device__ double atomicAdd(double* address, double val)
-{
-    unsigned long long int* address_as_ull =
-                              (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
-
-    do {
-        assumed = old;
-        old = atomicCAS(address_as_ull, assumed,
-                        __double_as_longlong(val +
-                               __longlong_as_double(assumed)));
-
-    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-    } while (assumed != old);
-
-    return __longlong_as_double(old);
-}
-#endif
-*/
 template<class T>
-__device__ T atomic_sub_sat(T* address, T val, T limit);
-
+__device__ T atomic_sub_safe(T* address, T val) {
+    unsigned expected, update, old;
+    old = *address;
+    do {
+        expected = old;
+        update = (old - val < old) ? (old - val) : 0;
+        old = atomicCAS(address, expected, update);
+    } while (expected != old);
+    return old;
+}
 
 
 template<
@@ -291,20 +278,19 @@ __global__ void ij_full_kernel_2(
     };
     typedef BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
 
-    __shared__ uint32_t p_partkey_buffer[BUFFER_SIZE];
+    __shared__ uint32_t l_partkey_buffer[BUFFER_SIZE];
     __shared__ uint32_t lineitem_tid_buffer[BUFFER_SIZE];
-    __shared__ uint32_t bufferIdx = 0;
+    __shared__ uint32_t buffer_idx;
 
-    __shared__ uint16_t fully_occupied_warps = 0;
-    __shared__ uint16_t exhausted_warps = 0;
-
-    __shared__ uint16_t items_per_warp[WARPS_PER_BLOCK];
+    __shared__ uint32_t fully_occupied_warps;
+    __shared__ uint32_t exhausted_warps;
+    __shared__ uint32_t items_per_warp[WARPS_PER_BLOCK];
 
     __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
     union {
         struct {
-            uint32_t p_partkey;
+            uint32_t l_partkey;
             uint32_t lineitem_tid;
         } join_pair;
         uint64_t raw;
@@ -318,9 +304,15 @@ __global__ void ij_full_kernel_2(
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
+    // initialize shared variables
+    if (warp_id == 0 && lane_id == 0) {
+        buffer_idx = 0;
+        fully_occupied_warps = 0;
+        exhausted_warps = 0;
+    }
+
     while (exhausted_warps < WARPS_PER_BLOCK) {
         uint16_t register_items = 0;
-    //    uint16_t warp_buffered_items = 0;
         uint32_t underfull_lanes = FULL_MASK; // lanes that have less than ITEMS_PER_THREAD items in their registers
         uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
 
@@ -334,18 +326,18 @@ __global__ void ij_full_kernel_2(
             }
 
             // fetch attributes
-            uint32_t p_partkey;
+            uint32_t l_partkey;
             if (active) {
-                p_partkey = part->p_partkey[tid];
+                l_partkey = lineitem->l_partkey[tid];
             }
 
             // negotiate buffer target positions among all threads in this warp
             unsigned mask = __ballot_sync(FULL_MASK, register_items > ITEMS_PER_THREAD);
-            unsigned right = __funnelshift_l(0xffffffff, 0, lane_id()); // TODO replace lane_id call
+            unsigned right = __funnelshift_l(0xffffffff, 0, lane_id);
             unsigned offset = __popc(mask & right);
             unsigned dest_idx = 0;
-            if (lane_id() == 0) {
-                dest_idx = atomicAdd(&bufferIdx, __popc(mask));
+            if (lane_id == 0) {
+                dest_idx = atomicAdd(&buffer_idx, __popc(mask));
             }
             dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0);
 
@@ -353,33 +345,29 @@ __global__ void ij_full_kernel_2(
             if (active && register_items > ITEMS_PER_THREAD) {
                 // buffer items
                 lineitem_tid_buffer[dest_idx] = tid;
-                p_partkey_buffer[dest_idx] = p_partkey;
+                l_partkey_buffer[dest_idx] = l_partkey;
             } else if (active) {
                 // store items in registers
                 auto& p = join_pairs[register_items++];
                 p.lineitem_tid = tid;
-                p.p_partkey = p_partkey;
+                p.l_partkey = l_partkey;
             }
 
             underfull_lanes = __ballot_sync(FULL_MASK, register_items < ITEMS_PER_THREAD);
             unexhausted_lanes = __ballot_sync(FULL_MASK, tid < lineitem_size);
-/*
-            if (unexhausted_lanes == 0) {
-                atomicInc(&exhausted_warps);
-            }
-*/
-/*
-            if (active) {
-                atomicInc(&items_per_warp[warp_id]);
-            }*/
 
-            active_lanes = __ballot_sync(FULL_MASK, active);
-            if (lane_id() == 0) {
-                atomicAdd(&items_per_warp[warp_id], __popcnt(active_lanes);
+            if (unexhausted_lanes == 0 && lane_id == 0) {
+                atomicInc(&exhausted_warps, std::numeric_limits<decltype(exhausted_warps)>::max());
             }
-            __syncwarp();
+
+            auto active_lanes = __ballot_sync(FULL_MASK, active);
+            if (lane_id == 0) {
+                atomicAdd(&items_per_warp[warp_id], __popc(active_lanes));
+            }
 
             tid += thread_offset; // TODO
+
+            __syncwarp();
         }
 
         __syncthreads(); // wait until all threads have gathered enough elements
@@ -394,8 +382,8 @@ __global__ void ij_full_kernel_2(
         // distribute buffered items among the threads in this warp
         if (refill_cnt > 0) {
             int available_cnt = 0;
-            if (lane_id() == 0) {
-                available_cnt = atomic_sub_sat(bufferIdx, refill_cnt, 0);
+            if (lane_id == 0) {
+                available_cnt = atomic_sub_safe(&buffer_idx, refill_cnt);
             }
 
             //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
@@ -415,14 +403,14 @@ __global__ void ij_full_kernel_2(
             for (; prefix_sum < limit; ++prefix_sum) {
                 auto& p = join_pairs[register_items++];
                 p.lineitem_tid = lineitem_tid_buffer[prefix_sum];
-                p.p_partkey = p_partkey_buffer[prefix_sum];
+                p.l_partkey = l_partkey_buffer[prefix_sum];
             }
 
             refill_cnt -= available_cnt;
         }
 
-        if (refill_cnt == 0 && lane_id() == 0) {
-            atomicAdd(&fully_occupied_warps, 1);
+        if (refill_cnt == 0 && lane_id == 0) {
+            atomicInc(&fully_occupied_warps, std::numeric_limits<decltype(fully_occupied_warps)>::max());
         }
 
         __syncthreads(); // wait until all threads have gathered enough elements
@@ -434,11 +422,12 @@ __global__ void ij_full_kernel_2(
         }
 */
 
+/*
         for (unsigned i = 0; i < actual_items; ++i) {
             btree::payload_t payload = btree::invalidTid;
             payload = index_structure();
         }
-
+*/
         // reset state
         fully_occupied_warps = 0;
         __syncthreads();
