@@ -594,6 +594,7 @@ struct helper {
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 
+#if 0
     void run_two_phase_ij() {
         JoinEntry* join_entries;
         cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
@@ -617,6 +618,57 @@ struct helper {
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
+#else
+/*
+template<
+    int   BLOCK_THREADS,
+    int   ITEMS_PER_THREAD,
+    class IndexStructureType >
+__launch_bounds__ (BLOCK_THREADS)
+__global__ void ij_full_kernel_2(
+    const lineitem_table_plain_t* __restrict__ lineitem,
+    const unsigned lineitem_size,
+//    const part_table_plain_t* __restrict__ part,
+    IndexStructureType index_structure)
+*/
+
+
+    void run_two_phase_ij() {
+
+        enum { BLOCK_THREADS = 128, ITEMS_PER_THREAD = 12 };
+
+        JoinEntry* join_entries;
+        cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
+
+        const auto start1 = std::chrono::high_resolution_clock::now();
+
+        int num_blocks = 1;// TODO
+        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, 512, index_structure);
+        cudaDeviceSynchronize();
+
+        const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
+        std::cout << "kernel time: " << d1 << " ms\n";
+
+
+
+        decltype(output_index) matches;
+        cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
+        assert(error == cudaSuccess);
+        //printf("join matches: %u\n", matches);
+
+        num_blocks = (lineitem_size + block_size - 1) / block_size;
+
+        const auto start2 = std::chrono::high_resolution_clock::now();
+        ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
+        cudaDeviceSynchronize();
+
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
+        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start2).count()/1000.;
+        std::cout << "kernel time: " << kernelTime << " ms\n";
+    }
+
+
+#endif
 };
 
 template<class IndexType>
