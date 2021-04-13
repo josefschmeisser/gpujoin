@@ -23,17 +23,51 @@ using namespace btree::cuda;
 __global__ void btree_bulk_lookup(const Node* __restrict__ tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
+
+    __shared__ uint8_t rootRaw[Node::pageSize];
+    if (threadIdx.x == 0) {
+        memcpy(rootRaw, tree, Node::pageSize);
+    }
+    const Node* root = reinterpret_cast<Node*>(rootRaw);
+    __syncthreads();
+
     for (int i = index; i < n; i += stride) {
-        tids[i] = btree_lookup(tree, keys[i]);
-        //tids[i] = btree::cuda::btree_lookup_with_hints(tree, keys[i]);
+        //tids[i] = btree_lookup(root, keys[i]);
+        tids[i] = btree::cuda::btree_lookup_with_hints(root, keys[i]);
     }
 }
+
+
+__global__ void btree_bulk_lookup_serialized(const Node* __restrict__ tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+    enum { MAX_ACTIVE = 16, RUNS = 32 / MAX_ACTIVE };
+
+    const int lane_id = threadIdx.x % 32;
+    const int lane_mask = 1<<lane_id;
+    
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    for (int i = index; i < n; i += stride) {
+        // mask of active lanes
+        uint32_t active_lanes = (1<<MAX_ACTIVE) - 1;
+        for (unsigned j = 0; j < RUNS; ++j) {
+            printf("ative mask: %d\n", active_lanes);
+            if (active_lanes & lane_mask) {
+                tids[i] = btree_lookup(tree, keys[i]);
+                //tids[i] = btree::cuda::btree_lookup_with_hints(tree, keys[i]);
+            }
+            active_lanes <<= MAX_ACTIVE;
+        }
+    }
+}
+
 
 int main(int argc, char** argv) {
     if (argc > 1) {
         std::string::size_type sz;
         numElements = std::stod(argv[1], &sz);
     }
+    std::cout << "index size: " << numElements << std::endl;
 
     std::vector<btree::key_t> keys(numElements);
     std::iota(keys.begin(), keys.end(), 0);
@@ -46,7 +80,7 @@ int main(int argc, char** argv) {
         if (!found) throw 0;
     }
 
-    int blockSize = 32;
+    int blockSize = 512;
     int numBlocks = (numElements + blockSize - 1) / blockSize;
     /*
     int numSMs;
@@ -73,7 +107,7 @@ int main(int argc, char** argv) {
     printf("executing kernel...\n");
     const auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-        btree_bulk_lookup<<<numBlocks, blockSize>>>(d_tree, numElements, lookupKeys, d_tids);
+        btree_bulk_lookup_serialized<<<numBlocks, blockSize>>>(d_tree, numElements, lookupKeys, d_tids);
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
