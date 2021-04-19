@@ -335,10 +335,10 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
         while (unexhausted_lanes && underfull_lanes && items_per_warp[warp_id] < MAX_ITEMS_PER_WARP) {
         //while (unexhausted_lanes && items_per_warp[warp_id] < MAX_ITEMS_PER_WARP) {
 
-            if (lane_id == 0) { printf("first tid: %d\n", tid); }
+            if (lane_id == 0) { printf("warp: %d first tid: %d\n", warp_id, tid); }
 
             //if (lane_id == 0) { printf("underfull_lanes: 0x%.8X\n", underfull_lanes); }
-            if (lane_id == 0) { printf("unexhausted_lanes: 0x%.8X\n", unexhausted_lanes); }
+
             if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[warp_id]); }
 
             int active = tid < tid_limit;
@@ -376,8 +376,9 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
                 p.l_partkey = l_partkey;
             }
 
-            underfull_lanes = __ballot_sync(FULL_MASK, register_items < ITEMS_PER_THREAD);
+            underfull_lanes = __ballot_sync(FULL_MASK, register_items < ITEMS_PER_THREAD); // FIXME
             unexhausted_lanes = __ballot_sync(FULL_MASK, tid < tid_limit);
+if (lane_id == 0) { printf("underfull_lanes: 0x%.8X\n", underfull_lanes); }
 
             if (unexhausted_lanes == 0 && lane_id == 0) {
                 //atomicInc(&exhausted_warps, std::numeric_limits<decltype(exhausted_warps)>::max());
@@ -390,22 +391,31 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
                 atomicAdd(&items_per_warp[warp_id], __popc(active_lanes));
             }
 
-            tid += 32; // TODO
+            tid += BLOCK_THREADS; // each tile is organized as a consecutive succession of its corresponding block
 
             __syncwarp();
         }
+            if (lane_id == 0) { printf("warp: %d unexhausted_lanes: 0x%.8X\n", warp_id, unexhausted_lanes); }
 
         __syncthreads(); // wait until all threads have gathered enough elements
 
         // determine the number of items required to fully populate this warp
-        unsigned refill_cnt = 0;
+        const unsigned missing = 1 + ITEMS_PER_THREAD - register_items;
+printf("warp: %d lane: %d missing: %d\n", warp_id, lane_id, missing);
+        unsigned refill_cnt = missing;
+/*
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
+
+*/
         if (underfull_lanes) {
             #pragma unroll
             for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-                refill_cnt += __shfl_down_sync(FULL_MASK, ITEMS_PER_THREAD - register_items, offset);
+                refill_cnt += __shfl_down_sync(FULL_MASK, refill_cnt, offset);
             }
         }
-
+__syncwarp();
+if (lane_id == 0) { printf("warp: %d refill_cnt: %d buffer_idx: %d\n", warp_id, refill_cnt, buffer_idx); }
         // distribute buffered items among the threads in this warp
         if (refill_cnt > 0) {
             int available_cnt = 0;
@@ -416,17 +426,20 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
             //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
             available_cnt = __shfl_sync(FULL_MASK, available_cnt, 0);
 
-            int prefix_sum = ITEMS_PER_THREAD - register_items;
+            int prefix_sum = missing;
+//printf("warp: %d lane: %d required: %d\n", warp_id, lane_id, prefix_sum);
             // calculate the inclusive prefix sum among all threads in this warp
             #pragma unroll
             for (int offset = 1; offset <= 32; offset <<= 1) {
-                prefix_sum += __shfl_up_sync(FULL_MASK, prefix_sum, offset);
+                auto value = __shfl_up_sync(FULL_MASK, prefix_sum, offset);
+                prefix_sum += (lane_id >= offset) ? value : 0;
             }
             // calculate the exclusive prefix sum
-            prefix_sum -= ITEMS_PER_THREAD - register_items;
+            prefix_sum -= missing;
+printf("warp: %d lane: %d prefix_sum: %d\n", warp_id, lane_id, prefix_sum);
 
             // refill registers with buffered elements
-            const auto limit = prefix_sum + ITEMS_PER_THREAD - register_items;
+            const auto limit = prefix_sum + missing;
             for (; prefix_sum < limit; ++prefix_sum) {
                 auto& p = join_pairs[register_items++].join_pair;
                 p.lineitem_tid = lineitem_tid_buffer[prefix_sum];
@@ -443,13 +456,15 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
 
         __syncthreads(); // wait until all threads have tried to fill their registers
 
-/* TODO
-        if (fully_occupied_warps == WARPS_PER_BLOCK)
-            printf("sorting...\n");
-            BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs, 20, 32); // TODO
-        }
-*/
 
+        if (fully_occupied_warps == WARPS_PER_BLOCK) {
+            printf("=== sorting... ===\n");
+            /* TODO
+            BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs, 20, 32); // TODO
+            */
+        }
+
+if (warp_id == 0 && lane_id == 0) { printf("start sorting\n"); }
 /*
         for (unsigned i = 0; i < actual_items; ++i) {
             btree::payload_t payload = btree::invalidTid;
@@ -669,7 +684,7 @@ __global__ void ij_full_kernel_2(
 
     void run_two_phase_ij() {
 
-        enum { BLOCK_THREADS = 64, ITEMS_PER_THREAD = 12 };
+        enum { BLOCK_THREADS = 64, ITEMS_PER_THREAD = 4 };
 
         JoinEntry* join_entries;
         cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
@@ -677,7 +692,7 @@ __global__ void ij_full_kernel_2(
         const auto start1 = std::chrono::high_resolution_clock::now();
 
         int num_blocks = 1;// TODO
-        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, 2048, index_structure);
+        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, 1024*2048, index_structure);
         cudaDeviceSynchronize();
 
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
