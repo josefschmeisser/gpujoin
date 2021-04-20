@@ -325,7 +325,7 @@ __global__ void ij_full_kernel_2(
 
 if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[warp_id]); }
 
-        uint16_t register_items = 0;
+        uint16_t local_idx = 0;
         uint32_t underfull_lanes = FULL_MASK; // lanes that have less than ITEMS_PER_THREAD items in their registers
         uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
 
@@ -333,7 +333,6 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
         //unsigned thread_offset = lane_id;
 
         while (unexhausted_lanes && underfull_lanes && items_per_warp[warp_id] < MAX_ITEMS_PER_WARP) {
-        //while (unexhausted_lanes && items_per_warp[warp_id] < MAX_ITEMS_PER_WARP) {
 
             if (lane_id == 0) { printf("warp: %d first tid: %d\n", warp_id, tid); }
 
@@ -355,7 +354,7 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
             }
 
             // negotiate buffer target positions among all threads in this warp
-            unsigned mask = __ballot_sync(FULL_MASK, register_items > ITEMS_PER_THREAD);
+            unsigned mask = __ballot_sync(FULL_MASK, local_idx >= ITEMS_PER_THREAD);
             unsigned right = __funnelshift_l(0xffffffff, 0, lane_id);
             unsigned offset = __popc(mask & right);
             unsigned dest_idx = 0;
@@ -366,18 +365,18 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
             dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0);
 
             // matrialize attributes
-            if (active && register_items > ITEMS_PER_THREAD) {
+            if (active && local_idx >= ITEMS_PER_THREAD) {
                 // buffer items
                 lineitem_tid_buffer[dest_idx] = tid;
                 l_partkey_buffer[dest_idx] = l_partkey;
             } else if (active) {
                 // store items in registers
-                auto& p = join_pairs[register_items++].join_pair;
+                auto& p = join_pairs[local_idx++].join_pair;
                 p.lineitem_tid = tid;
                 p.l_partkey = l_partkey;
             }
 
-            underfull_lanes = __ballot_sync(FULL_MASK, register_items < ITEMS_PER_THREAD); // FIXME
+            underfull_lanes = __ballot_sync(FULL_MASK, local_idx < ITEMS_PER_THREAD); // FIXME
             unexhausted_lanes = __ballot_sync(FULL_MASK, tid < tid_limit);
 if (lane_id == 0) { printf("underfull_lanes: 0x%.8X\n", underfull_lanes); }
 
@@ -396,14 +395,14 @@ if (lane_id == 0) { printf("underfull_lanes: 0x%.8X\n", underfull_lanes); }
 
             __syncwarp();
         }
-            if (lane_id == 0) { printf("warp: %d unexhausted_lanes: 0x%.8X\n", warp_id, unexhausted_lanes); }
+        if (lane_id == 0) { printf("warp: %d unexhausted_lanes: 0x%.8X\n", warp_id, unexhausted_lanes); }
 
         __syncthreads(); // wait until all threads have gathered enough elements
 
         // determine the number of items required to fully populate this warp
-        const unsigned missing = 1 + ITEMS_PER_THREAD - register_items;
-printf("warp: %d lane: %d missing: %d\n", warp_id, lane_id, missing);
-        unsigned refill_cnt = missing;
+        const unsigned required = ITEMS_PER_THREAD - local_idx;
+printf("warp: %d lane: %d required: %d\n", warp_id, lane_id, required);
+        unsigned ideal_refill_cnt = required;
 /*
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
         sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
@@ -418,7 +417,7 @@ printf("warp: %d lane: %d missing: %d\n", warp_id, lane_id, missing);
 //__syncwarp();
 if (lane_id == 0) { printf("warp: %d ideal_refill_cnt: %d buffer_idx: %d\n", warp_id, ideal_refill_cnt, buffer_idx); }
         // distribute buffered items among the threads in this warp
-        if (refill_cnt > 0) {
+        if (ideal_refill_cnt > 0) {
             int available_cnt = 0;
             if (lane_id == 0) {
                 auto old = atomic_sub_safe(&buffer_idx, ideal_refill_cnt);
@@ -428,7 +427,7 @@ if (lane_id == 0) { printf("warp: %d ideal_refill_cnt: %d buffer_idx: %d\n", war
             //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
             available_cnt = __shfl_sync(FULL_MASK, available_cnt, 0);
 
-            int prefix_sum = missing;
+            int prefix_sum = required;
 //printf("warp: %d lane: %d required: %d\n", warp_id, lane_id, prefix_sum);
             // calculate the inclusive prefix sum among all threads in this warp
             #pragma unroll
@@ -437,30 +436,31 @@ if (lane_id == 0) { printf("warp: %d ideal_refill_cnt: %d buffer_idx: %d\n", war
                 prefix_sum += (lane_id >= offset) ? value : 0;
             }
             // calculate the exclusive prefix sum
-            prefix_sum -= missing;
+            prefix_sum -= required;
 printf("warp: %d lane: %d prefix_sum: %d\n", warp_id, lane_id, prefix_sum);
 
             // refill registers with buffered elements
-            const auto limit = prefix_sum + missing;
+            const auto limit = prefix_sum + required;
             for (; prefix_sum < limit; ++prefix_sum) {
-                auto& p = join_pairs[register_items++].join_pair;
+                auto& p = join_pairs[local_idx++].join_pair;
                 p.lineitem_tid = lineitem_tid_buffer[prefix_sum];
                 p.l_partkey = l_partkey_buffer[prefix_sum];
             }
 
-            refill_cnt -= available_cnt;
+            ideal_refill_cnt -= available_cnt;
         }
+if (lane_id == 0) printf("ideal_refill_cnt: %d\n", ideal_refill_cnt);
 
-        if (refill_cnt == 0 && lane_id == 0) {
+        if (ideal_refill_cnt == 0 && lane_id == 0) {
             //atomicInc(&fully_occupied_warps, std::numeric_limits<decltype(fully_occupied_warps)>::max());
             atomicInc(&fully_occupied_warps, UINT_MAX);
         }
 
         __syncthreads(); // wait until all threads have tried to fill their registers
-
+if (lane_id == 0) printf("fully_occupied_warps: %d\n", fully_occupied_warps);
 
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
-            printf("=== sorting... ===\n");
+            if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
             /* TODO
             BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs, 20, 32); // TODO
             */
@@ -480,7 +480,7 @@ if (warp_id == 0 && lane_id == 0) { printf("start sorting\n"); }
             items_per_warp[warp_id] = 0;
         }
 
-if (warp_id == 0) { printf("exhausted_warps: %d\n", exhausted_warps); }
+if (warp_id == 0 && lane_id == 0) { printf("exhausted_warps: %d\n", exhausted_warps); }
 
     }
 }
@@ -665,7 +665,7 @@ struct helper {
         ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
         cudaDeviceSynchronize();
 
-        const auto kernelStop = std::chrono::high_resolution_clock::now();register_items
+        const auto kernelStop = std::chrono::high_resolution_clock::now();local_idx
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
