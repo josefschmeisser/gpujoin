@@ -252,6 +252,11 @@ __device__ T atomic_sub_safe(T* address, T val) {
 }
 
 
+template<class T>
+__forceinline__ __device__ T round_up_pow2(T value) {
+    return static_cast<T>(1) << (sizeof(T)*8 - __clz(value - 1));
+}
+
 template<
     int   BLOCK_THREADS,
     int   ITEMS_PER_THREAD,
@@ -297,20 +302,15 @@ __global__ void ij_full_kernel_2(
         uint64_t raw;
     } join_pairs[ITEMS_PER_THREAD];
 
-/*
-    // each thread starts at the current block's offset
-    unsigned tid = blockIdx.x * TILE_SIZE + threadIdx.x;
-    const unsigned limit = min(tid + TILE_SIZE, lineitem_size);
-*/
-
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
-    const unsigned tile_size = (lineitem_size + BLOCK_THREADS - 1)/BLOCK_THREADS;
-    if (lane_id == 0) { printf("tile_size: %d\n", tile_size); }
+const unsigned tile_size_raw = (lineitem_size + BLOCK_THREADS - 1)/gridDim.x;
+    const unsigned tile_size = round_up_pow2((lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
+    if (warp_id == 0 && lane_id == 0) { printf("lineitem_size: %d gridDim.x: %d tile_size: %d tile_size_raw: %d\n", lineitem_size, gridDim.x, tile_size, tile_size_raw); }
     unsigned tid = blockIdx.x * tile_size + threadIdx.x;
     const unsigned tid_limit = min(tid + tile_size, lineitem_size);
-
+//return;
 
     // initialize shared variables
     if (warp_id == 0 && lane_id == 0) {
