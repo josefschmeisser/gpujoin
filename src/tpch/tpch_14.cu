@@ -412,16 +412,17 @@ printf("warp: %d lane: %d missing: %d\n", warp_id, lane_id, missing);
         if (underfull_lanes) {
             #pragma unroll
             for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-                refill_cnt += __shfl_down_sync(FULL_MASK, refill_cnt, offset);
+                ideal_refill_cnt += __shfl_down_sync(FULL_MASK, ideal_refill_cnt, offset);
             }
         }
-__syncwarp();
-if (lane_id == 0) { printf("warp: %d refill_cnt: %d buffer_idx: %d\n", warp_id, refill_cnt, buffer_idx); }
+//__syncwarp();
+if (lane_id == 0) { printf("warp: %d ideal_refill_cnt: %d buffer_idx: %d\n", warp_id, ideal_refill_cnt, buffer_idx); }
         // distribute buffered items among the threads in this warp
         if (refill_cnt > 0) {
             int available_cnt = 0;
             if (lane_id == 0) {
-                available_cnt = atomic_sub_safe(&buffer_idx, refill_cnt);
+                auto old = atomic_sub_safe(&buffer_idx, ideal_refill_cnt);
+                available_cnt = (old > ideal_refill_cnt) ? ideal_refill_cnt : old;
             }
 
             //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
