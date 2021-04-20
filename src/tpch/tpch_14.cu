@@ -271,10 +271,10 @@ __global__ void ij_full_kernel_2(
 */
 
     enum {
-    //    TILE_SIZE = BLOCK_THREADS * ITEMS_PER_THREAD,
         MAX_ITEMS_PER_WARP = ITEMS_PER_THREAD * 32,
         WARPS_PER_BLOCK = BLOCK_THREADS / 32,
-        BUFFER_SIZE = MAX_ITEMS_PER_WARP*WARPS_PER_BLOCK
+        // the last summand ensures that each thread can write one more element during the last scan iteration
+        BUFFER_SIZE = ITEMS_PER_THREAD*BLOCK_THREADS + BLOCK_THREADS
     };
     typedef BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
 
@@ -359,8 +359,9 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
             unsigned right = __funnelshift_l(0xffffffff, 0, lane_id);
             unsigned offset = __popc(mask & right);
             unsigned dest_idx = 0;
-            if (lane_id == 0) {
+            if (active && mask && lane_id == 0) {
                 dest_idx = atomicAdd(&buffer_idx, __popc(mask));
+                printf("warp: %d dest_idx: %d\n", warp_id, dest_idx);
             }
             dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0);
 
