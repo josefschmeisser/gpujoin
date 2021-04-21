@@ -319,15 +319,18 @@ const unsigned tile_size_raw = (lineitem_size + BLOCK_THREADS - 1)/gridDim.x;
         exhausted_warps = 0;
     }
 
-    while (exhausted_warps < WARPS_PER_BLOCK) {
+    uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
+
+    // TODO get rid of exhausted_warps
+    while (exhausted_warps < WARPS_PER_BLOCK || buffer_idx > 0) {
         __syncthreads(); // ensure that all shared variables are initialized
 
 
 if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[warp_id]); }
 
-        uint16_t local_idx = 0;
-        uint32_t underfull_lanes = FULL_MASK; // lanes that have less than ITEMS_PER_THREAD items in their registers
-        uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
+        // reset
+        uint16_t local_idx = 0; // current size of the thread local array
+        uint32_t underfull_lanes = FULL_MASK; // lanes that have less than ITEMS_PER_THREAD items in their registers (has to be reset after each iteration)
 
         //unsigned tid = threadIdx.x + thread_offset;
         //unsigned thread_offset = lane_id;
