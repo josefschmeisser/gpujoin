@@ -357,15 +357,15 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
             }
 
             // negotiate buffer target positions among all threads in this warp
-            unsigned mask = __ballot_sync(FULL_MASK, local_idx >= ITEMS_PER_THREAD);
-            unsigned right = __funnelshift_l(0xffffffff, 0, lane_id);
-            unsigned offset = __popc(mask & right);
-            unsigned dest_idx = 0;
-            if (active && mask && lane_id == 0) {
-                dest_idx = atomicAdd(&buffer_idx, __popc(mask));
+            const uint32_t overflow_lanes = __ballot_sync(FULL_MASK, active && local_idx >= ITEMS_PER_THREAD);
+            const uint32_t right = __funnelshift_l(FULL_MASK, 0, lane_id); // TODO check
+            uint32_t dest_idx = 0;
+            if (overflow_lanes != 0 && lane_id == 0) {
+                dest_idx = atomicAdd(&buffer_idx, __popc(overflow_lanes));
                 printf("warp: %d dest_idx: %d\n", warp_id, dest_idx);
             }
-            dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0);
+            const uint32_t lane_offset = __popc(overflow_lanes & right);
+            dest_idx = lane_offset + __shfl_sync(FULL_MASK, dest_idx, 0);
 
             // matrialize attributes
             if (active && local_idx >= ITEMS_PER_THREAD) {
