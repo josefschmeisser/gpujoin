@@ -76,7 +76,7 @@ __managed__ int64_t globalSum2 = 0;
 
 // see: https://stackoverflow.com/a/44337310
 __forceinline__ __device__ unsigned lane_id() {
-    unsigned ret; 
+    unsigned ret;
     asm volatile ("mov.u32 %0, %laneid;" : "=r"(ret));
     return ret;
 }
@@ -245,7 +245,7 @@ __device__ T atomic_sub_safe(T* address, T val) {
     old = *address;
     do {
         expected = old;
-        update = (old - val < old) ? (old - val) : 0;
+        update = (old > val) ? (old - val) : 0;
         old = atomicCAS(address, expected, update);
     } while (expected != old);
     return old;
