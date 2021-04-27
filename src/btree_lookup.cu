@@ -14,28 +14,33 @@
 
 using namespace std;
 
-static constexpr unsigned maxRepetitions = 10;
+static constexpr unsigned maxRepetitions = 1;
 static constexpr unsigned activeLanes = 32;
-static constexpr unsigned numLookups = 1e7;
-static unsigned numElements = 1e7;
+static constexpr unsigned numLookups = 128;
+static unsigned numElements = 128;
 
 using namespace btree;
 using namespace btree::cuda;
 
-__global__ void btree_bulk_lookup(const Node* __restrict__ tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+__global__ void btree_bulk_lookup(const Node* __restrict__ root, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
+    //n = 32;
+
+/*
     __shared__ uint8_t rootRaw[Node::pageSize];
     if (threadIdx.x == 0) {
         memcpy(rootRaw, tree, Node::pageSize);
     }
     const Node* root = reinterpret_cast<Node*>(rootRaw);
     __syncthreads();
+*/
 
     for (int i = index; i < n; i += stride) {
-        //tids[i] = btree_lookup(root, keys[i]);
-        tids[i] = btree::cuda::btree_lookup_with_hints(root, keys[i]);
+    printf("i: %d\n", i);
+        tids[i] = btree_lookup(root, keys[i]);
+        //tids[i] = btree::cuda::btree_lookup_with_hints(root, keys[i]);
     }
 }
 
@@ -137,12 +142,23 @@ int main(int argc, char** argv) {
     int numBlocks = 32*numSMs;*/
     printf("numblocks: %d\n", numBlocks);
 
-    std::cout << "active lanes: " << activeLanes << std::endl;
     printf("executing kernel...\n");
-    const auto kernelStart = std::chrono::high_resolution_clock::now();
-    for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-        btree_bulk_lookup_serialized<activeLanes><<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
-        cudaDeviceSynchronize();
+    decltype(std::chrono::high_resolution_clock::now()) kernelStart;
+    if constexpr (activeLanes < 32) {
+        std::cout << "active lanes: " << activeLanes << std::endl;
+        kernelStart = std::chrono::high_resolution_clock::now();
+        for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
+            btree_bulk_lookup<<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
+            //btree_bulk_lookup_serialized<activeLanes><<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
+            cudaDeviceSynchronize();
+        }
+    } else {
+        kernelStart = std::chrono::high_resolution_clock::now();
+        for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
+            btree_bulk_lookup<<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
+            //btree_bulk_lookup_serialized<activeLanes><<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
+            cudaDeviceSynchronize();
+        }
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
     const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
@@ -156,16 +172,16 @@ int main(int argc, char** argv) {
         std::unique_ptr<btree::payload_t[]> h_tids(new btree::payload_t[numElements]);
         cudaMemcpy(h_tids.get(), d_tids, numElements*sizeof(decltype(d_tids)), cudaMemcpyDeviceToHost);
         for (unsigned i = 0; i < numElements; ++i) {
-            //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(h_tids[i]), keys[i]);
-            if (reinterpret_cast<uint64_t>(h_tids[i]) != keys[i]) {
-                printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(h_tids[i]), keys[i]);
+            //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(h_tids[i]), lookupKeys[i]);
+            if (reinterpret_cast<uint64_t>(h_tids[i]) != lookupKeys[i]) {
+                printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(h_tids[i]), lookupKeys[i]);
                 throw;
             }
         }
     }
 
     return 0;
-
+/*
     const auto cpuStart = std::chrono::high_resolution_clock::now();
     for (unsigned i = 0; i < numElements; ++i) {
         btree::payload_t value;
@@ -177,5 +193,5 @@ int main(int argc, char** argv) {
     std::cout << "CPU time: " << cpuTime << " ms\n";
     std::cout << "CPU MOps: " << (numElements/1e6)/(cpuTime/1e3) << endl;
 
-    return 0;
+    return 0;*/
 }
