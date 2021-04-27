@@ -328,12 +328,62 @@ __device__ unsigned linear_search(T x, const T* arr, const unsigned size) {
     return size;
 }
 
+__forceinline__ __device__ unsigned lane_id() {
+    unsigned ret;
+    asm volatile ("mov.u32 %0, %laneid;" : "=r"(ret));
+    return ret;
+}
+
+#define FULL_MASK 0xffffffff
+
+template<class T, unsigned degree = 3>
+__device__ unsigned cooperative_linear_search(T x, const T* arr, const unsigned size) {
+
+    enum { WINDOW_SIZE = 1 << degree };
+
+    const unsigned my_lane_id = lane_id();
+
+    unsigned lower_bound = size;
+
+    //uint32_t leader = 1 << degree*(my_lane_id >> degree);
+    unsigned leader = degree*(my_lane_id >> degree);
+    //__funnelshift_l ( unsigned int  lo, unsigned int  hi, unsigned int  shift )
+    const uint32_t window_mask = __funnelshift_l(0, FULL_MASK, degree) << leader; // TODO
+
+    for (unsigned shift = 0; shift < degree; ++shift) {
+        unsigned key_idx = 0;
+        const T query = __shfl_sync(window_mask, x, leader);
+
+        //uint32_t exhausted = 0;
+        unsigned exhausted_cnt = 0;
+        uint32_t matches = 0;
+        while (matches != 0 || exhausted_cnt < WINDOW_SIZE) {
+            T value;
+            if (key_idx < size) value = arr[key_idx];
+            matches = __ballot_sync(window_mask, key_idx < size && value >= query);
+            exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= size));
+
+            key_idx += WINDOW_SIZE;
+        }
+
+        if (my_lane_id == leader) {
+//            const auto first_match = (matches == 0) ? size : __ffs(matches) + ;
+            lower_bound = __shfl_sync(window_mask, key_idx, __ffs(matches));
+        }
+
+        leader += 1;
+    }
+
+    return lower_bound;
+}
+
 __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     const Node* node = tree;
     while (!node->header.isLeaf) {
         //unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
-        unsigned pos = linear_search(key, node->keys, node->header.count);
+        //unsigned pos = linear_search(key, node->keys, node->header.count);
+        unsigned pos = cooperative_linear_search(key, node->keys, node->header.count);
         //printf("inner pos: %d\n", pos);
         node = reinterpret_cast<const Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
@@ -342,7 +392,8 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     }
 
     //unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
-    unsigned pos = linear_search(key, node->keys, node->header.count);
+    //unsigned pos = linear_search(key, node->keys, node->header.count);
+    unsigned pos = cooperative_linear_search(key, node->keys, node->header.count);
     //printf("leaf pos: %d\n", pos);
     if ((pos < node->header.count) && (node->keys[pos] == key)) {
         return node->payloads[pos];
