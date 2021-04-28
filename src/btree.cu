@@ -341,39 +341,51 @@ __device__ unsigned cooperative_linear_search(T x, const T* arr, const unsigned 
 
     enum { WINDOW_SIZE = 1 << degree };
 
+
+    assert(__ballot_sync(FULL_MASK, 1) == FULL_MASK);
+
+
     const unsigned my_lane_id = lane_id();
 
     unsigned lower_bound = size;
 
     //uint32_t leader = 1 << degree*(my_lane_id >> degree);
-    unsigned leader = degree*(my_lane_id >> degree);
+    unsigned leader = WINDOW_SIZE*(my_lane_id >> degree);
+    printf("lane: %d leader: %d\n", my_lane_id, leader);
     //__funnelshift_l ( unsigned int  lo, unsigned int  hi, unsigned int  shift )
-    const uint32_t window_mask = __funnelshift_l(0, FULL_MASK, degree) << leader; // TODO
+    const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
+    printf("lane: %d window_mask: 0x%.8X\n", my_lane_id, window_mask);
+    const unsigned lane_offset =  my_lane_id - leader;
 
-    for (unsigned shift = 0; shift < degree; ++shift) {
-        unsigned key_idx = 0;
+    for (unsigned shift = 0; shift < WINDOW_SIZE; ++shift) {
+        int key_idx = lane_offset - WINDOW_SIZE;
         const T query = __shfl_sync(window_mask, x, leader);
 
         //uint32_t exhausted = 0;
         unsigned exhausted_cnt = 0;
         uint32_t matches = 0;
-        while (matches != 0 || exhausted_cnt < WINDOW_SIZE) {
+        while (matches == 0 && exhausted_cnt < WINDOW_SIZE) {
+            key_idx += WINDOW_SIZE;
+
             T value;
             if (key_idx < size) value = arr[key_idx];
             matches = __ballot_sync(window_mask, key_idx < size && value >= query);
             exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= size));
 
-            key_idx += WINDOW_SIZE;
+            if (my_lane_id == leader) printf("leader: %d matches: 0x%.8X exhausted_cnt: %d\n", leader, matches, exhausted_cnt);
         }
 
-        if (my_lane_id == leader) {
-//            const auto first_match = (matches == 0) ? size : __ffs(matches) + ;
-            lower_bound = __shfl_sync(window_mask, key_idx, __ffs(matches));
+        if (my_lane_id == leader && matches != 0) {
+//            lower_bound = __shfl_sync(window_mask, key_idx, __ffs(matches));
+            printf("lane: %d key_idx: %u, ffs: %u\n", my_lane_id, key_idx, __ffs(matches) - 1 - leader);
+            lower_bound = key_idx + __ffs(matches) - 1 - leader;
         }
 
         leader += 1;
+      //  break; // TODO remove
     }
-
+    printf("lane: %d lower_bound: %u arr[lower_bound]: %u x: %u\n", my_lane_id, lower_bound, arr[lower_bound], x);
+    assert(arr[lower_bound] >= x);
     return lower_bound;
 }
 
