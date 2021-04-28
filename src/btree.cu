@@ -402,6 +402,27 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     return invalidTid;
 }
 
+#if 0
+__device__ payload_t btree_lookup_with_page_replication(const Node* tree, key_t key) {
+    __shared__ uint8_t page_cache[32][Node::pageSize];
+
+    const Node* node = tree;
+    while (!node->header.isLeaf) {
+        unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+        //unsigned pos = linear_search(key, node->keys, node->header.count);
+        node = reinterpret_cast<const Node*>(node->payloads[pos]);
+    }
+
+    unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+    //unsigned pos = linear_search(key, node->keys, node->header.count);
+    if ((pos < node->header.count) && (node->keys[pos] == key)) {
+        return node->payloads[pos];
+    }
+
+    return invalidTid;
+}
+#endif
+
 #if 1
 __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
