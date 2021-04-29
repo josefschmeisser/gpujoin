@@ -393,9 +393,8 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
     //printf("btree_lookup key: %lu\n", key);
     const Node* node = tree;
     while (!node->header.isLeaf) {
-        //unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+        unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
         //unsigned pos = linear_search(key, node->keys, node->header.count);
-        unsigned pos = cooperative_linear_search(key, node->keys, node->header.count);
         //printf("inner pos: %d\n", pos);
         node = reinterpret_cast<const Node*>(node->payloads[pos]);/*
         if (node == nullptr) {
@@ -403,11 +402,36 @@ __device__ payload_t btree_lookup(const Node* tree, key_t key) {
         }*/
     }
 
-    //unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
+    unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
     //unsigned pos = linear_search(key, node->keys, node->header.count);
-    unsigned pos = cooperative_linear_search(key, node->keys, node->header.count);
     //printf("leaf pos: %d\n", pos);
     if ((pos < node->header.count) && (node->keys[pos] == key)) {
+        return node->payloads[pos];
+    }
+
+    return invalidTid;
+}
+
+// this function has to be called by the entire warp, otherwise the function is likly to yield wrong results
+__device__ payload_t btree_cooperative_lookup(bool active, const Node* tree, key_t key) {
+    //printf("btree_lookup key: %lu\n", key);
+    const Node* node = tree;
+    while (__any_sync(FULL_MASK, active && !node->header.isLeaf)) {
+        unsigned pos = cooperative_linear_search(active, key, node->keys, node->header.count);
+        //printf("inner pos: %d\n", pos);
+
+        // Inactive threads never progress during the traversal phase.
+        // They will however be utilized by active threads during the cooperative search.
+        node = active ? reinterpret_cast<const Node*>(node->payloads[pos]) : tree;
+        /*
+        if (node == nullptr) {
+            return invalidTid;
+        }*/
+    }
+
+    unsigned pos = cooperative_linear_search(active, key, node->keys, node->header.count);
+    //printf("leaf pos: %d\n", pos);
+    if (active && (pos < node->header.count) && (node->keys[pos] == key)) {
         return node->payloads[pos];
     }
 
