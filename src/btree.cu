@@ -337,11 +337,11 @@ __forceinline__ __device__ unsigned lane_id() {
 #define FULL_MASK 0xffffffff
 
 template<class T, unsigned degree = 3>
-__device__ unsigned cooperative_linear_search(T x, const T* arr, const unsigned size) {
+__device__ unsigned cooperative_linear_search(bool active, T x, const T* arr, const unsigned size) {
 
     enum { WINDOW_SIZE = 1 << degree };
 
-
+//if (threadIdx.x < 192 || threadIdx.x > 223) return 0;
     assert(__ballot_sync(FULL_MASK, 1) == FULL_MASK);
 
 
@@ -351,41 +351,47 @@ __device__ unsigned cooperative_linear_search(T x, const T* arr, const unsigned 
 
     //uint32_t leader = 1 << degree*(my_lane_id >> degree);
     unsigned leader = WINDOW_SIZE*(my_lane_id >> degree);
-    printf("lane: %d leader: %d\n", my_lane_id, leader);
+    printf("thread: %d lane: %d leader: %d\n", threadIdx.x, my_lane_id, leader);
     //__funnelshift_l ( unsigned int  lo, unsigned int  hi, unsigned int  shift )
     const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
-    printf("lane: %d window_mask: 0x%.8X\n", my_lane_id, window_mask);
-    const unsigned lane_offset =  my_lane_id - leader;
+    printf("thread: %d lane: %d window_mask: 0x%.8X\n", threadIdx.x, my_lane_id, window_mask);
+//    const int lane_offset = my_lane_id - leader;
+    const int lane_offset = max(my_lane_id, leader) - min(my_lane_id, leader); // TODO
 
     for (unsigned shift = 0; shift < WINDOW_SIZE; ++shift) {
         int key_idx = lane_offset - WINDOW_SIZE;
-        const T query = __shfl_sync(window_mask, x, leader);
+        const T leader_x = __shfl_sync(window_mask, x, leader);
+        const T* leader_arr = reinterpret_cast<const T*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
 
-        //uint32_t exhausted = 0;
-        unsigned exhausted_cnt = 0;
+        const auto leader_active = __shfl_sync(window_mask, active, leader);
+        unsigned exhausted_cnt = leader_active ? 0 : WINDOW_SIZE;
+
+        if (my_lane_id == leader && !leader_active) printf("thread: %d leader: %d leader not active\n", threadIdx.x, leader);
+
         uint32_t matches = 0;
         while (matches == 0 && exhausted_cnt < WINDOW_SIZE) {
             key_idx += WINDOW_SIZE;
 
             T value;
-            if (key_idx < size) value = arr[key_idx];
-            matches = __ballot_sync(window_mask, key_idx < size && value >= query);
+            if (key_idx < size) value = leader_arr[key_idx];
+            matches = __ballot_sync(window_mask, key_idx < size && value >= leader_x);
             exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= size));
 
-            if (my_lane_id == leader) printf("leader: %d matches: 0x%.8X exhausted_cnt: %d\n", leader, matches, exhausted_cnt);
+            if (leader == 0) printf("thread: %d leader: %d key_idx: %d value: %d\n", threadIdx.x, leader, key_idx, value);
+            if (my_lane_id == leader) printf("thread: %d leader: %d matches: 0x%.8X exhausted_cnt: %d\n", threadIdx.x, leader, matches, exhausted_cnt);
         }
 
         if (my_lane_id == leader && matches != 0) {
-//            lower_bound = __shfl_sync(window_mask, key_idx, __ffs(matches));
-            printf("lane: %d key_idx: %u, ffs: %u\n", my_lane_id, key_idx, __ffs(matches) - 1 - leader);
+            printf("thread: %d lane: %d key_idx: %u, ffs: %u\n", threadIdx.x, my_lane_id, key_idx, __ffs(matches) - 1 - leader);
             lower_bound = key_idx + __ffs(matches) - 1 - leader;
+        } else if (my_lane_id == leader) {
+            printf("thread: %d lane: %d key_idx: %u\n", threadIdx.x, my_lane_id, lower_bound);
         }
 
         leader += 1;
-      //  break; // TODO remove
     }
-    printf("lane: %d lower_bound: %u arr[lower_bound]: %u x: %u\n", my_lane_id, lower_bound, arr[lower_bound], x);
-    assert(arr[lower_bound] >= x);
+    printf("thread: %d lane: %d size: %u lower_bound: %u arr[lower_bound]: %u x: %u arr[size - 1]: %u\n", threadIdx.x, my_lane_id, size, lower_bound, arr[lower_bound], x, arr[size - 1]);
+    assert(!active || lower_bound >= size || arr[lower_bound] >= x);
     return lower_bound;
 }
 
