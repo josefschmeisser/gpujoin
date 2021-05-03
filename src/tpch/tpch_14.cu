@@ -238,6 +238,60 @@ __global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineit
     }
 }
 
+struct JoinEntry {
+    unsigned lineitem_tid;
+    unsigned part_tid;
+};
+__device__ unsigned output_index = 0;
+
+/*
+// source: https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
+// increment the value at ptr by 1 and return the old value
+__device__ int atomicAggInc(int *ptr) {
+    int mask = __match_any_sync(__activemask(), (unsigned long long)ptr);
+    int leader = __ffs(mask) - 1;    // select a leader
+    int res;
+    if(lane_id() == leader)                  // leader does the update
+        res = atomicAdd(ptr, __popc(mask));
+    res = __shfl_sync(mask, res, leader);    // get leader’s old value
+    return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
+}*/
+
+template<class IndexStructureType>
+__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < lineitem_size + 31; i += stride) {
+        btree::payload_t payload = btree::invalidTid;
+        if (i < lineitem_size &&
+            lineitem->l_shipdate[i] >= lower_shipdate &&
+            lineitem->l_shipdate[i] < upper_shipdate) {
+            payload = index_structure(lineitem->l_partkey[i]);
+        }
+
+        int match = payload != btree::invalidTid;
+        unsigned mask = __ballot_sync(FULL_MASK, match);
+        unsigned my_lane = lane_id();
+        unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
+//        printf("right %u\n", right);
+        unsigned offset = __popc(mask & right);
+
+        unsigned base = 0;
+        int leader = __ffs(mask) - 1;
+        if (my_lane == leader) {
+            base = atomicAdd(&output_index, __popc(mask));
+        }
+        base = __shfl_sync(FULL_MASK, base, leader);
+
+        if (match) {
+//            printf("lane %u store to: %u\n", my_lane, base + offset);
+            auto& join_entry = join_entries[base + offset];
+            join_entry.lineitem_tid = i;
+            join_entry.part_tid = payload;
+        }
+    }
+}
+
 
 template<class T>
 __device__ T atomic_sub_safe(T* address, T val) {
