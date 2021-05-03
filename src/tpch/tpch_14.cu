@@ -140,6 +140,10 @@ struct btree_index {
         return btree::cuda::btree_lookup(tree_, key);
     //    return btree::cuda::btree_lookup_with_hints(tree_, key); // TODO
     }
+
+    __device__ __forceinline__ btree::payload_t cooperative_lookup(bool active, const btree::key_t key) const {
+        return btree::cuda::btree_cooperative_lookup(active, tree_, key);
+    }
 };
 
 struct radix_spline_index {
@@ -422,7 +426,7 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
             uint32_t dest_idx = 0;
             if (overflow_lanes != 0 && lane_id == 0) {
                 dest_idx = atomicAdd(&buffer_idx, __popc(overflow_lanes));
-                printf("warp: %d dest_idx: %d\n", warp_id, dest_idx);
+//                printf("warp: %d dest_idx: %d\n", warp_id, dest_idx);
             }
             const uint32_t lane_offset = __popc(overflow_lanes & right);
             dest_idx = lane_offset + __shfl_sync(FULL_MASK, dest_idx, 0);
@@ -550,6 +554,7 @@ if (lane_id == 0) printf("fully_occupied_warps: %d\n", fully_occupied_warps);
 
 printf("warp: %d lane: %d local_idx: %d\n", warp_id, lane_id, local_idx);
 
+#if 0
         for (unsigned i = 0; i < local_idx; ++i) {
             atomicInc(&total_matches, UINT_MAX); // TODO remove
         /* TODO
@@ -557,54 +562,8 @@ printf("warp: %d lane: %d local_idx: %d\n", warp_id, lane_id, local_idx);
             payload = index_structure();
             */
         }
-
-        // reset state
-        __syncthreads(); // wait until each wrap is done
-        if (lane_id == 0) {
-            fully_occupied_warps = 0;
+#else
 /*
-         //   items_per_warp[warp_id] = (items_per_warp[warp_id] > MAX_ITEMS_PER_WARP) ? items_per_warp[warp_id] - MAX_ITEMS_PER_WARP : 0; // FIXME
-            const auto local_cnt = MAX_ITEMS_PER_WARP - (ideal_refill_cnt + refill_cnt);
-            items_per_warp[warp_id] -= (items_per_warp[warp_id] - local_cnt);*/
-        }
-
-if (warp_id == 0 && lane_id == 0) { printf("exhausted_warps: %d\n", exhausted_warps); }
-
-    }
-}
-
-
-struct JoinEntry {
-    unsigned lineitem_tid;
-    unsigned part_tid;
-};
-__device__ unsigned output_index = 0;
-
-/*
-// source: https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
-// increment the value at ptr by 1 and return the old value
-__device__ int atomicAggInc(int *ptr) {
-    int mask = __match_any_sync(__activemask(), (unsigned long long)ptr);
-    int leader = __ffs(mask) - 1;    // select a leader
-    int res;
-    if(lane_id() == leader)                  // leader does the update
-        res = atomicAdd(ptr, __popc(mask));
-    res = __shfl_sync(mask, res, leader);    // get leader’s old value
-    return res + __popc(mask & ((1 << lane_id()) - 1)); //compute old value
-}*/
-
-template<class IndexStructureType>
-__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
-    const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size + 31; i += stride) {
-        btree::payload_t payload = btree::invalidTid;
-        if (i < lineitem_size &&
-            lineitem->l_shipdate[i] >= lower_shipdate &&
-            lineitem->l_shipdate[i] < upper_shipdate) {
-            payload = index_structure(lineitem->l_partkey[i]);
-        }
-
         int match = payload != btree::invalidTid;
         unsigned mask = __ballot_sync(FULL_MASK, match);
         unsigned my_lane = lane_id();
@@ -625,8 +584,57 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
             join_entry.lineitem_tid = i;
             join_entry.part_tid = payload;
         }
+*/
+
+
+        const auto count = MAX_ITEMS_PER_WARP - ideal_refill_cnt;
+        if (lane_id == 0) {
+            atomicAdd(&total_matches, count);
+        }
+
+        int lane_dst_idx_prefix_sum = local_idx;
+        // calculate the inclusive prefix sum among all threads in this warp
+        #pragma unroll
+        for (int offset = 1; offset < 32; offset <<= 1) {
+            auto value = __shfl_up_sync(FULL_MASK, lane_dst_idx_prefix_sum, offset);
+            lane_dst_idx_prefix_sum += (lane_id >= offset) ? value : 0;
+        }
+        lane_dst_idx_prefix_sum -= local_idx;
+
+        uint32_t active_lanes = FULL_MASK;
+        for (unsigned i = 0; active_lanes != 0; ++i) {
+            bool active = i < local_idx;
+            auto& p = join_pairs[i].join_pair;
+const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
+//            const auto tid = index_structure(p.l_partkey);
+
+            if (active) {
+                if (tid == btree::invalidTid) {
+                    printf("partkey: %u -> invalidTid\n", p.l_partkey);
+                }
+                assert(tid != btree::invalidTid);
+            }
+            active_lanes = __ballot_sync(FULL_MASK, active);
+        }
+
+
+#endif
+
+        // reset state
+        __syncthreads(); // wait until each wrap is done
+        if (lane_id == 0) {
+            fully_occupied_warps = 0;
+/*
+         //   items_per_warp[warp_id] = (items_per_warp[warp_id] > MAX_ITEMS_PER_WARP) ? items_per_warp[warp_id] - MAX_ITEMS_PER_WARP : 0; // FIXME
+            const auto local_cnt = MAX_ITEMS_PER_WARP - (ideal_refill_cnt + refill_cnt);
+            items_per_warp[warp_id] -= (items_per_warp[warp_id] - local_cnt);*/
+        }
+
+if (warp_id == 0 && lane_id == 0) { printf("exhausted_warps: %d\n", exhausted_warps); }
+
     }
 }
+
 
 __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const part_table_plain_t* __restrict__ part, const JoinEntry* __restrict__ join_entries, size_t n) {
     int64_t sum1 = 0;
@@ -850,7 +858,7 @@ int main(int argc, char** argv) {
             printf("using btree\n");
             load_and_run_ij<btree_index>(argv[1], full_pipline_breaker);
             break;
-        }
+        }/* TODO: add cooperative_lookup
         case IndexType::radixspline: {
             printf("using radixspline\n");
             load_and_run_ij<radix_spline_index>(argv[1], full_pipline_breaker);
@@ -860,7 +868,7 @@ int main(int argc, char** argv) {
             printf("using lower bound search\n");
             load_and_run_ij<lower_bound_index>(argv[1], full_pipline_breaker);
             break;
-        }
+        }*/
         default:
             std::cerr << "unknown index type: " << index_type << std::endl;
             return 0;
