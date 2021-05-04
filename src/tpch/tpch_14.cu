@@ -328,7 +328,8 @@ __global__ void ij_full_kernel_2(
     const lineitem_table_plain_t* __restrict__ lineitem,
     const unsigned lineitem_size,
 //    const part_table_plain_t* __restrict__ part,
-    IndexStructureType index_structure)
+    IndexStructureType index_structure,
+    JoinEntry* __restrict__ join_entries)
 {
 /*
     const char* prefix = "PROMO";
@@ -430,7 +431,7 @@ if (lane_id == 0) { printf("items_per_warp[%d]: %d\n", warp_id, items_per_warp[w
             }
             const uint32_t lane_offset = __popc(overflow_lanes & right);
             dest_idx = lane_offset + __shfl_sync(FULL_MASK, dest_idx, 0);
-
+assert(!active || tid != 0);
             // matrialize attributes
             if (active && local_idx >= ITEMS_PER_THREAD) {
                 // buffer items
@@ -531,6 +532,7 @@ printf("warp: %d lane: %d refilling: %d\n", warp_id, lane_id, max(0, static_cast
                 auto& p = join_pairs[local_idx++].join_pair;
                 p.lineitem_tid = lineitem_tid_buffer[prefix_sum];
                 p.l_partkey = l_partkey_buffer[prefix_sum];
+assert(p.lineitem_tid != 0);
             }
 
             ideal_refill_cnt -= refill_cnt;
@@ -587,10 +589,13 @@ printf("warp: %d lane: %d local_idx: %d\n", warp_id, lane_id, local_idx);
 */
 
 
+        unsigned output_base = 0;
         const auto count = MAX_ITEMS_PER_WARP - ideal_refill_cnt;
         if (lane_id == 0) {
-            atomicAdd(&total_matches, count);
+            atomicAdd(&total_matches, count); // TODO remove
+            output_base = atomicAdd(&output_index, count);
         }
+        output_base = __shfl_sync(FULL_MASK, output_base, 0);
 
         int lane_dst_idx_prefix_sum = local_idx;
         // calculate the inclusive prefix sum among all threads in this warp
@@ -600,12 +605,13 @@ printf("warp: %d lane: %d local_idx: %d\n", warp_id, lane_id, local_idx);
             lane_dst_idx_prefix_sum += (lane_id >= offset) ? value : 0;
         }
         lane_dst_idx_prefix_sum -= local_idx;
+printf("warp: %d lane: %d output_base: %u output prefix sum: %d\n", warp_id, lane_id, output_base, lane_dst_idx_prefix_sum);
 
         uint32_t active_lanes = FULL_MASK;
         for (unsigned i = 0; active_lanes != 0; ++i) {
             bool active = i < local_idx;
             auto& p = join_pairs[i].join_pair;
-const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
+            const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
 //            const auto tid = index_structure(p.l_partkey);
 
             if (active) {
@@ -613,6 +619,10 @@ const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
                     printf("partkey: %u -> invalidTid\n", p.l_partkey);
                 }
                 assert(tid != btree::invalidTid);
+                auto& join_entry = join_entries[output_base + lane_dst_idx_prefix_sum++];
+                join_entry.lineitem_tid = p.lineitem_tid;
+assert(p.lineitem_tid != 0);
+                join_entry.part_tid = p.l_partkey;
             }
             active_lanes = __ballot_sync(FULL_MASK, active);
         }
