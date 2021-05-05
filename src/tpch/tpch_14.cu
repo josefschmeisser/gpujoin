@@ -789,35 +789,81 @@ __global__ void ij_full_kernel_2(
     IndexStructureType index_structure)
 */
 
+    void compare_join_results(JoinEntry* ref, unsigned ref_size, JoinEntry* actual, unsigned actual_size) {
+        std::unordered_map<uint32_t, uint32_t> map;
+        for (unsigned i = 0; i < ref_size; ++i) {
+            if (map.count(ref[i].lineitem_tid) > 0) {
+                std::cerr << "lineitem tid " << ref[i].lineitem_tid << " already in map" << std::endl;
+                exit(0);
+            }
+            map.emplace(ref[i].lineitem_tid, ref[i].part_tid);
+        }
+        for (unsigned i = 0; i < actual_size; ++i) {
+            auto it = map.find(actual[i].lineitem_tid);
+            if (it != map.end()) {
+                if (it->second != actual[i].part_tid) {
+                    std::cerr << "part tid " << actual[i].part_tid << " expected " << it->second << std::endl;
+                }
+            } else {
+                std::cerr << "lineitem tid " << actual[i].lineitem_tid << " not in reference" << std::endl;
+            }
+        }
+    }
 
     void run_two_phase_ij() {
+decltype(output_index) matches1 = 0;
+decltype(output_index) matches2 = 0;
+decltype(output_index) zero = 0;
 
         enum { BLOCK_THREADS = 128, ITEMS_PER_THREAD = 8 }; // TODO optimize
 
-        JoinEntry* join_entries;
-        cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
+        JoinEntry* join_entries1;
+//        cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
+        cudaMallocManaged(&join_entries1, sizeof(JoinEntry)*lineitem_size);
 
         const auto start1 = std::chrono::high_resolution_clock::now();
 
-        int num_blocks = 1;// TODO
-//        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, 1024*1024*30, index_structure);
-        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure);
+        int num_blocks = 4;// TODO
+//        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, 1024*1024*30, index_structure, join_entries);
+        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
         cudaDeviceSynchronize();
+
+        cudaError_t error = cudaMemcpyFromSymbol(&matches1, output_index, sizeof(matches1), 0, cudaMemcpyDeviceToHost);
+        assert(error == cudaSuccess);
+        printf("join matches1: %u\n", matches1);
+/*
+cudaError_t cudaMemcpyToSymbol 	( 	const char *  	symbol,
+		const void *  	src,
+		size_t  	count,
+		size_t  	offset = 0,
+		enum cudaMemcpyKind  	kind = cudaMemcpyHostToDevice
+	) 	*/
+        error = cudaMemcpyToSymbol(output_index, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice);
+        assert(error == cudaSuccess);
+        JoinEntry* join_entries2;
+//        cudaMalloc(&join_entries2, sizeof(JoinEntry)*lineitem_size);
+        cudaMallocManaged(&join_entries2, sizeof(JoinEntry)*lineitem_size);
+        num_blocks = (part_size + block_size - 1) / block_size;
+        ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure, join_entries2);
+        cudaDeviceSynchronize();
+
+        error = cudaMemcpyFromSymbol(&matches2, output_index, sizeof(matches2), 0, cudaMemcpyDeviceToHost);
+        assert(error == cudaSuccess);
+        printf("join matches2: %u\n", matches2);
+//exit(0);
+//compare_join_results(join_entries2, matches2, join_entries1, matches1);
+compare_join_results(join_entries1, matches1, join_entries2, matches2);
 
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
 
 std::cout << "total_scanned: " << total_scanned << " total_matches: " << total_matches << std::endl;
 
-        decltype(output_index) matches;
-        cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
-        assert(error == cudaSuccess);
-        //printf("join matches: %u\n", matches);
 
         num_blocks = (lineitem_size + block_size - 1) / block_size;
 
         const auto start2 = std::chrono::high_resolution_clock::now();
-        ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
+        ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries1, matches1);
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
