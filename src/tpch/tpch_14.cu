@@ -665,7 +665,7 @@ struct helper {
         ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
         cudaDeviceSynchronize();
 
-        const auto kernelStop = std::chrono::high_resolution_clock::now();local_idx
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
@@ -691,7 +691,7 @@ struct helper {
         }
     }
 
-    void run_two_phase_ij_debug() {
+    void run_two_phase_ij_buffer_debug() {
         decltype(output_index) matches1 = 0;
         decltype(output_index) matches2 = 0;
         decltype(output_index) zero = 0;
@@ -699,7 +699,6 @@ struct helper {
         enum { BLOCK_THREADS = 128, ITEMS_PER_THREAD = 8 }; // TODO optimize
 
         JoinEntry* join_entries1;
-//        cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
         cudaMallocManaged(&join_entries1, sizeof(JoinEntry)*lineitem_size);
 
         int num_sms;
@@ -717,7 +716,6 @@ struct helper {
         error = cudaMemcpyToSymbol(output_index, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice);
         assert(error == cudaSuccess);
         JoinEntry* join_entries2;
-//        cudaMalloc(&join_entries2, sizeof(JoinEntry)*lineitem_size);
         cudaMallocManaged(&join_entries2, sizeof(JoinEntry)*lineitem_size);
         num_blocks = (part_size + block_size - 1) / block_size;
         ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure, join_entries2);
@@ -727,13 +725,11 @@ struct helper {
         assert(error == cudaSuccess);
         printf("join matches2: %u\n", matches2);
 
-//compare_join_results(join_entries2, matches2, join_entries1, matches1);
-compare_join_results(join_entries1, matches1, join_entries2, matches2);
+        compare_join_results(join_entries2, matches2, join_entries1, matches1);
+        compare_join_results(join_entries1, matches1, join_entries2, matches2);
 
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
-
-//std::cout << "total_scanned: " << total_scanned << " total_matches: " << total_matches << std::endl;
 
         num_blocks = (lineitem_size + block_size - 1) / block_size;
 
@@ -745,6 +741,39 @@ compare_join_results(join_entries1, matches1, join_entries2, matches2);
         const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start2).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
+
+    void run_two_phase_ij_buffer() {
+        decltype(output_index) matches1 = 0;
+
+        enum { BLOCK_THREADS = 128, ITEMS_PER_THREAD = 8 }; // TODO optimize
+
+        JoinEntry* join_entries1;
+        cudaMalloc(&join_entries1, sizeof(JoinEntry)*lineitem_size);
+
+        int num_sms;
+        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
+        int num_blocks = num_sms*4; // TODO
+
+        const auto start1 = std::chrono::high_resolution_clock::now();
+        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
+        cudaDeviceSynchronize();
+        const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
+        std::cout << "kernel time: " << d1 << " ms\n";
+
+        cudaError_t error = cudaMemcpyFromSymbol(&matches1, output_index, sizeof(matches1), 0, cudaMemcpyDeviceToHost);
+        assert(error == cudaSuccess);
+        printf("join matches1: %u\n", matches1);
+
+        num_blocks = (lineitem_size + block_size - 1) / block_size;
+
+        const auto start2 = std::chrono::high_resolution_clock::now();
+        ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries1, matches1);
+        cudaDeviceSynchronize();
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
+        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start2).count()/1000.;
+        std::cout << "kernel time: " << kernelTime << " ms\n";
+        std::cout << "complete time: " << d1 + kernelTime << " ms\n";
+    }
 };
 
 template<class IndexType>
@@ -753,7 +782,7 @@ void load_and_run_ij(const std::string& path, bool as_full_pipline_breaker) {
     h.load_database(path);
     if (as_full_pipline_breaker) {
         printf("full pipline breaker\n");
-        h.run_two_phase_ij();
+        h.run_two_phase_ij_buffer();
     } else {
         h.run_ij();
     }
