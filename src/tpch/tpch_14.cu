@@ -622,7 +622,7 @@ printf("warp: %d lane: %d output_base: %u output prefix sum: %d\n", warp_id, lan
                 auto& join_entry = join_entries[output_base + lane_dst_idx_prefix_sum++];
                 join_entry.lineitem_tid = p.lineitem_tid;
 assert(p.lineitem_tid != 0);
-                join_entry.part_tid = p.l_partkey;
+                join_entry.part_tid = tid;
             }
             active_lanes = __ballot_sync(FULL_MASK, active);
         }
