@@ -378,14 +378,11 @@ __global__ void ij_full_kernel_2(
         fully_occupied_warps = 0;
         exhausted_warps = 0;
     }
+    __syncthreads(); // ensure that all shared variables are initialized
 
     uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
 
-    // TODO get rid of exhausted_warps
     while (exhausted_warps < WARPS_PER_BLOCK || buffer_idx > 0) {
-        __syncthreads(); // ensure that all shared variables are initialized
-
-        // reset
         uint16_t local_idx = 0; // current size of the thread local array
         uint32_t underfull_lanes = FULL_MASK; // lanes that have less than ITEMS_PER_THREAD items in their registers (has to be reset after each iteration)
 
@@ -516,7 +513,7 @@ __global__ void ij_full_kernel_2(
         }
         lane_dst_idx_prefix_sum -= local_idx;
 
-        uint32_t active_lanes = FULL_MASK;
+        uint32_t active_lanes = __ballot_sync(FULL_MASK, local_idx > 0);
         for (unsigned i = 0; active_lanes != 0; ++i) {
             bool active = i < local_idx;
             auto& p = join_pairs[i].join_pair;
