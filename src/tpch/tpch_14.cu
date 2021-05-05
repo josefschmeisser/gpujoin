@@ -502,15 +502,19 @@ assert(!active || tid != 0);
 if (lane_id == 0) { printf("warp: %d ideal_refill_cnt: %d buffer_idx (before): %d\n", warp_id, ideal_refill_cnt, buffer_idx); }
         // distribute buffered items among the threads in this warp
         if (ideal_refill_cnt > 0) {
+            uint32_t refill_idx_start;
             if (lane_id == 0) {
 //                auto expected = buffer_idx;
-                auto old = atomic_sub_safe(&buffer_idx, ideal_refill_cnt);
+//                auto old = atomic_sub_safe(&buffer_idx, ideal_refill_cnt);
+                const auto old = atomic_sub_safe(&buffer_idx, ideal_refill_cnt);
 //                assert(old == expected);
                 refill_cnt = (old > ideal_refill_cnt) ? ideal_refill_cnt : old;
+                refill_idx_start = old - refill_cnt;
             }
 
             //T __shfl_sync(unsigned mask, T var, int srcLane, int width=warpSize);
             refill_cnt = __shfl_sync(FULL_MASK, refill_cnt, 0);
+            refill_idx_start = __shfl_sync(FULL_MASK, refill_idx_start, 0);
 if (lane_id == 0) { printf("warp: %d refill_cnt: %d\n", warp_id, refill_cnt); }
 
             int prefix_sum = required;
@@ -530,8 +534,9 @@ printf("warp: %d lane: %d prefix_sum: %d\n", warp_id, lane_id, prefix_sum);
 printf("warp: %d lane: %d refilling: %d\n", warp_id, lane_id, max(0, static_cast<int>(limit - prefix_sum)));
             for (; prefix_sum < limit; ++prefix_sum) {
                 auto& p = join_pairs[local_idx++].join_pair;
-                p.lineitem_tid = lineitem_tid_buffer[prefix_sum];
-                p.l_partkey = l_partkey_buffer[prefix_sum];
+                p.lineitem_tid = lineitem_tid_buffer[refill_idx_start + prefix_sum];
+                p.l_partkey = l_partkey_buffer[refill_idx_start + prefix_sum];
+if (p.lineitem_tid == 27109) printf("=== got tid 27109 from buffer pos: %u ===\n", prefix_sum);
 assert(p.lineitem_tid != 0);
             }
 
