@@ -356,8 +356,9 @@ __global__ void ij_full_kernel_2(
     __shared__ uint32_t exhausted_warps;
 
 // TODO
-//    __shared__ typename BlockRadixSortT::TempStorage temp_storage;
+    __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
+    /*
     union {
         struct {
             uint32_t l_partkey;
@@ -365,6 +366,14 @@ __global__ void ij_full_kernel_2(
         } join_pair;
         uint64_t raw;
     } join_pairs[ITEMS_PER_THREAD];
+*/
+    union {
+        uint64_t join_pairs_raw[ITEMS_PER_THREAD];
+        struct {
+            uint32_t l_partkey;
+            uint32_t lineitem_tid;
+        } join_pairs[ITEMS_PER_THREAD];
+    };
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
@@ -419,7 +428,7 @@ __global__ void ij_full_kernel_2(
                 l_partkey_buffer[dest_idx] = l_partkey;
             } else if (active) {
                 // store items in registers
-                auto& p = join_pairs[local_idx++].join_pair;
+                auto& p = join_pairs[local_idx++];
                 p.lineitem_tid = tid;
                 p.l_partkey = l_partkey;
             }
@@ -476,7 +485,7 @@ __global__ void ij_full_kernel_2(
             // refill registers with buffered elements
             const auto limit = min(prefix_sum + required, refill_cnt);
             for (; prefix_sum < limit; ++prefix_sum) {
-                auto& p = join_pairs[local_idx++].join_pair;
+                auto& p = join_pairs[local_idx++];
                 p.lineitem_tid = lineitem_tid_buffer[refill_idx_start + prefix_sum];
                 p.l_partkey = l_partkey_buffer[refill_idx_start + prefix_sum];
             }
@@ -491,10 +500,11 @@ __global__ void ij_full_kernel_2(
         __syncthreads(); // wait until all threads have tried to fill their registers
 
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
-//            if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
-            /* TODO
-            BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs, 20, 32); // TODO
-            */
+            if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
+            assert(join_pairs[0].l_partkey == (join_pairs_raw[0] & FULL_MASK));
+/*
+            BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs_raw, 8, 21); // TODO
+*/
         }
 
         unsigned output_base = 0;
@@ -516,7 +526,7 @@ __global__ void ij_full_kernel_2(
         uint32_t active_lanes = __ballot_sync(FULL_MASK, local_idx > 0);
         for (unsigned i = 0; active_lanes != 0; ++i) {
             bool active = i < local_idx;
-            auto& p = join_pairs[i].join_pair;
+            auto& p = join_pairs[i];
             const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
 //            const auto tid = index_structure(p.l_partkey);
 
