@@ -8,12 +8,15 @@ template<class Key, class Value, unsigned fanout>
 struct harmonia_tree {
     using key_t = Key;
     using value_t = Value;
+    using child_ref_t = unsigned;
 
-    static constexpr auto max_keys = fanout -1;
+    static constexpr auto max_keys = fanout - 1;
 
-    Key* keys;
-    Value* values;
+    key_t* keys;
+    child_ref_t* children;
+    value_t* values;
     unsigned size;
+    unsigned height;
 
     struct intermediate_node {
         bool is_leaf = false;
@@ -29,6 +32,9 @@ struct harmonia_tree {
 
     using tree_level_t = std::vector<std::unique_ptr<intermediate_node>>;
     using tree_levels_t = std::vector<std::unique_ptr<tree_level_t>>;
+
+    ~harmonia_tree() {
+    }
 
     key_t max_key(const intermediate_node* subtree);
 
@@ -94,19 +100,64 @@ struct harmonia_tree {
         return tree_levels;
     }
 
-    void store_node(const intermediate_node& node, unsigned key_array_pos) {
+    void store_node(const intermediate_node& node, unsigned key_offset /*, unsigned& children_offset*/) {
         for (unsigned i = 0; i < node.count; ++i) {
             std::memcpy(keys + current_key_offset, node.keys, sizeof(key_t)*max_keys);
         }
         for (unsigned i = 0; i < node.count; ++i) {
-            store_node(*node.children[i], key_array_pos += node.count);
-        }
+            store_node(*node.children[i], key_offset += node.count);
+        }/*
+        children[children_offset] = key_offset;
+        children_offset += 1;*/
     }
 
-    void store_nodes(const intermediate_node& root) {
+    /// offset into the flat key-array
+    void store_nodes(const tree_level_t& tree_level, unsigned& key_offset, unsigned& children_offset) {
+        for (auto& node : tree_level) {
+            store_node(root, key_offset);
+            key_offset += max_keys;
+        }
+
+        if (tree_level.front()->is_leaf) {
+            decltype(children[0]) value_offset = 0;
+            for (auto& node : tree_level) {
+                children[value_offset++] =
+        } else {
+            // write out prefix sum array entries
+            auto prefix_sum = key_offset + 1;
+            children[children_offset++] = prefix_sum;
+            for (unsigned i = 1; i < tree_level.size(); ++i) {
+                prefix_sum += max_keys;
+                children[children_offset++] = prefix_sum;
+            }
+        }
+    }
+/*
+    void store_prefix_sum_array() {
+    }
+*/
+    void construct(const vector<key_t>& keys) {
+        auto tree_levels = construct_levels(keys);
+        auto& root = tree_levels.front().front();
+
+        // allocate arrays
         const auto key_array_size = sizeof(key_t)*max_keys*root->tree_size;
         keys = malloc(key_array_size);
-        store_node(root, 0);
+        const auto node_count = 0;
+        children = malloc(node_count*sizeof(child_ref_t));
+        values = malloc(keys.size()*sizeof(value_t));
+
+        unsigned key_offset, children_offset;
+        for (auto& tree_level : tree_levels) {
+            store_nodes(tree_level, key_offset, children_offset);
+        }
+
+
+        unsigned value_offset = 0;
+        if (tree_level.front()->is_leaf) {
+            // TODO
+
+        }
     }
 
     template<Key, Value>
