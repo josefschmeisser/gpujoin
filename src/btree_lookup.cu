@@ -16,8 +16,8 @@ using namespace std;
 
 static constexpr unsigned maxRepetitions = 1;
 static constexpr unsigned activeLanes = 32;
-static constexpr unsigned numLookups = 128;
-static unsigned numElements = 128;
+static constexpr unsigned numLookups = 1e7;
+static unsigned numElements = 1e7;
 
 using namespace btree;
 using namespace btree::cuda;
@@ -38,9 +38,19 @@ __global__ void btree_bulk_lookup(const Node* __restrict__ root, unsigned n, con
 */
 
     for (int i = index; i < n; i += stride) {
-    printf("i: %d\n", i);
         tids[i] = btree_lookup(root, keys[i]);
         //tids[i] = btree::cuda::btree_lookup_with_hints(root, keys[i]);
+    }
+}
+
+__global__ void btree_bulk_cooperative_lookup(const Node* __restrict__ root, unsigned threadCount, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+//if (index < 32 || index > 63) return;
+    for (int i = index; i < threadCount; i += stride) {
+  //      printf("i: %d\n", i);
+        const auto tid = btree_cooperative_lookup(i < n, root, keys[i]);
+        if (i < n) tids[i] = tid;
     }
 }
 
@@ -114,7 +124,7 @@ int main(int argc, char** argv) {
 
     // calculate a factory by which the number of lookups has to be scaled in order to be able to serve all threads
     int lookupFactor = 32/activeLanes + ((32%activeLanes > 0) ? 1 : 0);
-    const auto numAugmentedLookups = numLookups*lookupFactor;
+    const int numAugmentedLookups = numLookups*lookupFactor;
     std::cout << "lookup scale factor: " << lookupFactor << " numAugmentedLookups: " << numAugmentedLookups << std::endl;
 
     // generate lookup keys
@@ -134,7 +144,7 @@ int main(int argc, char** argv) {
     auto d_tree = tree;
     d_tree = btree::copy_btree_to_gpu(tree);
 
-    int blockSize = 512;
+    int blockSize = 32;
     int numBlocks = (numAugmentedLookups + blockSize - 1) / blockSize;
     /*
     int numSMs;
@@ -143,20 +153,20 @@ int main(int argc, char** argv) {
     printf("numblocks: %d\n", numBlocks);
 
     printf("executing kernel...\n");
+    const int threadCount = ((numAugmentedLookups + 31) & (-32));
+    std::cout << "n: " << numAugmentedLookups << " threadCount: " << threadCount << std::endl;
     decltype(std::chrono::high_resolution_clock::now()) kernelStart;
     if constexpr (activeLanes < 32) {
         std::cout << "active lanes: " << activeLanes << std::endl;
         kernelStart = std::chrono::high_resolution_clock::now();
         for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-            btree_bulk_lookup<<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
-            //btree_bulk_lookup_serialized<activeLanes><<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
+            btree_bulk_lookup_serialized<activeLanes><<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
             cudaDeviceSynchronize();
         }
     } else {
         kernelStart = std::chrono::high_resolution_clock::now();
         for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-            btree_bulk_lookup<<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
-            //btree_bulk_lookup_serialized<activeLanes><<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
+            btree_bulk_cooperative_lookup<<<numBlocks, blockSize>>>(d_tree, threadCount, numAugmentedLookups, d_lookupKeys, d_tids);
             cudaDeviceSynchronize();
         }
     }
