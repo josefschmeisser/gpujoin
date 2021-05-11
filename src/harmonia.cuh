@@ -119,9 +119,11 @@ struct harmonia_tree {
         }
 
         if (tree_level.front()->is_leaf) {
-            decltype(children[0]) value_offset = 0;
+            decltype(children[0]) values_prefix_sum = 0;
             for (auto& node : tree_level) {
-                children[value_offset++] =
+                children[children_offset++] = values_prefix_sum;
+                values_prefix_sum += fanout;
+            }
         } else {
             // write out prefix sum array entries
             auto prefix_sum = key_offset + 1;
@@ -132,10 +134,7 @@ struct harmonia_tree {
             }
         }
     }
-/*
-    void store_prefix_sum_array() {
-    }
-*/
+
     void construct(const vector<key_t>& keys) {
         auto tree_levels = construct_levels(keys);
         auto& root = tree_levels.front().front();
@@ -152,11 +151,10 @@ struct harmonia_tree {
             store_nodes(tree_level, key_offset, children_offset);
         }
 
-
-        unsigned value_offset = 0;
         if (tree_level.front()->is_leaf) {
-            // TODO
-
+            for (unsigned i = 0; i < keys.size(); ++i) {
+                values[i] = i;
+            }
         }
     }
 
