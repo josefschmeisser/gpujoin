@@ -16,6 +16,8 @@
 
 #include <numa.h>
 
+#include "cuda_utils.cuh"
+
 using namespace std;
 
 static const size_t cache_line_size = 128;
@@ -328,21 +330,13 @@ __device__ unsigned linear_search(T x, const T* arr, const unsigned size) {
     return size;
 }
 
-__forceinline__ __device__ unsigned lane_id() {
-    unsigned ret;
-    asm volatile ("mov.u32 %0, %laneid;" : "=r"(ret));
-    return ret;
-}
-
-#define FULL_MASK 0xffffffff
-
 template<class T, unsigned degree = 3>
 __device__ unsigned cooperative_linear_search(bool active, T x, const T* arr, const unsigned size) {
 
     enum { WINDOW_SIZE = 1 << degree };
 
-//if (threadIdx.x < 192 || threadIdx.x > 223) return 0;
-    assert(__ballot_sync(FULL_MASK, 1) == FULL_MASK);
+//if (threadIdx.x < 832 || threadIdx.x > 863) return 0;
+    assert(__all_sync(FULL_MASK, 1));
 
 
     const unsigned my_lane_id = lane_id();

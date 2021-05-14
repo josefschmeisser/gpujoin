@@ -21,6 +21,7 @@
 //#include "thirdparty/cub_test/test_util.h"
 
 
+#include "cuda_utils.cuh"
 #include "LinearProbingHashTable.cuh"
 #include "btree.cuh"
 #include "btree.cu"
@@ -71,15 +72,6 @@ __device__ int my_strcmp(const char *str_a, const char *str_b, unsigned len){
 
 __managed__ int64_t globalSum1 = 0;
 __managed__ int64_t globalSum2 = 0;
-
-#define FULL_MASK 0xffffffff
-
-// see: https://stackoverflow.com/a/44337310
-__forceinline__ __device__ unsigned lane_id() {
-    unsigned ret;
-    asm volatile ("mov.u32 %0, %laneid;" : "=r"(ret));
-    return ret;
-}
 
 __global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__ part, const lineitem_table_plain_t* __restrict__ lineitem, device_ht_t ht) {
     const char* prefix = "PROMO";
