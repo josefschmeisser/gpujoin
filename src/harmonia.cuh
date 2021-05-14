@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <cstring>
+#include <numeric>
 
 #include "cuda_utils.cuh"
 
@@ -39,9 +40,8 @@ struct harmonia_tree {
     struct intermediate_node {
         bool is_leaf = false;
         unsigned count = 0;
-        unsigned tree_size = 0;
+//        unsigned tree_size = 0;
         key_t keys[fanout - 1];
-//        std::unique_ptr<itermediate_node> children[fanout];
         union {
             intermediate_node* children[fanout];
             value_t values[fanout];
@@ -55,13 +55,22 @@ struct harmonia_tree {
     }
 
     key_t max_key(const intermediate_node& subtree) {
-        return 0; // TODO
+        if (subtree.is_leaf) {
+            return subtree.keys[subtree.count - 1];
+        }
+        return max_key(*subtree.children[subtree.count]);
     }
 
     void add(intermediate_node& node, key_t key, value_t value) {
+        node.keys[node.count] = key;
+        node.values[node.count] = value;
+        node.count += 1;
     }
 
     void add(intermediate_node& node, key_t key, intermediate_node* child) {
+        node.keys[node.count] = key;
+        node.children[node.count] = child;
+        node.count += 1;
     }
 
     void construct_inner_nodes(tree_levels_t& tree_levels) {
@@ -123,21 +132,11 @@ struct harmonia_tree {
         return tree_levels;
     }
 
-    void store_node(const intermediate_node& node, unsigned key_offset /*, unsigned& children_offset*/) {
-        for (unsigned i = 0; i < node.count; ++i) {
-            std::memcpy(keys + key_offset, node.keys, sizeof(key_t)*max_keys);
-        }
-        for (unsigned i = 0; i < node.count; ++i) {
-            store_node(*node.children[i], key_offset += node.count);
-        }/*
-        children[children_offset] = key_offset;
-        children_offset += 1;*/
-    }
-
-    /// offset into the flat key-array
     void store_nodes(const tree_level_t& tree_level, unsigned& key_offset, unsigned& children_offset) {
+        // store the keys in breadth first order
         for (auto& node : tree_level) {
-            store_node(*node, key_offset);
+  //          store_node(*node, key_offset);
+            std::memcpy(keys + key_offset, node->keys, sizeof(key_t)*max_keys);
             key_offset += max_keys;
         }
 
@@ -163,22 +162,27 @@ struct harmonia_tree {
         auto& root = tree_levels.front()->front();
 
         // allocate arrays
-        const auto key_array_size = sizeof(key_t)*max_keys*root->tree_size;
+        const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
+        printf("node_count: %lu\n", node_count);
+//        const auto key_array_size = sizeof(key_t)*max_keys*root->tree_size;
+        const auto key_array_size = sizeof(key_t)*max_keys*node_count;
         keys = (key_t*)malloc(key_array_size);
-        const auto node_count = 0;
         children = (child_ref_t*)malloc(node_count*sizeof(child_ref_t));
         values = (value_t*)malloc(input.size()*sizeof(value_t));
 
-        unsigned key_offset, children_offset;
+        unsigned key_offset = 0, children_offset = 0;
         for (auto& tree_level : tree_levels) {
             store_nodes(*tree_level, key_offset, children_offset);
         }
 
+        // insert values
         for (unsigned i = 0; i < input.size(); ++i) {
             values[i] = i;
         }
+
+        // initialize remaining members
         depth = tree_levels.size();
-        // TODO
+        size = input.size();
     }
 
     template<unsigned degree>
@@ -254,7 +258,11 @@ struct harmonia_tree {
         bool active = true;
         unsigned lb, pos = 0;
         for (unsigned current_depth = 0; current_depth <= depth; ++current_depth) {
-            lb = cooperative_linear_search(active, key, keys + pos);
+            using key_array_t = key_t[max_keys];
+            key_t* raw = keys + pos;
+            key_array_t& current_node = reinterpret_cast<key_array_t&>(raw);
+            lb = std::lower_bound(std::cbegin(current_node), std::cend(current_node), key) - std::cbegin(current_node);
+            printf("lower bound: %lu size: %lu\n", lb, std::cend(current_node) - std::cbegin(current_node));
             unsigned new_pos = children[pos + lb];
             active = active && new_pos < size;
 
