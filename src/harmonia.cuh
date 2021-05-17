@@ -74,7 +74,7 @@ struct harmonia_tree {
     }
 
     void construct_inner_nodes(tree_levels_t& tree_levels) {
-        const auto& lower_level = tree_levels.front();
+        const auto& lower_level = tree_levels.back();
 
         if (lower_level->size() == 1) {
             return;
@@ -165,13 +165,14 @@ struct harmonia_tree {
         const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
         printf("node_count: %lu\n", node_count);
 //        const auto key_array_size = sizeof(key_t)*max_keys*root->tree_size;
-        const auto key_array_size = sizeof(key_t)*max_keys*node_count;
-        keys = (key_t*)malloc(key_array_size);
+        const auto key_array_size = max_keys*node_count;
+        keys = (key_t*)malloc(key_array_size*sizeof(key_t));
         children = (child_ref_t*)malloc(node_count*sizeof(child_ref_t));
         values = (value_t*)malloc(input.size()*sizeof(value_t));
 
         unsigned key_offset = 0, children_offset = 0;
-        for (auto& tree_level : tree_levels) {
+        for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
+            auto& tree_level = *it;
             store_nodes(*tree_level, key_offset, children_offset);
         }
 
