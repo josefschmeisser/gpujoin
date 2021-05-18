@@ -13,6 +13,14 @@
 #define FULL_MASK 0xffffffff
 #endif
 
+template<class InputIt>
+std::string stringify(InputIt first, InputIt last) {
+    auto comma_fold = [](std::string a, auto b) {
+        return std::move(a) + ',' + std::to_string(b);
+    };
+    return std::accumulate(std::next(first), last, std::to_string(*first), comma_fold);
+}
+
 namespace harmonia {
 
 template<class Key, class Value, unsigned fanout>
@@ -135,32 +143,45 @@ struct harmonia_tree {
     void fill_underfull_node(intermediate_node& node) {
         for (unsigned i = 1; i < max_keys; ++i) {
             if (node.keys[i - 1] > node.keys[i]) {
-                node.keys[i] = node.keys[i - 1];
+                node.keys[i] = std::numeric_limits<key_t>::max();
             }
         }
     }
 
-    void store_nodes(const tree_level_t& tree_level, unsigned& key_offset, unsigned& children_offset) {
-        // store the keys in breadth first order
-        for (auto& node : tree_level) {
-  //          store_node(*node, key_offset);
-            std::memcpy(keys + key_offset, node->keys, sizeof(key_t)*max_keys);
-            key_offset += max_keys;
-        }
+    void store_nodes(tree_levels_t& tree_levels) {
+        unsigned key_offset = 0;
 
-        if (tree_level.front()->is_leaf) {
-            child_ref_t values_prefix_sum = 0;
+        // the keys are stored in breadth first order
+        for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
+            auto& tree_level = *(*it);
+            fill_underfull_node(*tree_level.back());
+
             for (auto& node : tree_level) {
-                children[children_offset++] = values_prefix_sum;
-                values_prefix_sum += fanout;
+                std::memcpy(keys + key_offset, node->keys, sizeof(key_t)*max_keys);
+                key_offset += max_keys;
             }
-        } else {
-            // write out prefix sum array entries
-            auto prefix_sum = key_offset + 1;
-            children[children_offset++] = prefix_sum;
-            for (unsigned i = 1; i < tree_level.size(); ++i) {
-                prefix_sum += max_keys;
-                children[children_offset++] = prefix_sum;
+        }
+    }
+
+    void store_structure(const tree_levels_t& tree_levels) {
+        unsigned children_offset = 0;
+        child_ref_t prefix_sum = 1;
+
+        // levels are stored in reverse order since the tree was constructed in bottom-up fashion
+        for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
+            auto& tree_level = *(*it);
+            if (tree_level.front()->is_leaf) {
+                child_ref_t values_prefix_sum = 0;
+                for (auto& node : tree_level) {
+                    children[children_offset++] = values_prefix_sum;
+                    values_prefix_sum += max_keys;// fanout;
+                }
+            } else {
+                // write out the prefix sum array entries
+                for (auto& node : tree_level) {
+                    children[children_offset++] = prefix_sum;
+                    prefix_sum += node->count + 1;
+                }
             }
         }
     }
@@ -178,12 +199,8 @@ struct harmonia_tree {
         children = (child_ref_t*)malloc(node_count*sizeof(child_ref_t));
         values = (value_t*)malloc(input.size()*sizeof(value_t));
 
-        unsigned key_offset = 0, children_offset = 0;
-        for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
-            auto& tree_level = *it;
-            fill_underfull_node(*tree_level->back());
-            store_nodes(*tree_level, key_offset, children_offset);
-        }
+        store_nodes(tree_levels);
+        store_structure(tree_levels);
 
         // insert values
         for (unsigned i = 0; i < input.size(); ++i) {
@@ -193,6 +210,15 @@ struct harmonia_tree {
         // initialize remaining members
         depth = tree_levels.size();
         size = input.size();
+
+//std::cout << "keys: " << stringify(keys, keys + key_array_size) << std::endl;
+        for (unsigned i = 0, j = 0; i < key_array_size; i += max_keys, ++j) {
+            std::cout << "node " << j << " keys: " << stringify(keys + i, keys + i + 8) << std::endl;
+        }
+
+std::cout << "children: " << stringify(children, children + node_count) << std::endl;
+//std::cout << "values: " << stringify(values, values + input.size()) << std::endl;
+
     }
 
     template<unsigned degree>
