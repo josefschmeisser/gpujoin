@@ -132,6 +132,14 @@ struct harmonia_tree {
         return tree_levels;
     }
 
+    void fill_underfull_node(intermediate_node& node) {
+        for (unsigned i = 1; i < max_keys; ++i) {
+            if (node.keys[i - 1] > node.keys[i]) {
+                node.keys[i] = node.keys[i - 1];
+            }
+        }
+    }
+
     void store_nodes(const tree_level_t& tree_level, unsigned& key_offset, unsigned& children_offset) {
         // store the keys in breadth first order
         for (auto& node : tree_level) {
@@ -173,6 +181,7 @@ struct harmonia_tree {
         unsigned key_offset = 0, children_offset = 0;
         for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
             auto& tree_level = *it;
+            fill_underfull_node(*tree_level->back());
             store_nodes(*tree_level, key_offset, children_offset);
         }
 
