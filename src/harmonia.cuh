@@ -23,7 +23,12 @@ std::string stringify(InputIt first, InputIt last) {
 
 namespace harmonia {
 
-template<class Key, class Value, unsigned fanout>
+template<
+    class Key,
+    class Value,
+    unsigned fanout,
+    Key not_found,
+    bool sorted_only = true>
 struct harmonia_tree {
     using key_t = Key;
     using value_t = Value;
@@ -48,7 +53,6 @@ struct harmonia_tree {
     struct intermediate_node {
         bool is_leaf = false;
         unsigned count = 0;
-//        unsigned tree_size = 0;
         key_t keys[fanout - 1];
         union {
             intermediate_node* children[fanout];
@@ -221,6 +225,10 @@ std::cout << "children: " << stringify(children, children + node_count) << std::
 
     }
 
+    void create_device_handle(device_handle& handle) {
+
+    }
+
     template<unsigned degree>
     __device__ value_t cooperative_linear_search(bool active, key_t x, const key_t* arr) {
         enum { WINDOW_SIZE = 1 << degree };
@@ -268,50 +276,57 @@ std::cout << "children: " << stringify(children, children + node_count) << std::
 
     template<unsigned degree = 3>
     __device__ value_t lookup(bool active, const device_handle tree, key_t key) {
-   //     unsigned current_depth = 0;
-
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
-        unsigned lb, pos = 0;
-        for (unsigned current_depth = 0; current_depth <= tree.depth; ++current_depth) {
-            lb = cooperative_linear_search(active, key, tree.keys + pos);
+        key_t actual;
+        unsigned lb = 0, pos = 0;
+        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
+            key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+            lb = cooperative_linear_search(active, key, node_start);
+            actual = node_start[lb];
+
             unsigned new_pos = tree.children[pos + lb];
-            active = active && new_pos < tree.size;
+//            active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
 
-        if (active && (pos < tree.size) && (tree.keys[pos] == key)) {
-            return 0; // TODO node->payloads[pos];
+        if (active && pos < size && key == actual) {
+            return tree.values[pos];
         }
 
-        return -1; // TODO
+        return not_found;
     }
 
     __host__ value_t lookup(key_t key) {
         bool active = true;
-        unsigned lb, pos = 0;
-        for (unsigned current_depth = 0; current_depth <= depth; ++current_depth) {
+        key_t actual;
+        unsigned lb = 0, pos = 0;
+        for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             using key_array_t = key_t[max_keys];
-            key_t* raw = keys + pos;
-            key_array_t& current_node = reinterpret_cast<key_array_t&>(raw);
+            key_t* raw = keys + max_keys*pos;
+            key_array_t& current_node = reinterpret_cast<key_array_t&>(*raw);
+//std::cout << "search " << key << " in: " << stringify(std::cbegin(current_node), std::cend(current_node)) << std::endl;
             lb = std::lower_bound(std::cbegin(current_node), std::cend(current_node), key) - std::cbegin(current_node);
-            printf("lower bound: %lu size: %lu\n", lb, std::cend(current_node) - std::cbegin(current_node));
-            unsigned new_pos = children[pos + lb];
-            active = active && new_pos < size;
+            actual = current_node[lb];
+//printf("lower bound: %lu size: %lu\n", lb, std::cend(current_node) - std::cbegin(current_node));
+
+            unsigned new_pos = children[pos] + lb;
+//printf("new_pos: %d\n", new_pos);
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
-
-        if (active && (pos < size) && (keys[pos] == key)) {
-            return 0; // TODO return node->payloads[pos];
+//printf("leaf pos: %d\n", pos);
+        if (active && pos < size && key == actual) {
+//printf("lookup final pos: %d\n", pos);
+            return values[pos];
         }
 
-        return -1; // TODO
+        return not_found;
     }
 };
 
