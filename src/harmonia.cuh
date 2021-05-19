@@ -36,19 +36,19 @@ struct harmonia_tree {
 
     static constexpr auto max_keys = fanout - 1;
 
-    key_t* keys;
-    child_ref_t* children;
-    value_t* values;
+    std::vector<key_t> keys;
+    std::vector<child_ref_t> children;
+    std::vector<value_t> values;
     unsigned size;
     unsigned depth;
 
-    struct device_handle {
+    struct device_handle_t {
         key_t* keys;
         child_ref_t* children;
         value_t* values;
         unsigned size;
         unsigned depth;
-    };
+    }* device_handle = nullptr;
 
     struct intermediate_node {
         bool is_leaf = false;
@@ -115,8 +115,8 @@ struct harmonia_tree {
         construct_inner_nodes(tree_levels);
     }
 
-    tree_levels_t construct_levels(const std::vector<key_t>& keys) {
-        uint64_t n = keys.size();
+    tree_levels_t construct_levels(const std::vector<key_t>& input) {
+        uint64_t n = input.size();
 
         auto leaves = std::make_unique<tree_level_t>();
         auto node = std::make_unique<intermediate_node>();
@@ -124,7 +124,7 @@ struct harmonia_tree {
 
         // construct leaves
         for (uint64_t i = 0; i < n; i++) {
-            auto k = keys[i];
+            auto k = input[i];
             value_t value = i;
             if (node->count >= max_keys) {
                 leaves->push_back(std::move(node));
@@ -161,7 +161,7 @@ struct harmonia_tree {
             fill_underfull_node(*tree_level.back());
 
             for (auto& node : tree_level) {
-                std::memcpy(keys + key_offset, node->keys, sizeof(key_t)*max_keys);
+                std::memcpy(&keys[key_offset], node->keys, sizeof(key_t)*max_keys);
                 key_offset += max_keys;
             }
         }
@@ -198,10 +198,13 @@ struct harmonia_tree {
         const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
         printf("node_count: %lu\n", node_count);
 //        const auto key_array_size = sizeof(key_t)*max_keys*root->tree_size;
-        const auto key_array_size = max_keys*node_count;
+        const auto key_array_size = max_keys*node_count;/*
         keys = (key_t*)malloc(key_array_size*sizeof(key_t));
         children = (child_ref_t*)malloc(node_count*sizeof(child_ref_t));
-        values = (value_t*)malloc(input.size()*sizeof(value_t));
+        values = (value_t*)malloc(input.size()*sizeof(value_t));*/
+        keys.resize(key_array_size);
+        children.resize(node_count);
+        values.resize(input.size());
 
         store_nodes(tree_levels);
         store_structure(tree_levels);
@@ -275,18 +278,18 @@ std::cout << "children: " << stringify(children, children + node_count) << std::
     }
 
     template<unsigned degree = 3>
-    __device__ value_t lookup(bool active, const device_handle tree, key_t key) {
+    __device__ value_t lookup(bool active, const device_handle_t* tree, key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         key_t actual;
         unsigned lb = 0, pos = 0;
-        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
-            key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+        for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
+            key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
             lb = cooperative_linear_search(active, key, node_start);
             actual = node_start[lb];
 
-            unsigned new_pos = tree.children[pos + lb];
-//            active = active && new_pos < tree.size; // TODO
+            unsigned new_pos = tree->children[pos + lb];
+//            active = active && new_pos < tree->size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
@@ -294,7 +297,7 @@ std::cout << "children: " << stringify(children, children + node_count) << std::
         }
 
         if (active && pos < size && key == actual) {
-            return tree.values[pos];
+            return tree->values[pos];
         }
 
         return not_found;
@@ -306,7 +309,7 @@ std::cout << "children: " << stringify(children, children + node_count) << std::
         unsigned lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             using key_array_t = key_t[max_keys];
-            key_t* raw = keys + max_keys*pos;
+            key_t* raw = &keys[max_keys*pos];
             key_array_t& current_node = reinterpret_cast<key_array_t&>(*raw);
 //std::cout << "search " << key << " in: " << stringify(std::cbegin(current_node), std::cend(current_node)) << std::endl;
             lb = std::lower_bound(std::cbegin(current_node), std::cend(current_node), key) - std::cbegin(current_node);
