@@ -247,7 +247,8 @@ std::cout << "children: " << stringify(children.begin(), children.end()) << std:
         // create cuda struct
         ret = cudaMalloc(&device_handle, sizeof(device_handle_t));
         assert(ret == cudaSuccess);
-        cudaMemcpy(device_handle, &tmp, sizeof(device_handle), cudaMemcpyHostToDevice);
+        ret = cudaMemcpy(device_handle, &tmp, sizeof(device_handle_t), cudaMemcpyHostToDevice);
+        assert(ret == cudaSuccess);
     }
 
     template<unsigned degree>
