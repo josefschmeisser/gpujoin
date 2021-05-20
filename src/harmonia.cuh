@@ -64,6 +64,10 @@ struct harmonia_tree {
     using tree_levels_t = std::vector<std::unique_ptr<tree_level_t>>;
 
     ~harmonia_tree() {
+        // free device handle
+        if (device_handle) {
+// TODO
+        }
     }
 
     key_t max_key(const intermediate_node& subtree) {
@@ -220,20 +224,34 @@ struct harmonia_tree {
 
 //std::cout << "keys: " << stringify(keys, keys + key_array_size) << std::endl;
         for (unsigned i = 0, j = 0; i < key_array_size; i += max_keys, ++j) {
-            std::cout << "node " << j << " keys: " << stringify(keys + i, keys + i + 8) << std::endl;
+            std::cout << "node " << j << " keys: " << stringify(&keys[i], &keys[i + 8]) << std::endl;
         }
 
-std::cout << "children: " << stringify(children, children + node_count) << std::endl;
+std::cout << "children: " << stringify(children.begin(), children.end()) << std::endl;
 //std::cout << "values: " << stringify(values, values + input.size()) << std::endl;
 
     }
 
-    void create_device_handle(device_handle& handle) {
+    void create_device_handle() {//device_handle_t& handle) {
+        // initialize fields
+        device_handle_t tmp;
+        tmp.depth = depth;
+        tmp.size = size;
+        auto ret = cudaMalloc(&tmp.keys, sizeof(key_t)*keys.size());
+        assert(ret == cudaSuccess);
+        ret = cudaMalloc(&tmp.children, sizeof(child_ref_t)*children.size());
+        assert(ret == cudaSuccess);
+        ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
+        assert(ret == cudaSuccess);
 
+        // create cuda struct
+        ret = cudaMalloc(&device_handle, sizeof(device_handle_t));
+        assert(ret == cudaSuccess);
+        cudaMemcpy(device_handle, &tmp, sizeof(device_handle), cudaMemcpyHostToDevice);
     }
 
     template<unsigned degree>
-    __device__ value_t cooperative_linear_search(bool active, key_t x, const key_t* arr) {
+    __device__ static value_t cooperative_linear_search(bool active, key_t x, const key_t* arr) {
         enum { WINDOW_SIZE = 1 << degree };
 
         assert(__all_sync(FULL_MASK, 1));
@@ -278,17 +296,17 @@ std::cout << "children: " << stringify(children, children + node_count) << std::
     }
 
     template<unsigned degree = 3>
-    __device__ value_t lookup(bool active, const device_handle_t* tree, key_t key) {
+    __device__ static value_t lookup(bool active, const device_handle_t* tree, key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         key_t actual;
         unsigned lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
             key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
-            lb = cooperative_linear_search(active, key, node_start);
+            lb = cooperative_linear_search<degree>(active, key, node_start);
             actual = node_start[lb];
 
-            unsigned new_pos = tree->children[pos + lb];
+            unsigned new_pos = tree->children[pos] + lb;
 //            active = active && new_pos < tree->size; // TODO
 
             // Inactive threads never progress during the traversal phase.
@@ -296,7 +314,7 @@ std::cout << "children: " << stringify(children, children + node_count) << std::
             pos = active ? new_pos : 0;
         }
 
-        if (active && pos < size && key == actual) {
+        if (active && pos < tree->size && key == actual) {
             return tree->values[pos];
         }
 
