@@ -239,9 +239,15 @@ std::cout << "children: " << stringify(children.begin(), children.end()) << std:
         tmp.size = size;
         auto ret = cudaMalloc(&tmp.keys, sizeof(key_t)*keys.size());
         assert(ret == cudaSuccess);
+        ret = cudaMemcpy(tmp.keys, keys.data(), sizeof(key_t)*keys.size(), cudaMemcpyHostToDevice);
+        assert(ret == cudaSuccess);
         ret = cudaMalloc(&tmp.children, sizeof(child_ref_t)*children.size());
         assert(ret == cudaSuccess);
+        ret = cudaMemcpy(tmp.children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
+        assert(ret == cudaSuccess);
         ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
+        assert(ret == cudaSuccess);
+        ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
 
         // create cuda struct
