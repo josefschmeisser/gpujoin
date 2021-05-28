@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cuda_runtime.h>
@@ -12,6 +13,8 @@
 #include "zipf.hpp"
 
 #include "cuda_utils.cuh"
+#include "cuda_allocator.hpp"
+#include "numa_allocator.hpp"
 #include "indexes.cuh"
 
 using namespace std;
@@ -26,6 +29,9 @@ static unsigned defaultNumElements = 1e7;
 using namespace btree;
 using namespace btree::cuda;
 */
+
+using index_store_policy = vector_to_managed_array;
+using index_store_policy = vector_to_managed_array;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
@@ -115,6 +121,75 @@ IndexStructureType build_index(const std::vector<key_t>& h_keys, key_t* d_keys) 
     return index;
 }
 
+
+template<class T, class Allocator>
+struct device_array {
+    T* ptr_;
+    size_t size_;
+    Allocator allocator_;
+
+    device_array(T* ptr, size_t size, Allocator allocator) : ptr_(ptr), size_(size), allocator_(allocator) {}
+
+    device_array(const device_array&) = delete;
+
+    ~device_array() {
+        allocator_.deallocate(ptr_, sizeof(T)*size_);
+    }
+
+    T* data() { return ptr_; }
+};
+
+
+template<class T>
+struct device_array<T, void> {
+    T* ptr_;
+    size_t size_;
+
+    device_array(T* ptr, size_t size) : ptr_(ptr), size_(size) {}
+
+    device_array(const device_array&) = delete;
+
+    T* data() { return ptr_; }
+};
+
+
+template<class T, class OutputAllocator, class InputAllocator>
+auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
+    printf("different types\n");
+    if constexpr (std::is_same<OutputAllocator, numa_allocator<T>>::value) {
+        T* ptr = allocator.allocate(vec.size()*sizeof(T));
+        std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
+        return device_array<T, OutputAllocator>(ptr, vec.size(), allocator);
+    } else if (std::is_same<OutputAllocator, cuda_allocator<T, true>>::value) {
+        return device_array<T, void>(vec.data(), vec.size());
+    } else if (std::is_same<OutputAllocator, cuda_allocator<T, false>>::value) {
+        T* ptr;
+        cudaMalloc((void**)&ptr, vec.size()*sizeof(T));
+        cudaMemcpy(ptr, vec.data(), vec.size()*sizeof(T), cudaMemcpyHostToDevice);
+        return device_array<T, OutputAllocator>(ptr, vec.size(), allocator);
+    } else {
+        assert(false);
+    }
+}
+
+template<class T, class OutputAllocator>
+auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAllocator& allocator) {
+    printf("same type\n");
+    if constexpr (std::is_same<OutputAllocator, numa_allocator<T>>::value) {
+        if (allocator.node() == vec.get_allocator().node()) {
+            return device_array<T, void>(vec.data(), vec.size());
+        } else {
+            T* ptr = allocator.allocate(vec.size()*sizeof(T));
+            std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
+            return device_array<T, OutputAllocator>(ptr, vec.size(), allocator);
+        }
+    } else if (std::is_same<OutputAllocator, cuda_allocator<T, false>>::value) {
+        return device_array<T, void>(vec.data(), vec.size());
+    } else {
+        assert(false);
+    }
+}
+
 template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_lookup_keys, unsigned num_lookup_keys) {
     int numBlocks = (num_lookup_keys + blockSize - 1) / blockSize;
@@ -135,10 +210,12 @@ auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_loo
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "GPU MOps: " << (maxRepetitions*num_lookup_keys/1e6)/(kernelTime/1e3) << endl;
 
+    // transfer results
     std::unique_ptr<value_t[]> h_tids(new value_t[num_lookup_keys]);
     cudaMemcpy(h_tids.get(), d_tids, num_lookup_keys*sizeof(value_t), cudaMemcpyDeviceToHost);
 
     cudaFree(d_tids);
+
     return std::move(h_tids);
 }
 
@@ -182,6 +259,11 @@ int main(int argc, char** argv) {
     auto d_indexed = indexed.data(); // TODO
     auto d_lookup_keys = lookup_keys.data(); // TODO
     index_type index = build_index<index_type>(indexed, d_indexed);
+
+cuda_allocator<int> a;
+auto v = std::vector<int, cuda_allocator<int>>();
+auto t1 = create_device_array_from(indexed, a);
+auto tt = create_device_array_from(v, a);
 
     std::unique_ptr<value_t[]> h_tids;
     if constexpr (activeLanes < 32) {
