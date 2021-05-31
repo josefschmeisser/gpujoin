@@ -30,12 +30,17 @@ using namespace btree;
 using namespace btree::cuda;
 */
 
+/*
 using index_store_policy = vector_to_managed_array;
 using index_store_policy = vector_to_managed_array;
+*/
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
 using index_type = lower_bound_index<key_t, value_t>;
+
+using indexed_allocator_t = cuda_allocator<key_t>;
+using lookup_keys_allocator_t = cuda_allocator<key_t>;
 
 template<class IndexStructureType>
 __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
@@ -122,8 +127,10 @@ IndexStructureType build_index(const std::vector<key_t>& h_keys, key_t* d_keys) 
 }
 
 
+struct abstract_device_array {};
+
 template<class T, class Allocator>
-struct device_array {
+struct device_array : abstract_device_array {
     T* ptr_;
     size_t size_;
     Allocator allocator_;
@@ -141,7 +148,7 @@ struct device_array {
 
 
 template<class T>
-struct device_array<T, void> {
+struct device_array<T, void> : abstract_device_array {
     T* ptr_;
     size_t size_;
 
@@ -153,42 +160,57 @@ struct device_array<T, void> {
 };
 
 
+template<class T>
+struct device_array_wrapper {
+    std::unique_ptr<abstract_device_array> device_array_;
+
+    template<class Allocator>
+    device_array_wrapper(T* ptr, size_t size, Allocator allocator) {
+        device_array_ = std::make_unique<device_array<T, Allocator>>(ptr, size, allocator);
+    }
+
+    device_array_wrapper(T* ptr, size_t size) {
+        device_array_ = std::make_unique<device_array<T, void>>(ptr, size);
+    }
+};
+
+
 template<class T, class OutputAllocator, class InputAllocator>
 auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
     printf("different types\n");
     if constexpr (std::is_same<OutputAllocator, numa_allocator<T>>::value) {
         T* ptr = allocator.allocate(vec.size()*sizeof(T));
         std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
-        return device_array<T, OutputAllocator>(ptr, vec.size(), allocator);
+        return device_array_wrapper(ptr, vec.size(), allocator);
     } else if (std::is_same<OutputAllocator, cuda_allocator<T, true>>::value) {
-        return device_array<T, void>(vec.data(), vec.size());
+        return device_array_wrapper(vec.data(), vec.size());
     } else if (std::is_same<OutputAllocator, cuda_allocator<T, false>>::value) {
         T* ptr;
         cudaMalloc((void**)&ptr, vec.size()*sizeof(T));
         cudaMemcpy(ptr, vec.data(), vec.size()*sizeof(T), cudaMemcpyHostToDevice);
-        return device_array<T, OutputAllocator>(ptr, vec.size(), allocator);
-    } else {
-        assert(false);
+        return device_array_wrapper(ptr, vec.size(), allocator);
     }
+    throw std::runtime_error("not available");
 }
+
 
 template<class T, class OutputAllocator>
 auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAllocator& allocator) {
     printf("same type\n");
     if constexpr (std::is_same<OutputAllocator, numa_allocator<T>>::value) {
         if (allocator.node() == vec.get_allocator().node()) {
-            return device_array<T, void>(vec.data(), vec.size());
+            return device_array_wrapper(vec.data(), vec.size());
         } else {
             T* ptr = allocator.allocate(vec.size()*sizeof(T));
             std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
-            return device_array<T, OutputAllocator>(ptr, vec.size(), allocator);
+            return device_array_wrapper(ptr, vec.size(), allocator);
         }
     } else if (std::is_same<OutputAllocator, cuda_allocator<T, false>>::value) {
-        return device_array<T, void>(vec.data(), vec.size());
-    } else {
-        assert(false);
+        return device_array_wrapper(vec.data(), vec.size());
     }
+    throw std::runtime_error("not available");
 }
+
 
 template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_lookup_keys, unsigned num_lookup_keys) {
@@ -254,13 +276,17 @@ int main(int argc, char** argv) {
     }
     std::cout << "index size: " << num_elements << std::endl;
 
+    // generate datasets
     std::vector<key_t> indexed, lookup_keys;
     generate_datasets<index_type>(indexed, lookup_keys);
-    auto d_indexed = indexed.data(); // TODO
-    auto d_lookup_keys = lookup_keys.data(); // TODO
-    index_type index = build_index<index_type>(indexed, d_indexed);
 
-cuda_allocator<int> a;
+    // create gpu accessible vectors
+    indexed_allocator_t indexed_allocator;
+    auto d_indexed = create_device_array_from(indexed, indexed_allocator); // TODO
+    auto d_lookup_keys = lookup_keys.data(); // TODO
+    index_type index = build_index<index_type>(indexed, d_indexed.data());
+
+
 auto v = std::vector<int, cuda_allocator<int>>();
 auto t1 = create_device_array_from(indexed, a);
 auto tt = create_device_array_from(v, a);
