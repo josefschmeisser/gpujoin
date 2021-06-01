@@ -25,16 +25,6 @@ static const unsigned activeLanes = 32;
 static const unsigned defaultNumLookups = 1e7;
 static unsigned defaultNumElements = 1e7;
 
-/*
-using namespace btree;
-using namespace btree::cuda;
-*/
-
-/*
-using index_store_policy = vector_to_managed_array;
-using index_store_policy = vector_to_managed_array;
-*/
-
 using index_key_t = uint32_t;
 using value_t = uint32_t;
 using index_type = lower_bound_index<key_t, value_t>;
@@ -108,6 +98,7 @@ void generate_datasets(std::vector<key_t>& keys, std::vector<key_t>& lookups) {
 
 
 */
+
 }
 
 template<class IndexStructureType>
@@ -126,43 +117,43 @@ IndexStructureType build_index(const std::vector<key_t>& h_keys, key_t* d_keys) 
     return index;
 }
 
-
-struct abstract_device_array {};
-
-template<class T, class Allocator>
-struct device_array : abstract_device_array {
+template<class T>
+struct abstract_device_array {
     T* ptr_;
     size_t size_;
-    Allocator allocator_;
 
-    device_array(T* ptr, size_t size, Allocator allocator) : ptr_(ptr), size_(size), allocator_(allocator) {}
+    abstract_device_array() : ptr_(nullptr), size_(0) {}
 
-    device_array(const device_array&) = delete;
+    abstract_device_array(T* ptr, size_t size) : ptr_(ptr), size_(size) {}
 
-    ~device_array() {
-        allocator_.deallocate(ptr_, sizeof(T)*size_);
-    }
+    abstract_device_array(const abstract_device_array&) = delete;
 
     T* data() { return ptr_; }
 };
 
+template<class T, class Allocator>
+struct device_array : abstract_device_array<T> {
+    Allocator allocator_;
 
-template<class T>
-struct device_array<T, void> : abstract_device_array {
-    T* ptr_;
-    size_t size_;
-
-    device_array(T* ptr, size_t size) : ptr_(ptr), size_(size) {}
+    device_array(T* ptr, size_t size, Allocator allocator) : abstract_device_array<T>(ptr, size), allocator_(allocator) {}
 
     device_array(const device_array&) = delete;
 
-    T* data() { return ptr_; }
+    ~device_array() {
+        allocator_.deallocate(this->ptr_, sizeof(T)*this->size_);
+    }
+};
+
+
+template<class T>
+struct device_array<T, void> : abstract_device_array<T> {
+    device_array(T* ptr, size_t size) : abstract_device_array<T>(ptr, size) {}
 };
 
 
 template<class T>
 struct device_array_wrapper {
-    std::unique_ptr<abstract_device_array> device_array_;
+    std::unique_ptr<abstract_device_array<T>> device_array_;
 
     template<class Allocator>
     device_array_wrapper(T* ptr, size_t size, Allocator allocator) {
@@ -172,6 +163,8 @@ struct device_array_wrapper {
     device_array_wrapper(T* ptr, size_t size) {
         device_array_ = std::make_unique<device_array<T, void>>(ptr, size);
     }
+
+    T* data() { return device_array_->data(); }
 };
 
 
@@ -282,20 +275,22 @@ int main(int argc, char** argv) {
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
-    auto d_indexed = create_device_array_from(indexed, indexed_allocator); // TODO
-    auto d_lookup_keys = lookup_keys.data(); // TODO
+    auto d_indexed = create_device_array_from(indexed, indexed_allocator);
+    lookup_keys_allocator_t lookup_keys_allocator;
+    auto d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
     index_type index = build_index<index_type>(indexed, d_indexed.data());
 
-
+/*
 auto v = std::vector<int, cuda_allocator<int>>();
 auto t1 = create_device_array_from(indexed, a);
 auto tt = create_device_array_from(v, a);
+*/
 
     std::unique_ptr<value_t[]> h_tids;
     if constexpr (activeLanes < 32) {
 
     } else {
-        auto result = run_lookup_benchmark(index, d_lookup_keys, lookup_keys.size());
+        auto result = run_lookup_benchmark(index, d_lookup_keys.data(), lookup_keys.size());
         h_tids.swap(result);
     }
 /*
