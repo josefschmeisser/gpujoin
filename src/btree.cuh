@@ -12,12 +12,6 @@ using payload_t = uintptr_t;
 
 static constexpr payload_t invalidTid = std::numeric_limits<btree::payload_t>::max();
 
-/*
-struct NodeBase {
-    bool isLeaf;
-    uint16_t count;
-};
-*/
 struct NodeBase {
     union {
         struct {
@@ -54,8 +48,6 @@ namespace cuda {
 __device__ payload_t btree_lookup(const Node* tree, key_t key);
 
 __device__ payload_t btree_lookup_with_hints(const Node* tree, key_t key);
-
-//__global__ void btree_bulk_lookup(const Node* tree, unsigned n, uint32_t* keys, payload_t* tids);
 
 } // namespace cuda
 
