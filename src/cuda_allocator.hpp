@@ -4,10 +4,8 @@
 #include <new>
 #include <limits>
 
-#include <numa.h>
-
-template <class T> 
-struct numa_allocator {
+template <class T, bool managed = false> 
+struct cuda_allocator {
     typedef size_t size_type;
     typedef ptrdiff_t difference_type;
     typedef T* pointer;
@@ -16,32 +14,33 @@ struct numa_allocator {
     typedef const T& const_reference;
     typedef T value_type;
 
-    unsigned node_ = 0;
+    template <class U> struct rebind { typedef cuda_allocator<U> other; };
+    cuda_allocator() throw() {}
+    cuda_allocator(const cuda_allocator&) throw() {}
 
-    template <class U> struct rebind { typedef numa_allocator<U> other; };
-    numa_allocator(unsigned node) throw() : node_(node) {}
-    numa_allocator(const numa_allocator& other) throw() : node_(other.node_) {}
+    template <class U> cuda_allocator(const cuda_allocator<U>&) throw(){}
 
-    template <class U> numa_allocator(const numa_allocator<U>& other) throw() : node_(other.node_) {}
-
-    ~numa_allocator() throw() {}
+    ~cuda_allocator() throw() {}
 
     pointer address(reference x) const { return &x; }
     const_pointer address(const_reference x) const { return &x; }
 
     pointer allocate(size_type s, void const * = 0) {
-        if (0 == s) {
+        if (0 == s)
             return NULL;
+        pointer temp;
+        if constexpr (managed) {
+            cudaMallocManaged(&temp, s * sizeof(T));
+        } else {
+            cudaMalloc(&temp, s * sizeof(T));
         }
-        pointer temp = numa_alloc_onnode(s, node_);
-        if (temp == NULL) {
+        if (temp == NULL)
             throw std::bad_alloc();
-        }
         return temp;
     }
 
-    void deallocate(pointer p, size_type s) {
-        numa_free(p, s);
+    void deallocate(pointer p, size_type) {
+        cudaFree(p);
     }
 
     size_type max_size() const throw() {
@@ -54,9 +53,5 @@ struct numa_allocator {
 
     void destroy(pointer p) {
         p->~T();
-    }
-
-    unsigned node() const {
-        return node_;
     }
 };
