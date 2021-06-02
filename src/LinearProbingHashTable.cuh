@@ -19,6 +19,7 @@ public:
         Entry* table = nullptr;
         const uint32_t capacity;
 
+        // 32bit Murmur3 hash
         __device__ uint32_t hash(Key k) {
             static_assert(sizeof(Key) == 4);
             k ^= k >> 16;

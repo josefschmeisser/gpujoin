@@ -7,19 +7,12 @@
 #include <cstring>
 #include <numeric>
 
+#include "utils.hpp"
 #include "cuda_utils.cuh"
 
 #ifndef FULL_MASK
 #define FULL_MASK 0xffffffff
 #endif
-
-template<class InputIt>
-std::string stringify(InputIt first, InputIt last) {
-    auto comma_fold = [](std::string a, auto b) {
-        return std::move(a) + ',' + std::to_string(b);
-    };
-    return std::accumulate(std::next(first), last, std::to_string(*first), comma_fold);
-}
 
 namespace harmonia {
 
@@ -27,7 +20,7 @@ template<
     class Key,
     class Value,
     unsigned fanout,
-    Key not_found,
+    Value not_found,
     bool sorted_only = true>
 struct harmonia_tree {
     using key_t = Key;
@@ -200,7 +193,7 @@ struct harmonia_tree {
 
         // allocate arrays
         const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
-        printf("node_count: %lu\n", node_count);
+//        printf("node_count: %lu\n", node_count);
 //        const auto key_array_size = sizeof(key_t)*max_keys*root->tree_size;
         const auto key_array_size = max_keys*node_count;/*
         keys = (key_t*)malloc(key_array_size*sizeof(key_t));
@@ -222,14 +215,13 @@ struct harmonia_tree {
         depth = tree_levels.size();
         size = input.size();
 
-//std::cout << "keys: " << stringify(keys, keys + key_array_size) << std::endl;
+/*
         for (unsigned i = 0, j = 0; i < key_array_size; i += max_keys, ++j) {
             std::cout << "node " << j << " keys: " << stringify(&keys[i], &keys[i + 8]) << std::endl;
         }
-
 std::cout << "children: " << stringify(children.begin(), children.end()) << std::endl;
-//std::cout << "values: " << stringify(values, values + input.size()) << std::endl;
-
+std::cout << "values: " << stringify(values, values + input.size()) << std::endl;
+*/
     }
 
     void create_device_handle() {//device_handle_t& handle) {
@@ -268,7 +260,9 @@ std::cout << "children: " << stringify(children.begin(), children.end()) << std:
         unsigned lower_bound = max_keys;
 
         unsigned leader = WINDOW_SIZE*(my_lane_id >> degree);
+//printf("thread: %d lane: %d leader: %d\n", threadIdx.x, my_lane_id, leader);
         const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
+//printf("thread: %d lane: %d window_mask: 0x%.8X\n", threadIdx.x, my_lane_id, window_mask);
 
         assert(my_lane_id >= leader);
         const int lane_offset = my_lane_id - leader;
@@ -281,7 +275,7 @@ std::cout << "children: " << stringify(children.begin(), children.end()) << std:
 
             const auto leader_active = __shfl_sync(window_mask, active, leader);
             unsigned exhausted_cnt = leader_active ? 0 : WINDOW_SIZE;
-
+//if (my_lane_id == leader && !leader_active) printf("thread: %d leader: %d leader not active\n", threadIdx.x, leader);
             uint32_t matches = 0;
             while (matches == 0 && exhausted_cnt < WINDOW_SIZE) {
                 key_idx += WINDOW_SIZE;
@@ -290,15 +284,18 @@ std::cout << "children: " << stringify(children.begin(), children.end()) << std:
                 if (key_idx < leader_size) value = leader_arr[key_idx];
                 matches = __ballot_sync(window_mask, key_idx < leader_size && value >= leader_x);
                 exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= leader_size));
+//if (leader == 8) printf("thread: %d leader: %d key_idx: %d value: %d\n", threadIdx.x, leader, key_idx, value);
+//if (my_lane_id == leader) printf("thread: %d leader: %d matches: 0x%.8X exhausted_cnt: %d\n", threadIdx.x, leader, matches, exhausted_cnt);
             }
 
             if (my_lane_id == leader && matches != 0) {
+//printf("thread: %d lane: %d key_idx: %u, ffs: %u\n", threadIdx.x, my_lane_id, key_idx, __ffs(matches) - 1 - leader);
                 lower_bound = key_idx + __ffs(matches) - 1 - leader;
             }
 
             leader += 1;
         }
-
+//printf("thread: %d lane: %d lower_bound: %u arr[lower_bound]: %u x: %u arr[size - 1]: %u\n", threadIdx.x, my_lane_id, lower_bound, arr[lower_bound], x, arr[max_keys - 1]);
         return lower_bound;
     }
 
@@ -310,7 +307,14 @@ std::cout << "children: " << stringify(children.begin(), children.end()) << std:
         unsigned lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
             key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+/*
+if (lane_id() == 0) {
+    for (int i = 0; i < max_keys; ++i) {
+        printf("key %d: %d\n", i, node_start[i]);
+    }
+}*/
             lb = cooperative_linear_search<degree>(active, key, node_start);
+//printf("lb: %d\n", lb);
             actual = node_start[lb];
 
             unsigned new_pos = tree->children[pos] + lb;
@@ -322,9 +326,10 @@ std::cout << "children: " << stringify(children.begin(), children.end()) << std:
         }
 
         if (active && pos < tree->size && key == actual) {
+printf("return pos: %d\n", pos);
             return tree->values[pos];
         }
-
+printf("return not_found\n");
         return not_found;
     }
 

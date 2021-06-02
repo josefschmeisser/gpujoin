@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <numeric>
 #include <vector>
 
@@ -64,4 +65,12 @@ void apply_permutation(std::vector<size_t>& permutation, std::vector<Ts>&... vec
         }
         permutation[current] = current;
     }
+}
+
+template<class InputIt>
+std::string stringify(InputIt first, InputIt last) {
+    auto comma_fold = [](std::string a, auto b) {
+        return std::move(a) + ',' + std::to_string(b);
+    };
+    return std::accumulate(std::next(first), last, std::to_string(*first), comma_fold);
 }
