@@ -11,55 +11,60 @@
 #include <stdexcept>
 
 #include "rs/multi_map.h"
-#include "btree.cuh"
-#include "zipf.hpp"
 
 namespace rs {
 
-using rs_key_t = uint32_t;// uint64_t;
 using rs_rt_entry_t = uint32_t;
-using rs_spline_point_t = rs::Coord<rs_key_t>;
 
+template<class Key>
 struct RawRadixSpline {
-    rs_key_t min_key_;
-    rs_key_t max_key_;
+    using key_t = Key;
+    using spline_point_t = rs::Coord<key_t>;
+
+    key_t min_key_;
+    key_t max_key_;
     size_t num_keys_;
     size_t num_radix_bits_;
     size_t num_shift_bits_;
     size_t max_error_;
 
     std::vector<rs_rt_entry_t> radix_table_;
-    std::vector<rs::Coord<rs_key_t>> spline_points_;
+    std::vector<spline_point_t> spline_points_;
 };
 
+template<class Key>
 struct DeviceRadixSpline {
-    rs_key_t min_key_;
-    rs_key_t max_key_;
+    using key_t = Key;
+    using spline_point_t = rs::Coord<key_t>;
+
+    key_t min_key_;
+    key_t max_key_;
     size_t num_keys_;
     size_t num_radix_bits_;
     size_t num_shift_bits_;
     size_t max_error_;
 
     rs_rt_entry_t* radix_table_;
-    rs_spline_point_t* spline_points_;
+    spline_point_t* spline_points_;
 };
 
-auto build_radix_spline(const std::vector<rs_key_t>& keys) {
+template<class Key>
+auto build_radix_spline(const std::vector<Key>& keys) {
     auto min = keys.front();
     auto max = keys.back();
-    rs::Builder<rs_key_t> rsb(min, max);
+    rs::Builder<Key> rsb(min, max);
     for (const auto& key : keys) rsb.AddKey(key);
-    rs::RadixSpline<rs_key_t> rs = rsb.Finalize();
+    rs::RadixSpline<Key> rs = rsb.Finalize();
     return rs;
 }
 
-template<class F, class T>
-DeviceRadixSpline* copy_radix_spline(const T& radixSpline) {
-    static F f;
+template<class Policy, class Key>
+DeviceRadixSpline<Key>* copy_radix_spline(const rs::RadixSpline<Key>& radixSpline) {
+    static Policy f;
 
-    static DeviceRadixSpline tmp;
-    const RawRadixSpline* rrs = reinterpret_cast<const RawRadixSpline*>(&radixSpline);
-    std::memcpy(&tmp, &radixSpline, sizeof(DeviceRadixSpline));
+    static DeviceRadixSpline<Key> tmp;
+    const RawRadixSpline<Key>* rrs = reinterpret_cast<const RawRadixSpline<Key>*>(&radixSpline);
+    std::memcpy(&tmp, &radixSpline, sizeof(DeviceRadixSpline<Key>));
 
     // copy radix table
     tmp.radix_table_ = f(rrs->radix_table_);
@@ -67,9 +72,9 @@ DeviceRadixSpline* copy_radix_spline(const T& radixSpline) {
     // copy spline points
     tmp.spline_points_ = f(rrs->spline_points_);
 
-    DeviceRadixSpline* d_rs;
-    cudaMalloc(&d_rs, sizeof(DeviceRadixSpline));
-    cudaMemcpy(d_rs, &tmp, sizeof(DeviceRadixSpline), cudaMemcpyHostToDevice);
+    DeviceRadixSpline<Key>* d_rs;
+    cudaMalloc(&d_rs, sizeof(DeviceRadixSpline<Key>));
+    cudaMemcpy(d_rs, &tmp, sizeof(DeviceRadixSpline<Key>), cudaMemcpyHostToDevice);
     return d_rs;
 }
 
@@ -116,8 +121,9 @@ __global__ void do_lower_bound(const int* arr, const unsigned size) {
     });
 }
 
-__device__ unsigned get_spline_segment(const DeviceRadixSpline* rs, const rs_key_t key) {
-    const rs_key_t prefix = (key - rs->min_key_) >> rs->num_shift_bits_;
+template<class Key>
+__device__ unsigned get_spline_segment(const DeviceRadixSpline<Key>* rs, const Key key) {
+    const auto prefix = (key - rs->min_key_) >> rs->num_shift_bits_;
 
     const uint32_t begin = rs->radix_table_[prefix];
     const uint32_t end = rs->radix_table_[prefix + 1];
@@ -125,21 +131,22 @@ __device__ unsigned get_spline_segment(const DeviceRadixSpline* rs, const rs_key
     // TODO measure linear search for narrow ranges as in the reference implementation
 
     const auto range_size = end - begin;
-    const auto lb = begin + lower_bound(key, rs->spline_points_ + begin, range_size, [] (const rs_spline_point_t& coord, const rs_key_t key) {
+    const auto lb = begin + lower_bound(key, rs->spline_points_ + begin, range_size, [] (const auto& coord, const Key key) {
         return coord.x < key;
     });
 //    printf("key: %lu, lb: %u\n", key, lb);
     return lb;
 }
 
-__device__ double get_estimate(const DeviceRadixSpline* rs, const rs_key_t key) {
+template<class Key>
+__device__ double get_estimate(const DeviceRadixSpline<Key>* rs, const Key key) {
     if (key <= rs->min_key_) return 0;
     if (key >= rs->max_key_) return rs->num_keys_ - 1;
 
     // find spline segment
     const unsigned index = get_spline_segment(rs, key);
-    const rs_spline_point_t& down = rs->spline_points_[index - 1];
-    const rs_spline_point_t& up = rs->spline_points_[index];
+    const auto& down = rs->spline_points_[index - 1];
+    const auto& up = rs->spline_points_[index];
 
     // slope
     const double x_diff = up.x - down.x;

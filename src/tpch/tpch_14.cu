@@ -139,7 +139,7 @@ struct btree_index {
 };
 
 struct radix_spline_index {
-    rs::DeviceRadixSpline* d_rs_;
+    rs::DeviceRadixSpline<btree::key_t>* d_rs_;
     const btree::key_t* d_column_;
 
     __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
@@ -153,7 +153,7 @@ struct radix_spline_index {
         const auto duration = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
         std::cout << "radixspline transfer time: " << duration << " ms\n";
 
-        auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline*>(&h_rs);
+        auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline<btree::key_t>*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
     }
 
@@ -163,7 +163,7 @@ struct radix_spline_index {
         const unsigned end = (estimate + d_rs_->max_error_ + 2 > d_rs_->num_keys_) ? d_rs_->num_keys_ : (estimate + d_rs_->max_error_ + 2);
 
         const auto bound_size = end - begin;
-        const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const rs::rs_key_t& a, const rs::rs_key_t& b) -> int {
+        const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const btree::key_t& a, const btree::key_t& b) -> int {
             return a < b;
         });
         return (pos < d_rs_->num_keys_) ? static_cast<btree::payload_t>(pos) : btree::invalidTid;
