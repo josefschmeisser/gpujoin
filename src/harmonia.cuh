@@ -100,10 +100,9 @@ struct harmonia_tree {
                 current_level->push_back(std::move(node));
                 node = std::make_unique<intermediate_node>();
                 node->is_leaf = false;
-            } else {
-                key_t sep = max_key(*curr);
-                add(*node, sep, curr.get());
             }
+            key_t sep = max_key(*curr);
+            add(*node, sep, curr.get());
         }
         current_level->push_back(std::move(node));
 
