@@ -7,6 +7,8 @@
 #include <cstring>
 #include <numeric>
 
+#include <type_traits>
+
 #include "utils.hpp"
 #include "cuda_utils.cuh"
 
@@ -21,7 +23,7 @@ template<
     class Value,
     unsigned fanout,
     Value not_found,
-    bool sorted_only = true>
+    bool Sorted_Only = true>
 struct harmonia_tree {
     using key_t = Key;
     using value_t = Value;
@@ -261,9 +263,9 @@ std::cout << "children: ";
         assert(ret == cudaSuccess);
     }
 
-    template<unsigned degree>
+    template<unsigned Degree>
     __device__ static value_t cooperative_linear_search(bool active, key_t x, const key_t* arr) {
-        enum { WINDOW_SIZE = 1 << degree };
+        enum { WINDOW_SIZE = 1 << Degree };
 
         assert(__all_sync(FULL_MASK, 1));
 
@@ -271,7 +273,7 @@ std::cout << "children: ";
 
         unsigned lower_bound = max_keys;
 
-        unsigned leader = WINDOW_SIZE*(my_lane_id >> degree);
+        unsigned leader = WINDOW_SIZE*(my_lane_id >> Degree);
 //printf("thread: %d lane: %d leader: %d\n", threadIdx.x, my_lane_id, leader);
         const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
 //printf("thread: %d lane: %d window_mask: 0x%.8X\n", threadIdx.x, my_lane_id, window_mask);
@@ -311,8 +313,11 @@ std::cout << "children: ";
         return lower_bound;
     }
 
-    template<unsigned degree = 2>
-    __device__ static value_t lookup(bool active, const device_handle_t* tree, key_t key) {
+    template<unsigned Degree = 2> // cooperative parallelization Degree
+    // This has to be a function template so that it won't get compiled when Sorted_Only is false.
+    // To make it a function template, we have to add the second predicate to std::enable_if_t which is dependent on the function template parameter.
+    // And with the help of SFINAE only the correct implementation will get compiled.
+    __device__ static std::enable_if_t<Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t* tree, key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         key_t actual;
@@ -325,7 +330,7 @@ if (lane_id() == 0) {
         printf("key %d: %d\n", i, node_start[i]);
     }
 }*/
-            lb = cooperative_linear_search<degree>(active, key, node_start);
+            lb = cooperative_linear_search<Degree>(active, key, node_start);
 //printf("lb: %d\n", lb);
             actual = node_start[lb];
 
@@ -344,6 +349,12 @@ if (lane_id() == 0) {
 //printf("return not_found\n");
         return not_found;
     }
+
+    template<unsigned Degree = 2>
+    __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t* tree, key_t key) {
+        printf("todo\n");
+    }
+
 
     __host__ value_t lookup(key_t key) {
 printf("=== lookup: %u\n", key);
