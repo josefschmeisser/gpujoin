@@ -46,10 +46,10 @@ struct harmonia_tree {
     struct intermediate_node {
         bool is_leaf = false;
         unsigned count = 0;
-        key_t keys[fanout - 1];
+        key_t keys[max_keys];
         union {
             intermediate_node* children[fanout];
-            value_t values[fanout];
+            value_t values[max_keys];
         };
     };
 
@@ -92,6 +92,7 @@ struct harmonia_tree {
         auto current_level = std::make_unique<tree_level_t>();
         auto node = std::make_unique<intermediate_node>();
         node->is_leaf = false;
+        node->keys[0] = std::numeric_limits<key_t>::max();
 
         for (unsigned i = 0; i < lower_level->size() - 1; i++) {
             auto& curr = lower_level->at(i);
@@ -100,10 +101,13 @@ struct harmonia_tree {
                 current_level->push_back(std::move(node));
                 node = std::make_unique<intermediate_node>();
                 node->is_leaf = false;
+                node->keys[0] = std::numeric_limits<key_t>::max();
+            } else {
+                key_t sep = max_key(*curr);
+                add(*node, sep, curr.get());
             }
-            key_t sep = max_key(*curr);
-            add(*node, sep, curr.get());
         }
+        node->children[node->count] = lower_level->back().get();
         current_level->push_back(std::move(node));
 
         tree_levels.push_back(std::move(current_level));
@@ -150,16 +154,18 @@ struct harmonia_tree {
 
     void store_nodes(tree_levels_t& tree_levels) {
         unsigned key_offset = 0;
-
+int level = 0;
         // the keys are stored in breadth first order
         for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
             auto& tree_level = *(*it);
             fill_underfull_node(*tree_level.back());
-
+std::cout << "tree level: " << level << std::endl;
             for (auto& node : tree_level) {
                 std::memcpy(&keys[key_offset], node->keys, sizeof(key_t)*max_keys);
+std::cout << "node: " << key_offset/8 << " keys: " << stringify(&keys[key_offset], &keys[key_offset + 8]) << std::endl;
                 key_offset += max_keys;
             }
+level++;
         }
     }
 
@@ -183,6 +189,7 @@ struct harmonia_tree {
                     prefix_sum += node->count + 1;
                 }
             }
+   //         prefix_sum += 1;
         }
     }
 
@@ -217,10 +224,16 @@ struct harmonia_tree {
 /*
         for (unsigned i = 0, j = 0; i < key_array_size; i += max_keys, ++j) {
             std::cout << "node " << j << " keys: " << stringify(&keys[i], &keys[i + 8]) << std::endl;
+            printf("node %u key-array-idx: %u ptr: %p\n", j, i, &keys[i]);
+        }*/
+//std::cout << "children: " << stringify(children.begin(), children.end()) << std::endl;
+std::cout << "children: ";
+        for (unsigned i = 0; i < children.size(); ++i) {
+            printf("%u:%u, ", i, children[i]);
         }
-std::cout << "children: " << stringify(children.begin(), children.end()) << std::endl;
-std::cout << "values: " << stringify(values, values + input.size()) << std::endl;
-*/
+        printf("\n");
+//std::cout << "values: " << stringify(values, values + input.size()) << std::endl;
+
     }
 
     void create_device_handle() {//device_handle_t& handle) {
@@ -298,7 +311,7 @@ std::cout << "values: " << stringify(values, values + input.size()) << std::endl
         return lower_bound;
     }
 
-    template<unsigned degree = 3>
+    template<unsigned degree = 2>
     __device__ static value_t lookup(bool active, const device_handle_t* tree, key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
@@ -325,36 +338,39 @@ if (lane_id() == 0) {
         }
 
         if (active && pos < tree->size && key == actual) {
-printf("return pos: %d\n", pos);
+//printf("return pos: %d\n", pos);
             return tree->values[pos];
         }
-printf("return not_found\n");
+//printf("return not_found\n");
         return not_found;
     }
 
     __host__ value_t lookup(key_t key) {
+printf("=== lookup: %u\n", key);
         bool active = true;
         key_t actual;
         unsigned lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             using key_array_t = key_t[max_keys];
+printf("current node: %u\n", pos);// max_keys*pos);
             key_t* raw = &keys[max_keys*pos];
+printf("current node ptr: %p\n", raw);
             key_array_t& current_node = reinterpret_cast<key_array_t&>(*raw);
-//std::cout << "search " << key << " in: " << stringify(std::cbegin(current_node), std::cend(current_node)) << std::endl;
+std::cout << "search " << key << " in: " << stringify(std::cbegin(current_node), std::cend(current_node)) << std::endl;
             lb = std::lower_bound(std::cbegin(current_node), std::cend(current_node), key) - std::cbegin(current_node);
             actual = current_node[lb];
-//printf("lower bound: %lu size: %lu\n", lb, std::cend(current_node) - std::cbegin(current_node));
+printf("lower bound: %lu size: %lu\n", lb, std::cend(current_node) - std::cbegin(current_node));
 
             unsigned new_pos = children[pos] + lb;
-//printf("new_pos: %d\n", new_pos);
+printf("new_pos: %d\n", new_pos);
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
-//printf("leaf pos: %d\n", pos);
+printf("leaf pos: %d\n", pos);
         if (active && pos < size && key == actual) {
-//printf("lookup final pos: %d\n", pos);
+printf("lookup final pos: %d\n", pos);
             return values[pos];
         }
 

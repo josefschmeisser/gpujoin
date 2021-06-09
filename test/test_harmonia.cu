@@ -41,7 +41,11 @@ void test_harmonia_host_lookup(unsigned n) {
     //template<class Key, class Value, unsigned fanout>
     harmonia_tree<uint32_t, uint32_t, node_size + 1, std::numeric_limits<uint32_t>::max()> tree;
     tree.construct(keys);
-
+/*
+tree.lookup(1943);
+    auto tree_idx = tree.lookup(1944);
+    return;
+*/
     unsigned i = 0;
     for (auto k : keys) {
 //        std::cout << "=== lookup: " << k << std::endl;
@@ -113,8 +117,10 @@ int main(int argc, char** argv) {
     test_root_only();
     test_harmonia_host_lookup(15); // two tree levels
     test_harmonia_host_lookup(280); // three tree levels
+    test_harmonia_host_lookup(2000); // test underfull nodes (nodes with one child and no separator)
     test_harmonia_cuda_lookup(7); // root only
     test_harmonia_cuda_lookup(15); // two tree levels
     test_harmonia_cuda_lookup(280); // three tree levels
+    test_harmonia_cuda_lookup(2000); // test underfull nodes (nodes with one child and no separator)
     return 0;
 }
