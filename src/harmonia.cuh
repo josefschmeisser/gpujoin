@@ -6,7 +6,6 @@
 #include <vector>
 #include <cstring>
 #include <numeric>
-
 #include <type_traits>
 
 #include "utils.hpp"
@@ -201,14 +200,18 @@ struct harmonia_tree {
         const auto key_array_size = max_keys*node_count;
         keys.resize(key_array_size);
         children.resize(node_count);
-        values.resize(input.size());
+	if constexpr (!Sorted_Only) {
+            values.resize(input.size());
+	}
 
         store_nodes(tree_levels);
         store_structure(tree_levels);
 
-        // insert values
-        for (unsigned i = 0; i < input.size(); ++i) {
-            values[i] = i;
+        if constexpr (!Sorted_Only) {
+            // insert values
+            for (unsigned i = 0; i < input.size(); ++i) {
+                values[i] = i;
+            }
         }
 
         // initialize remaining members
@@ -229,10 +232,13 @@ struct harmonia_tree {
         assert(ret == cudaSuccess);
         ret = cudaMemcpy(tmp.children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
-        ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
-        assert(ret == cudaSuccess);
-        ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
-        assert(ret == cudaSuccess);
+
+        if constexpr (!Sorted_Only) {
+            ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
+            assert(ret == cudaSuccess);
+            ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
+            assert(ret == cudaSuccess);
+        }
 
         // create cuda struct
         ret = cudaMalloc(&device_handle, sizeof(device_handle_t));
@@ -308,7 +314,7 @@ struct harmonia_tree {
         }
 
         if (active && pos < tree->size && key == actual) {
-            return tree->values[pos];
+            return pos;
         }
 
         return not_found;
@@ -317,6 +323,30 @@ struct harmonia_tree {
     template<unsigned Degree = 2>
     __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t* tree, key_t key) {
         printf("todo\n");
+
+        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
+
+        key_t actual;
+        unsigned lb = 0, pos = 0;
+        for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
+            key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+
+            lb = cooperative_linear_search<Degree>(active, key, node_start);
+            actual = node_start[lb];
+
+            unsigned new_pos = tree->children[pos] + lb;
+//            active = active && new_pos < tree->size; // TODO
+
+            // Inactive threads never progress during the traversal phase.
+            // They, however, will be utilized by active threads during the cooperative search.
+            pos = active ? new_pos : 0;
+        }
+
+        if (active && pos < tree->size && key == actual) {
+            return tree->values[pos];
+        }
+
+        return not_found;
     }
 
 
@@ -340,7 +370,11 @@ struct harmonia_tree {
         }
 
         if (active && pos < size && key == actual) {
-            return values[pos];
+            if constexpr (Sorted_Only) {
+                return pos;
+            } else {
+                return values[pos];
+            }
         }
 
         return not_found;
