@@ -156,18 +156,16 @@ struct harmonia_tree {
 
     void store_nodes(tree_levels_t& tree_levels) {
         unsigned key_offset = 0;
-int level = 0;
+
         // the keys are stored in breadth first order
         for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
             auto& tree_level = *(*it);
             fill_underfull_node(*tree_level.back());
-std::cout << "tree level: " << level << std::endl;
+
             for (auto& node : tree_level) {
                 std::memcpy(&keys[key_offset], node->keys, sizeof(key_t)*max_keys);
-std::cout << "node: " << key_offset/8 << " keys: " << stringify(&keys[key_offset], &keys[key_offset + 8]) << std::endl;
                 key_offset += max_keys;
             }
-level++;
         }
     }
 
@@ -191,7 +189,6 @@ level++;
                     prefix_sum += node->count + 1;
                 }
             }
-   //         prefix_sum += 1;
         }
     }
 
@@ -201,12 +198,7 @@ level++;
 
         // allocate arrays
         const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
-//        printf("node_count: %lu\n", node_count);
-//        const auto key_array_size = sizeof(key_t)*max_keys*root->tree_size;
-        const auto key_array_size = max_keys*node_count;/*
-        keys = (key_t*)malloc(key_array_size*sizeof(key_t));
-        children = (child_ref_t*)malloc(node_count*sizeof(child_ref_t));
-        values = (value_t*)malloc(input.size()*sizeof(value_t));*/
+        const auto key_array_size = max_keys*node_count;
         keys.resize(key_array_size);
         children.resize(node_count);
         values.resize(input.size());
@@ -222,20 +214,6 @@ level++;
         // initialize remaining members
         depth = tree_levels.size();
         size = input.size();
-
-/*
-        for (unsigned i = 0, j = 0; i < key_array_size; i += max_keys, ++j) {
-            std::cout << "node " << j << " keys: " << stringify(&keys[i], &keys[i + 8]) << std::endl;
-            printf("node %u key-array-idx: %u ptr: %p\n", j, i, &keys[i]);
-        }*/
-//std::cout << "children: " << stringify(children.begin(), children.end()) << std::endl;
-std::cout << "children: ";
-        for (unsigned i = 0; i < children.size(); ++i) {
-            printf("%u:%u, ", i, children[i]);
-        }
-        printf("\n");
-//std::cout << "values: " << stringify(values, values + input.size()) << std::endl;
-
     }
 
     void create_device_handle() {//device_handle_t& handle) {
@@ -267,16 +245,14 @@ std::cout << "children: ";
     __device__ static value_t cooperative_linear_search(bool active, key_t x, const key_t* arr) {
         enum { WINDOW_SIZE = 1 << Degree };
 
-        assert(__all_sync(FULL_MASK, 1));
+        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads within the warp participate
 
         const unsigned my_lane_id = lane_id();
 
         unsigned lower_bound = max_keys;
 
         unsigned leader = WINDOW_SIZE*(my_lane_id >> Degree);
-//printf("thread: %d lane: %d leader: %d\n", threadIdx.x, my_lane_id, leader);
         const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
-//printf("thread: %d lane: %d window_mask: 0x%.8X\n", threadIdx.x, my_lane_id, window_mask);
 
         assert(my_lane_id >= leader);
         const int lane_offset = my_lane_id - leader;
@@ -289,7 +265,6 @@ std::cout << "children: ";
 
             const auto leader_active = __shfl_sync(window_mask, active, leader);
             unsigned exhausted_cnt = leader_active ? 0 : WINDOW_SIZE;
-//if (my_lane_id == leader && !leader_active) printf("thread: %d leader: %d leader not active\n", threadIdx.x, leader);
             uint32_t matches = 0;
             while (matches == 0 && exhausted_cnt < WINDOW_SIZE) {
                 key_idx += WINDOW_SIZE;
@@ -298,18 +273,14 @@ std::cout << "children: ";
                 if (key_idx < leader_size) value = leader_arr[key_idx];
                 matches = __ballot_sync(window_mask, key_idx < leader_size && value >= leader_x);
                 exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= leader_size));
-//if (leader == 8) printf("thread: %d leader: %d key_idx: %d value: %d\n", threadIdx.x, leader, key_idx, value);
-//if (my_lane_id == leader) printf("thread: %d leader: %d matches: 0x%.8X exhausted_cnt: %d\n", threadIdx.x, leader, matches, exhausted_cnt);
             }
 
             if (my_lane_id == leader && matches != 0) {
-//printf("thread: %d lane: %d key_idx: %u, ffs: %u\n", threadIdx.x, my_lane_id, key_idx, __ffs(matches) - 1 - leader);
                 lower_bound = key_idx + __ffs(matches) - 1 - leader;
             }
 
             leader += 1;
         }
-//printf("thread: %d lane: %d lower_bound: %u arr[lower_bound]: %u x: %u arr[size - 1]: %u\n", threadIdx.x, my_lane_id, lower_bound, arr[lower_bound], x, arr[max_keys - 1]);
         return lower_bound;
     }
 
@@ -324,14 +295,8 @@ std::cout << "children: ";
         unsigned lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
             key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
-/*
-if (lane_id() == 0) {
-    for (int i = 0; i < max_keys; ++i) {
-        printf("key %d: %d\n", i, node_start[i]);
-    }
-}*/
+
             lb = cooperative_linear_search<Degree>(active, key, node_start);
-//printf("lb: %d\n", lb);
             actual = node_start[lb];
 
             unsigned new_pos = tree->children[pos] + lb;
@@ -343,10 +308,9 @@ if (lane_id() == 0) {
         }
 
         if (active && pos < tree->size && key == actual) {
-//printf("return pos: %d\n", pos);
             return tree->values[pos];
         }
-//printf("return not_found\n");
+
         return not_found;
     }
 
@@ -357,31 +321,25 @@ if (lane_id() == 0) {
 
 
     __host__ value_t lookup(key_t key) {
-printf("=== lookup: %u\n", key);
         bool active = true;
         key_t actual;
         unsigned lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             using key_array_t = key_t[max_keys];
-printf("current node: %u\n", pos);// max_keys*pos);
             key_t* raw = &keys[max_keys*pos];
-printf("current node ptr: %p\n", raw);
             key_array_t& current_node = reinterpret_cast<key_array_t&>(*raw);
-std::cout << "search " << key << " in: " << stringify(std::cbegin(current_node), std::cend(current_node)) << std::endl;
+
             lb = std::lower_bound(std::cbegin(current_node), std::cend(current_node), key) - std::cbegin(current_node);
             actual = current_node[lb];
-printf("lower bound: %lu size: %lu\n", lb, std::cend(current_node) - std::cbegin(current_node));
 
             unsigned new_pos = children[pos] + lb;
-printf("new_pos: %d\n", new_pos);
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
-printf("leaf pos: %d\n", pos);
+
         if (active && pos < size && key == actual) {
-printf("lookup final pos: %d\n", pos);
             return values[pos];
         }
 
