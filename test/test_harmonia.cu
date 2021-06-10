@@ -41,11 +41,7 @@ void test_harmonia_host_lookup(unsigned n) {
     //template<class Key, class Value, unsigned fanout>
     harmonia_tree<uint32_t, uint32_t, node_size + 1, std::numeric_limits<uint32_t>::max()> tree;
     tree.construct(keys);
-/*
-tree.lookup(1943);
-    auto tree_idx = tree.lookup(1944);
-    return;
-*/
+
     unsigned i = 0;
     for (auto k : keys) {
 //        std::cout << "=== lookup: " << k << std::endl;
@@ -75,7 +71,7 @@ __global__ void lookup_kernel(const harmonia_handle* __restrict__ tree, unsigned
         auto tid = harmonia_type::lookup(active, tree, keys[i]);
         if (active) {
             tids[i] = tid;
-            printf("tids[%d] = %d\n", i, tids[i]);
+//            printf("tids[%d] = %d\n", i, tids[i]);
         }
 
         i += stride;
