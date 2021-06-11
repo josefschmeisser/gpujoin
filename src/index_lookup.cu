@@ -1,15 +1,20 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
-#include <cuda_runtime.h>
-#include <sys/types.h>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <numeric>
 #include <chrono>
 #include <memory>
 
-#include "tpch/common.hpp"
+#include <cuda_runtime.h>
+#include <sys/types.h>
+#include <cub/block/block_load.cuh>
+#include <cub/block/block_radix_sort.cuh>
+#include <thread>
+
+#include "utils.hpp"
 #include "zipf.hpp"
 
 #include "cuda_utils.cuh"
@@ -22,12 +27,13 @@ using namespace std;
 static const int blockSize = 128;
 static const unsigned maxRepetitions = 1;
 static const unsigned activeLanes = 32;
-static const unsigned defaultNumLookups = 1e7;
-static unsigned defaultNumElements = 1e7;
+static const unsigned defaultNumLookups = 2048;// 1e8;
+static unsigned defaultNumElements = 2048;// 1e7;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
-using index_type = lower_bound_index<key_t, value_t>;
+//using index_type = lower_bound_index<key_t, value_t>;
+using index_type = harmonia_index<key_t, value_t>;
 
 using indexed_allocator_t = cuda_allocator<key_t>;
 using lookup_keys_allocator_t = cuda_allocator<key_t>;
@@ -40,11 +46,15 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     int i = index;
     uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
     while (active_lanes) {
-        bool active = i < n;
-        auto tid = index_structure.lookup(keys[i]);
+        bool active = i < n;/*
+        if (active) {
+            printf("key[%d] = %d\n", i, keys[i]);
+        }*/
+//        auto tid = index_structure.lookup(keys[i]);
+        auto tid = index_structure.cooperative_lookup(active, keys[i]);
         if (active) {
             tids[i] = tid;
-            printf("tids[%d] = %d\n", i, tids[i]);
+//            printf("key[%d] = %d tids[%d] = %d\n", i, keys[i], i, tids[i]);
         }
 
         i += stride;
@@ -52,20 +62,115 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     }
 }
 
+template<class T>
+__device__ T atomic_add_sat(T* address, T val, T saturation) {
+    unsigned expected, update, old;
+    old = *address;
+    do {
+        expected = old;
+        update = (old + val > saturation) ? saturation : old + val;
+        old = atomicCAS(address, expected, update);
+    } while (expected != old);
+    return old;
+}
+
+
+
 #if 0
-template<class IndexStructureType>
-__global__ void lookup_kernel_with_sorting(const IndexStructureType index_structure, unsigned n, const uint32_t* __restrict__ keys, uint32_t* __restrict__ tids) {
+template<
+    unsigned BLOCK_THREADS,
+    unsigned ITEMS_PER_THREAD,
+    class    IndexStructureType>
+__global__ void lookup_kernel_with_sorting(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
+    enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
+
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
+
+    // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
+    typedef cub::BlockLoad<key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+
+//    typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+    typedef cub::BlockRadixSort<key_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+
+    __shared__ union TempStorage {
+        // Allocate shared memory for BlockLoad
+        typename BlockLoad::TempStorage load;
+
+        typename BlockRadixSortT::TempStorage sort;
+    } temp_storage;
+
+//    __shared__ uint32_t exhausted_warps;
+
+    __shared__ key_t buffer[ITEMS_PER_ITERATION];
+    __shared__ uint32_t buffer_pos;
+
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
+
+
+    // initialize shared memory variables
+    if (warp_id == 0 && lane_id == 0) {
+//        exhausted_warps = 0;
+        buffer_pos = 0;
+    }
+    __syncthreads(); // ensure that all shared variables are initialized
+
+
+    uint32_t read = 0;
+
+    const uint32_t iteration_count = (n + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
+
+
+    using key_array_t = key_t[ITEMS_PER_THREAD];
+    key_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+    key_array_t& thread_data = reinterpret_cast<key_array_t&>(*thread_data_raw);
+
+
+    for (int i = 0; i < iteration_count; ++i) {
+
+        if (lane_id == 0) {
+            buffer_pos = 0;
+        }
+
+        int valid_items = min(ITEMS_PER_ITERATION, n - read);
+        // Load a segment of consecutive items that are blocked across threads
+        BlockLoad(temp_storage.load).Load(keys + read, thread_data, valid_items);
+
+        __syncthreads();
+
+
+
+
+        // we only perform the sort step when the buffer is completely filled
+        if (valid_items == ITEMS_PER_ITERATION) {
+            BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(thread_data, 0, 21); // TODO
+             __syncthreads();
+        }
+
+
+        const auto old = atomic_add_sat(&buffer_pos, 32u, (unsigned)ITEMS_PER_ITERATION);
+        const auto actual_count = min(ITEMS_PER_ITERATION - old, 32);
+
+        printf("warp: %d lane: %d - actual_count: %u\n", warp_id, lane_id, actual_count);
+
+        read += valid_items;
+         __syncthreads();
+    }
+
 
     int i = index;
     uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
     while (active_lanes) {
         bool active = i < n;
-        auto tid = harmonia_type::lookup(active, tree, keys[i]);
+        if (active) {
+            printf("key[%d] = %d\n", i, keys[i]);
+        }
+//        auto tid = index_structure.lookup(keys[i]);
+        auto tid = index_structure.cooperative_lookup(active, keys[i]);
         if (active) {
             tids[i] = tid;
-            printf("tids[%d] = %d\n", i, tids[i]);
+            printf("key[%d] = %d tids[%d] = %d\n", i, keys[i], i, tids[i]);
         }
 
         i += stride;
@@ -74,31 +179,137 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
 }
 #endif
 
-template<class IndexStructureType>
-void generate_datasets(std::vector<key_t>& keys, std::vector<key_t>& lookups) {
+
+
+
+#if 1
+template<
+    unsigned BLOCK_THREADS,
+    unsigned ITEMS_PER_THREAD,
+    class    IndexStructureType>
+__global__ void lookup_kernel_with_sorting(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
+    enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
+    typedef cub::BlockLoad<key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+
+    typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+//    typedef cub::BlockRadixSort<key_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+
+    __shared__ union TempStorage {
+        // Allocate shared memory for BlockLoad
+        typename BlockLoad::TempStorage load;
+
+        typename BlockRadixSortT::TempStorage sort;
+    } temp_storage;
+
+    __shared__ uint64_t buffer[ITEMS_PER_ITERATION];
+    __shared__ uint32_t buffer_pos;
+
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
+
 /*
-    std::vector<index_key_t> keys(numElements);
-    std::iota(keys.begin(), keys.end(), 0);
-
-
-    // shuffle lookup keys
-    auto rng = std::default_random_engine {};
-    std::shuffle(std::begin(keys), std::end(keys), rng);
-
-    // generate lookup keys
-    std::vector<index_key_t> lookupKeys(numAugmentedLookups);
-    std::iota(lookupKeys.begin(), lookupKeys.end(), 0);
-    std::shuffle(std::begin(lookupKeys), std::end(lookupKeys), rng);
-    // TODO zipfian lookup patterns
-
-    // copy lookup keys
-    index_key_t* d_lookupKeys;
-    cudaMalloc(&d_lookupKeys, numAugmentedLookups*sizeof(index_key_t));
-    cudaMemcpy(d_lookupKeys, lookupKeys.data(), numAugmentedLookups*sizeof(index_key_t), cudaMemcpyHostToDevice);
-
-
+    // initialize shared memory variables
+    if (warp_id == 0 && lane_id == 0) {
+        buffer_pos = 0;
+    }
+    __syncthreads(); // ensure that all shared variables are initialized
 */
 
+    uint32_t read = 0;
+
+    const uint32_t iteration_count = (n + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
+
+
+    using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
+    uint64_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+    key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
+
+    key_t input_thread_data[ITEMS_PER_THREAD];
+
+
+    for (int i = 0; i < iteration_count; ++i) {
+
+
+        int valid_items = min(ITEMS_PER_ITERATION, n - read);
+        // Load a segment of consecutive items that are blocked across threads
+        BlockLoad(temp_storage.load).Load(keys + read, input_thread_data, valid_items);
+
+        __syncthreads();
+
+        // reset shared memory variables
+        if (lane_id == 0) {
+            buffer_pos = 0;
+        }
+
+        #pragma unroll
+        for (int i = 0; i < ITEMS_PER_THREAD; ++i) {
+            buffer[threadIdx.x*ITEMS_PER_THREAD + i] = static_cast<uint64_t>(input_thread_data[i]);
+        }
+
+
+        __syncthreads();
+
+        // we only perform the sort step when the buffer is completely filled
+        if (valid_items == ITEMS_PER_ITERATION) {
+            BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(thread_data, 0, 21); // TODO
+             __syncthreads();
+        }
+
+
+        const auto old = atomic_add_sat(&buffer_pos, 32u, (unsigned)ITEMS_PER_ITERATION);
+        const auto actual_count = min(ITEMS_PER_ITERATION - old, 32);
+
+        printf("warp: %d lane: %d - actual_count: %u\n", warp_id, lane_id, actual_count);
+
+        read += valid_items;
+   //      __syncthreads();
+    }
+
+/*
+    int i = index;
+    uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
+    while (active_lanes) {
+        bool active = i < n;
+        if (active) {
+            printf("key[%d] = %d\n", i, keys[i]);
+        }
+//        auto tid = index_structure.lookup(keys[i]);
+        auto tid = index_structure.cooperative_lookup(active, keys[i]);
+        if (active) {
+            tids[i] = tid;
+            printf("key[%d] = %d tids[%d] = %d\n", i, keys[i], i, tids[i]);
+        }
+
+        i += stride;
+        active_lanes = __ballot_sync(FULL_MASK, i < n);
+    }*/
+
+}
+#endif
+
+
+
+
+
+
+template<class IndexStructureType>
+void generate_datasets(std::vector<key_t>& keys, std::vector<key_t>& lookups) {
+    auto rng = std::default_random_engine {};
+
+    // create random keys
+    std::generate(keys.begin(), keys.end(), rng);
+    std::sort(keys.begin(), keys.end());
+
+    std::uniform_int_distribution<> lookup_distrib(0, keys.size() - 1);
+    std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distrib(rng)]; });
+
+//    std::cout << "keys: " << stringify(keys.begin(), keys.end()) << std::endl;
+//    std::cout << "lookups: " << stringify(lookups.begin(), lookups.end()) << std::endl;
 }
 
 template<class IndexStructureType>
@@ -217,7 +428,8 @@ auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_loo
     printf("executing kernel...\n");
     auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-        lookup_kernel<<<numBlocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
+//        lookup_kernel<<<numBlocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
+        lookup_kernel_with_sorting<blockSize, 8, IndexStructureType><<<numBlocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
@@ -271,6 +483,8 @@ int main(int argc, char** argv) {
 
     // generate datasets
     std::vector<key_t> indexed, lookup_keys;
+    indexed.resize(num_elements);
+    lookup_keys.resize(defaultNumLookups);
     generate_datasets<index_type>(indexed, lookup_keys);
 
     // create gpu accessible vectors
@@ -293,17 +507,17 @@ auto tt = create_device_array_from(v, a);
         auto result = run_lookup_benchmark(index, d_lookup_keys.data(), lookup_keys.size());
         h_tids.swap(result);
     }
-/*
+
+#if 0
     // validate results
     printf("validating results...\n");
-
-    for (unsigned i = 0; i < num_lookup_keys; ++i) {
-        //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(h_tids[i]), lookupKeys[i]);
-        if (reinterpret_cast<value_t>(h_tids[i]) != lookupKeys[i]) {
-            printf("i: %u tid: %lu key[i]: %u\n", i, reinterpret_cast<uint64_t>(h_tids[i]), lookupKeys[i]);
+    for (unsigned i = 0; i < lookup_keys.size(); ++i) {
+        if (lookup_keys[i] != indexed[h_tids[i]]) {
+            printf("lookup_keys[%u]: %u indexed[h_tids[%u]]: %u\n", i, lookup_keys[i], i, indexed[h_tids[i]]);
             throw;
         }
     }
-*/
+#endif
+
     return 0;
 }
