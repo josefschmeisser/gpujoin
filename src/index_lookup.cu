@@ -7,13 +7,14 @@
 #include <numeric>
 #include <chrono>
 #include <memory>
+#include <unordered_set>
 
 #include <cuda_runtime.h>
 #include <sys/types.h>
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_radix_sort.cuh>
-#include <thread>
 
+#include "tpch/common.hpp"
 #include "utils.hpp"
 #include "zipf.hpp"
 
@@ -119,7 +120,7 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
 if (lane_id == 0) printf("warp: %d n: %d BLOCK_THREADS: %d ITEMS_PER_ITERATION: %d\n", warp_id, n, BLOCK_THREADS, ITEMS_PER_ITERATION);
 
 //    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
-    const unsigned tile_size = (n + BLOCK_THREADS - 1) / gridDim.x;
+    const unsigned tile_size = min(n, (n + BLOCK_THREADS - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
     const unsigned tid_limit = min(tid + tile_size, n);
 
@@ -138,7 +139,7 @@ if (lane_id == 0) printf("warp: %d n: %d BLOCK_THREADS: %d ITEMS_PER_ITERATION: 
     for (int i = 0; i < iteration_count; ++i) {
         if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
 
-        unsigned valid_items = min(ITEMS_PER_ITERATION, tile_size - tid);
+        unsigned valid_items = min(ITEMS_PER_ITERATION, n - tid);
 if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
 
@@ -154,7 +155,8 @@ if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
         #pragma unroll
         for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
-            buffer[threadIdx.x*ITEMS_PER_THREAD + j] = static_cast<uint64_t>(input_thread_data[j]);
+            uint64_t upper = tid + threadIdx.x*ITEMS_PER_THREAD + j;
+            buffer[threadIdx.x*ITEMS_PER_THREAD + j] = upper<<32 | static_cast<uint64_t>(input_thread_data[j]);
         }
 
 
@@ -162,28 +164,41 @@ if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
+if (lane_id == 0) printf("warp: %d iteration: %d - sorting... ===\n", warp_id, i);
             BlockRadixSortT(temp_storage.sort).Sort(thread_data, 0, max_bits); // TODO
              __syncthreads();
-        }
+        }/* else {
+if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
+        }*/
 
         // empty buffer
-        unsigned actual_count;
+        unsigned old;
         do {
             if (lane_id == 0) {
-                const auto old = atomic_add_sat(&buffer_pos, 32u, valid_items);
-                actual_count = min(valid_items - old, 32);
-                printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+                old = atomic_add_sat(&buffer_pos, 32u, valid_items);
             }
-            actual_count = __shfl_sync(FULL_MASK, actual_count, 0);
+            old = __shfl_sync(FULL_MASK, old, 0);
+            unsigned actual_count = min(valid_items - old, 32);
+            if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
 
             if (actual_count == 0) break;
 
             // TODO perform lookup
             bool active = lane_id < actual_count;
 
+            uint32_t assoc_tid = 0;
             key_t element = 0xffffffff;
             if (active) {
-                element = 
+                assoc_tid = buffer[old + lane_id] >> 32;
+                element = buffer[old + lane_id] & 0xffffffff;
+                printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+            }
+
+            value_t tid_b = index_structure.cooperative_lookup(active, element);
+            if (active) {
+                printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+                tids[assoc_tid] = tid_b;
+            }
 
 //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
 
@@ -192,26 +207,6 @@ if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
         tid += valid_items;
     }
-
-/*
-    int i = index;
-    uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
-    while (active_lanes) {
-        bool active = i < n;
-        if (active) {
-            printf("key[%d] = %d\n", i, keys[i]);
-        }
-//        auto tid = index_structure.lookup(keys[i]);
-        auto tid = index_structure.cooperative_lookup(active, keys[i]);
-        if (active) {
-            tids[i] = tid;
-            printf("key[%d] = %d tids[%d] = %d\n", i, keys[i], i, tids[i]);
-        }
-
-        i += stride;
-        active_lanes = __ballot_sync(FULL_MASK, i < n);
-    }*/
-
 }
 
 
@@ -221,15 +216,27 @@ template<class IndexStructureType>
 void generate_datasets(std::vector<key_t>& keys, std::vector<key_t>& lookups) {
     auto rng = std::default_random_engine {};
 
-    // create random keys
-    std::generate(keys.begin(), keys.end(), rng);
-    std::sort(keys.begin(), keys.end());
+    {
+        // create random keys
+        std::uniform_int_distribution<> key_distrib(0, 1 << (max_bits - 1));
+        std::unordered_set<key_t> unique;
+        unique.reserve(keys.size());
+        while (unique.size() < keys.size()) {
+            const auto key = key_distrib(rng);
+            unique.insert(key);
+        }
+
+        std::copy(unique.begin(), unique.end(), keys.begin());
+        std::sort(keys.begin(), keys.end());
+    }
 
     std::uniform_int_distribution<> lookup_distrib(0, keys.size() - 1);
     std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distrib(rng)]; });
+/*
+    std::cout << "keys: " << stringify(keys.begin(), keys.end()) << std::endl;
+    std::cout << "lookups: " << stringify(lookups.begin(), lookups.end()) << std::endl;
 
-//    std::cout << "keys: " << stringify(keys.begin(), keys.end()) << std::endl;
-//    std::cout << "lookups: " << stringify(lookups.begin(), lookups.end()) << std::endl;
+    exit(0);*/
 }
 
 template<class IndexStructureType>
@@ -428,7 +435,7 @@ auto tt = create_device_array_from(v, a);
         h_tids.swap(result);
     }
 
-#if 0
+#if 1
     // validate results
     printf("validating results...\n");
     for (unsigned i = 0; i < lookup_keys.size(); ++i) {
