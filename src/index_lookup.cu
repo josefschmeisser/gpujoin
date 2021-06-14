@@ -27,8 +27,8 @@ using namespace std;
 static const int blockSize = 128;
 static const unsigned maxRepetitions = 1;
 static const unsigned activeLanes = 32;
-static const unsigned defaultNumLookups = 2048;// 1e8;
-static unsigned defaultNumElements = 2048;// 1e7;
+static const unsigned defaultNumLookups = 2000;// 1e8;
+static unsigned defaultNumElements = 2000;// 1e7;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
@@ -75,8 +75,6 @@ __device__ T atomic_add_sat(T* address, T val, T saturation) {
 }
 
 
-
-#if 0
 template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
@@ -84,115 +82,10 @@ template<
 __global__ void lookup_kernel_with_sorting(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
+/*
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-
-    // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
-    typedef cub::BlockLoad<key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
-
-//    typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
-    typedef cub::BlockRadixSort<key_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
-
-    __shared__ union TempStorage {
-        // Allocate shared memory for BlockLoad
-        typename BlockLoad::TempStorage load;
-
-        typename BlockRadixSortT::TempStorage sort;
-    } temp_storage;
-
-//    __shared__ uint32_t exhausted_warps;
-
-    __shared__ key_t buffer[ITEMS_PER_ITERATION];
-    __shared__ uint32_t buffer_pos;
-
-    const int lane_id = threadIdx.x % 32;
-    const int warp_id = threadIdx.x / 32;
-
-
-    // initialize shared memory variables
-    if (warp_id == 0 && lane_id == 0) {
-//        exhausted_warps = 0;
-        buffer_pos = 0;
-    }
-    __syncthreads(); // ensure that all shared variables are initialized
-
-
-    uint32_t read = 0;
-
-    const uint32_t iteration_count = (n + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
-
-
-    using key_array_t = key_t[ITEMS_PER_THREAD];
-    key_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
-    key_array_t& thread_data = reinterpret_cast<key_array_t&>(*thread_data_raw);
-
-
-    for (int i = 0; i < iteration_count; ++i) {
-
-        if (lane_id == 0) {
-            buffer_pos = 0;
-        }
-
-        int valid_items = min(ITEMS_PER_ITERATION, n - read);
-        // Load a segment of consecutive items that are blocked across threads
-        BlockLoad(temp_storage.load).Load(keys + read, thread_data, valid_items);
-
-        __syncthreads();
-
-
-
-
-        // we only perform the sort step when the buffer is completely filled
-        if (valid_items == ITEMS_PER_ITERATION) {
-            BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(thread_data, 0, 21); // TODO
-             __syncthreads();
-        }
-
-
-        const auto old = atomic_add_sat(&buffer_pos, 32u, (unsigned)ITEMS_PER_ITERATION);
-        const auto actual_count = min(ITEMS_PER_ITERATION - old, 32);
-
-        printf("warp: %d lane: %d - actual_count: %u\n", warp_id, lane_id, actual_count);
-
-        read += valid_items;
-         __syncthreads();
-    }
-
-
-    int i = index;
-    uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
-    while (active_lanes) {
-        bool active = i < n;
-        if (active) {
-            printf("key[%d] = %d\n", i, keys[i]);
-        }
-//        auto tid = index_structure.lookup(keys[i]);
-        auto tid = index_structure.cooperative_lookup(active, keys[i]);
-        if (active) {
-            tids[i] = tid;
-            printf("key[%d] = %d tids[%d] = %d\n", i, keys[i], i, tids[i]);
-        }
-
-        i += stride;
-        active_lanes = __ballot_sync(FULL_MASK, i < n);
-    }
-}
-#endif
-
-
-
-
-#if 1
-template<
-    unsigned BLOCK_THREADS,
-    unsigned ITEMS_PER_THREAD,
-    class    IndexStructureType>
-__global__ void lookup_kernel_with_sorting(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
-    enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
-
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-
+*/
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
     typedef cub::BlockLoad<key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
 
@@ -220,9 +113,18 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
     __syncthreads(); // ensure that all shared variables are initialized
 */
 
-    uint32_t read = 0;
+//    uint32_t read = 0;
 
-    const uint32_t iteration_count = (n + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
+if (lane_id == 0) printf("warp: %d n: %d BLOCK_THREADS: %d ITEMS_PER_ITERATION: %d\n", warp_id, n, BLOCK_THREADS, ITEMS_PER_ITERATION);
+
+//    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
+    const unsigned tile_size = (n + BLOCK_THREADS - 1) / gridDim.x;
+    unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
+    const unsigned tid_limit = min(tid + tile_size, n);
+
+    if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+
+    const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
 
 
     using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
@@ -233,11 +135,14 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
 
 
     for (int i = 0; i < iteration_count; ++i) {
+        if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
+
+        unsigned valid_items = min(ITEMS_PER_ITERATION, tile_size - tid);
+if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
 
-        int valid_items = min(ITEMS_PER_ITERATION, n - read);
         // Load a segment of consecutive items that are blocked across threads
-        BlockLoad(temp_storage.load).Load(keys + read, input_thread_data, valid_items);
+        BlockLoad(temp_storage.load).Load(keys + tid, input_thread_data, valid_items);
 
         __syncthreads();
 
@@ -247,8 +152,8 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
         }
 
         #pragma unroll
-        for (int i = 0; i < ITEMS_PER_THREAD; ++i) {
-            buffer[threadIdx.x*ITEMS_PER_THREAD + i] = static_cast<uint64_t>(input_thread_data[i]);
+        for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
+            buffer[threadIdx.x*ITEMS_PER_THREAD + j] = static_cast<uint64_t>(input_thread_data[j]);
         }
 
 
@@ -260,14 +165,31 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
              __syncthreads();
         }
 
+        // empty buffer
+        unsigned actual_count;
+        do {
+            if (lane_id == 0) {
+                const auto old = atomic_add_sat(&buffer_pos, 32u, valid_items);
+                actual_count = min(valid_items - old, 32);
+                printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+            }
+            actual_count = __shfl_sync(FULL_MASK, actual_count, 0);
 
-        const auto old = atomic_add_sat(&buffer_pos, 32u, (unsigned)ITEMS_PER_ITERATION);
-        const auto actual_count = min(ITEMS_PER_ITERATION - old, 32);
+            if (actual_count == 0) break;
 
-        printf("warp: %d lane: %d - actual_count: %u\n", warp_id, lane_id, actual_count);
+            // TODO perform lookup
+            bool active = lane_id < actual_count;
 
-        read += valid_items;
-   //      __syncthreads();
+            key_t element = 0xffffffff;
+            if (active) {
+                element = 
+
+//printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
+
+        } while (true);//actual_count == 32);
+
+
+        tid += valid_items;
     }
 
 /*
@@ -290,9 +212,6 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
     }*/
 
 }
-#endif
-
-
 
 
 
@@ -418,7 +337,7 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
 
 template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_lookup_keys, unsigned num_lookup_keys) {
-    int numBlocks = (num_lookup_keys + blockSize - 1) / blockSize;
+    int numBlocks = 1; // TODO (num_lookup_keys + blockSize - 1) / blockSize;
     printf("numblocks: %d\n", numBlocks);
 
     // create result array
