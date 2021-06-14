@@ -29,6 +29,7 @@ static const unsigned maxRepetitions = 1;
 static const unsigned activeLanes = 32;
 static const unsigned defaultNumLookups = 2000;// 1e8;
 static unsigned defaultNumElements = 2000;// 1e7;
+static const unsigned max_bits = 24;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
@@ -161,7 +162,7 @@ if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
-            BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(thread_data, 0, 21); // TODO
+            BlockRadixSortT(temp_storage.sort).Sort(thread_data, 0, max_bits); // TODO
              __syncthreads();
         }
 
