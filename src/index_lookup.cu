@@ -25,12 +25,12 @@
 
 using namespace std;
 
-static const int blockSize = 128;
+static const int blockSize = 256;
 static const unsigned maxRepetitions = 1;
 static const unsigned activeLanes = 32;
-static const unsigned defaultNumLookups = 2000;// 1e8;
-static unsigned defaultNumElements = 2000;// 1e7;
-static const unsigned max_bits = 24;
+static const unsigned defaultNumLookups = 1e8;
+static unsigned defaultNumElements = 1e7;
+static const unsigned max_bits = 26;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
@@ -137,10 +137,10 @@ if (lane_id == 0) printf("warp: %d n: %d BLOCK_THREADS: %d ITEMS_PER_ITERATION: 
 
 
     for (int i = 0; i < iteration_count; ++i) {
-        if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
+//if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
 
         unsigned valid_items = min(ITEMS_PER_ITERATION, n - tid);
-if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
+//if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
 
         // Load a segment of consecutive items that are blocked across threads
@@ -164,11 +164,11 @@ if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
-if (lane_id == 0) printf("warp: %d iteration: %d - sorting... ===\n", warp_id, i);
+//if (lane_id == 0) printf("warp: %d iteration: %d - sorting... ===\n", warp_id, i);
             BlockRadixSortT(temp_storage.sort).Sort(thread_data, 0, max_bits); // TODO
              __syncthreads();
         }/* else {
-if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
+//if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
         }*/
 
         // empty buffer
@@ -179,7 +179,7 @@ if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", wa
             }
             old = __shfl_sync(FULL_MASK, old, 0);
             unsigned actual_count = min(valid_items - old, 32);
-            if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+//if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
 
             if (actual_count == 0) break;
 
@@ -191,12 +191,12 @@ if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", wa
             if (active) {
                 assoc_tid = buffer[old + lane_id] >> 32;
                 element = buffer[old + lane_id] & 0xffffffff;
-                printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
             value_t tid_b = index_structure.cooperative_lookup(active, element);
             if (active) {
-                printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+//printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
                 tids[assoc_tid] = tid_b;
             }
 
@@ -345,8 +345,11 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
 
 template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_lookup_keys, unsigned num_lookup_keys) {
-    int numBlocks = 1; // TODO (num_lookup_keys + blockSize - 1) / blockSize;
-    printf("numblocks: %d\n", numBlocks);
+//    int num_blocks = 1; // TODO (num_lookup_keys + blockSize - 1) / blockSize;
+    int num_sms;
+    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
+    int num_blocks = num_sms*3; // TODO
+    printf("numblocks: %d\n", num_blocks);
 
     // create result array
     value_t* d_tids;
@@ -355,8 +358,8 @@ auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_loo
     printf("executing kernel...\n");
     auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-//        lookup_kernel<<<numBlocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
-        lookup_kernel_with_sorting<blockSize, 8, IndexStructureType><<<numBlocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
+//        lookup_kernel<<<num_blocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
+        lookup_kernel_with_sorting<blockSize, 4, IndexStructureType><<<num_blocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
