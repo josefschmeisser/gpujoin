@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sys/types.h>
 #include "search.cuh"
 
 /* TODO
@@ -7,6 +8,7 @@
 #include "btree.cu"
 */
 #include "harmonia.cuh"
+#include "rs.cuh"
 
 #if 0
 struct btree_index {
@@ -29,47 +31,54 @@ struct btree_index {
         return btree::cuda::btree_cooperative_lookup(active, tree_, key);
     }
 };
+#endif
 
+template<class Key, class Value>
 struct radix_spline_index {
-    rs::DeviceRadixSpline* d_rs_;
-    const btree::key_t* d_column_;
+    using key_t = Key;
+    using value_t = Value;
 
-    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
+    static const value_t invalid_tid = std::numeric_limits<value_t>::max();
+
+    rs::DeviceRadixSpline<key_t>* d_rs_;
+    const key_t* d_column_;
+
+    __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column) {
         d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
 
         // copy radix spline
         const auto start = std::chrono::high_resolution_clock::now();
-        d_rs_ = rs::copy_radix_spline<rs_placement_policy>(h_rs);
+        d_rs_ = rs::copy_radix_spline<vector_to_device_array>(h_rs); // TODO
         const auto finish = std::chrono::high_resolution_clock::now();
-        const auto duration = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
+        const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;
         std::cout << "radixspline transfer time: " << duration << " ms\n";
 
-        auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline*>(&h_rs);
+        auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline<key_t>*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
     }
 
-    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
+    __device__ __forceinline__ value_t operator() (const key_t key) const {
         const unsigned estimate = rs::cuda::get_estimate(d_rs_, key);
         const unsigned begin = (estimate < d_rs_->max_error_) ? 0 : (estimate - d_rs_->max_error_);
         const unsigned end = (estimate + d_rs_->max_error_ + 2 > d_rs_->num_keys_) ? d_rs_->num_keys_ : (estimate + d_rs_->max_error_ + 2);
 
         const auto bound_size = end - begin;
-        const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const rs::rs_key_t& a, const rs::rs_key_t& b) -> int {
+        const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const key_t& a, const key_t& b) -> int {
             return a < b;
         });
-        return (pos < d_rs_->num_keys_) ? static_cast<btree::payload_t>(pos) : btree::invalidTid;
+        return (pos < d_rs_->num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
     }
 };
-#endif
-
 
 template<class Key, class Value>
 struct harmonia_index {
     using key_t = Key;
     using value_t = Value;
 
-    using harmonia_t = harmonia::harmonia_tree<key_t, value_t, 8 + 1, std::numeric_limits<value_t>::max()>;
+    static const value_t invalid_tid = std::numeric_limits<value_t>::max();
+
+    using harmonia_t = harmonia::harmonia_tree<key_t, value_t, 32 + 1, invalid_tid>;
 
     harmonia_t tree;
     const typename harmonia_t::device_handle_t* __restrict__ d_tree;
@@ -83,7 +92,7 @@ struct harmonia_index {
 //    __device__ __forceinline__ value_t lookup(const key_t key) const;
 
     __device__ __forceinline__ value_t cooperative_lookup(bool active, key_t key) const {
-        return harmonia_t::lookup(active, d_tree, key);
+        return harmonia_t::lookup<4>(active, d_tree, key);
     }
 };
 
@@ -91,6 +100,8 @@ template<class Key, class Value>
 struct lower_bound_index {
     using key_t = Key;
     using value_t = Value;
+
+    static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
     struct device_data_t {
         const key_t* d_column;
@@ -104,8 +115,9 @@ struct lower_bound_index {
     }
 
     __device__ __forceinline__ value_t lookup(const key_t key) const {
-//        return branchy_binary_search(key, device_data->d_column, device_data->d_size);
-        return branch_free_binary_search(key, device_data->d_column, device_data->d_size);
+//        auto pos = branchy_binary_search(key, device_data->d_column, device_data->d_size);
+        auto pos = branch_free_binary_search(key, device_data->d_column, device_data->d_size);
+        return (pos < device_data->d_size) ? static_cast<value_t>(pos) : invalid_tid;
     }
 };
 

@@ -15,7 +15,7 @@
 #include "zipf.hpp"
 #include "utils.hpp"
 
-#include "rs.cu"
+#include "rs.cuh"
 
 using namespace std;
 using namespace rs;
