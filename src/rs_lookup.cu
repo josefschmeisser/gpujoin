@@ -11,7 +11,6 @@
 #include <stdexcept>
 
 #include "rs/multi_map.h"
-#include "btree.cuh"
 #include "zipf.hpp"
 #include "utils.hpp"
 
@@ -21,7 +20,7 @@ using namespace std;
 using namespace rs;
 
 using rs_key_t = uint32_t;
-using payload_t = btree::payload_t;
+using payload_t = uint64_t;
 using rs_placement_policy = vector_to_device_array;// vector_to_managed_array;
 
 static constexpr int device_id = 0;
@@ -110,7 +109,7 @@ int main(int argc, char** argv) {
         cudaMemPrefetchAsync(lookupKeys, keys_size, device_id);*/
     }
 
-    btree::payload_t* tids;
+    payload_t* tids;
     cudaMallocManaged(&tids, numElements*sizeof(decltype(tids)));
 
     int blockSize = 32;
