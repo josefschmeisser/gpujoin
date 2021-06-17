@@ -12,13 +12,10 @@ namespace index_structures {
 template<
     class Key,
     class Value,
-    unsigned Fanout,
     Value Not_Found>
 struct btree {
     using key_t = Key;
     using value_t = Value;
-
-    static constexpr auto max_keys = Fanout - 1;
 
     struct NodeBase {
         union {
@@ -26,32 +23,47 @@ struct btree {
                 uint16_t count;
                 bool isLeaf;
             } header;
-            uint8_t header_with_padding[128];
+            uint8_t header_with_padding[GPU_CACHE_LINE_SIZE];
         };
     };
-    static_assert(sizeof(NodeBase) == 128);
+    static_assert(sizeof(NodeBase) == GPU_CACHE_LINE_SIZE);
 
-    struct Node : public NodeBase {
-        static const uint64_t pageSize = 4 * 1024;
-        static const uint64_t maxEntries = ((pageSize - sizeof(NodeBase) - sizeof(value_t)) / (sizeof(key_t) + sizeof(value_t))) - 1;
+    struct LeafNode : public NodeBase {
+        static const unsigned pageSize = 4 * 1024;
+        static const unsigned maxEntries = ((pageSize - sizeof(NodeBase)) / (sizeof(key_t) + sizeof(value_t))) - 1;
 
         key_t keys[maxEntries];
-        value_t payloads[maxEntries + 1];
+        value_t payloads[maxEntries];
     };
-    static_assert(sizeof(Node) < Node::pageSize);
+    static_assert(sizeof(LeafNode) < LeafNode::pageSize);
 
-    Node* root = nullptr;
+    struct InnerNode : public NodeBase {
+        static const unsigned pageSize = 4 * 1024;
+        static const unsigned maxEntries = ((pageSize - sizeof(NodeBase) - sizeof(NodeBase*)) / (sizeof(key_t) + sizeof(NodeBase*))) - 1;
+
+        key_t keys[maxEntries];
+        NodeBase* children[maxEntries + 1];
+    };
+    static_assert(sizeof(InnerNode) < InnerNode::pageSize);
+
+    NodeBase* root = nullptr;
 
     ~btree() {
+        free_tree(root);
+    }
+
+    __host__ void free_tree(NodeBase* node) {
         // TODO
     }
 
-    Node* create_node(bool isLeaf) {
-        Node* node;
+    LeafNode* create_leaf() {
+        LeafNode* node;
         void** dst = reinterpret_cast<void**>(&node);
-        cudaMallocManaged(dst, Node::pageSize);
+
+        // TODO use allocator
+        cudaMallocManaged(dst, LeafNode::pageSize);
         //node = reinterpret_cast<Node*>(numa_alloc_onnode(Node::pageSize, 0));
-        node->header.isLeaf = isLeaf;
+        node->header.isLeaf = true;
 
         // validate alignment
         if ((reinterpret_cast<uintptr_t>(node) & GPU_CACHE_LINE_SIZE-1) != 0) { throw std::runtime_error("unaligned memory"); }
@@ -59,15 +71,38 @@ struct btree {
 
         // initialize key vector with the largest key value possible
         static constexpr auto maxKey = std::numeric_limits<key_t>::max();
-        for (unsigned i = 0; i < Node::maxEntries; ++i) {
+        for (unsigned i = 0; i < LeafNode::maxEntries; ++i) {
             node->keys[i] = maxKey;
         }
 
         return node;
     }
 
-    bool append_into(Node* dst, key_t key, value_t value) {
-        if (dst->header.count >= Node::maxEntries) { return false; }
+    InnerNode* create_inner() {
+        InnerNode* node;
+        void** dst = reinterpret_cast<void**>(&node);
+
+        // TODO use allocator
+        cudaMallocManaged(dst, InnerNode::pageSize);
+        //node = reinterpret_cast<Node*>(numa_alloc_onnode(Node::pageSize, 0));
+        node->header.isLeaf = false;
+
+        // validate alignment
+        if ((reinterpret_cast<uintptr_t>(node) & GPU_CACHE_LINE_SIZE-1) != 0) { throw std::runtime_error("unaligned memory"); }
+        if ((reinterpret_cast<uintptr_t>(&node->keys[0]) & GPU_CACHE_LINE_SIZE-1) != 0) { throw std::runtime_error("unaligned memory"); }
+
+        // initialize key vector with the largest key value possible
+        static constexpr auto maxKey = std::numeric_limits<key_t>::max();
+        for (unsigned i = 0; i < LeafNode::maxEntries; ++i) {
+            node->keys[i] = maxKey;
+        }
+
+        return node;
+    }
+
+    bool append_into(LeafNode* dst, key_t key, value_t value) {
+        assert(dst->header.isLeaf);
+        if (dst->header.count >= LeafNode::maxEntries) { return false; }
 
         dst->keys[dst->header.count] = key;
         dst->payloads[dst->header.count] = value;
@@ -75,58 +110,67 @@ struct btree {
         return true;
     }
 
-    static key_t max_key(Node* tree) {
-        if (tree->header.isLeaf) {
-            return tree->keys[tree->header.count - 1];
-        }
-        return max_key(reinterpret_cast<Node*>(tree->payloads[tree->header.count]));
+    bool append_into(InnerNode* dst, key_t key, NodeBase* child) {
+        assert(!dst->header.isLeaf);
+        if (dst->header.count >= LeafNode::maxEntries) { return false; }
+
+        dst->keys[dst->header.count] = key;
+        dst->children[dst->header.count] = child;
+        dst->header.count += 1;
+        return true;
     }
 
-    Node* construct_inner_nodes(std::vector<Node*> lower_level, float load_factor) {
+    static key_t max_key(const NodeBase* tree) {
+        if (tree->header.isLeaf) {
+            const LeafNode* leaf = static_cast<const LeafNode*>(tree);
+            return leaf->keys[tree->header.count - 1];
+        }
+        return max_key(static_cast<const InnerNode*>(tree)->children[tree->header.count]);
+    }
+
+    NodeBase* construct_inner_nodes(std::vector<NodeBase*> lower_level, float load_factor) {
         if (lower_level.size() == 1) {
             return lower_level.front();
         }
 
-        std::vector<Node*> current_level;
-        Node* node = create_node(false);
+        std::vector<NodeBase*> current_level;
+        InnerNode* node = create_inner();
         for (unsigned i = 0; i < lower_level.size() - 1; i++) {
-            Node* curr = lower_level[i];
+            NodeBase* curr = lower_level[i];
             key_t sep = max_key(curr);
-            bool full = node->header.count >= Node::maxEntries;
-            full = full || static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) > load_factor;
+            bool full = node->header.count >= InnerNode::maxEntries;
+            full = full || static_cast<float>(node->header.count) / static_cast<float>(InnerNode::maxEntries) > load_factor;
             if (full) {
-                //node->upperOrNext = curr;
-                node->payloads[node->header.count] = reinterpret_cast<value_t>(curr);
+                node->children[node->header.count] = curr;
                 current_level.push_back(node);
-                node = create_node(false);
+                node = create_inner();
             } else {
-                bool appended = append_into(node, sep, reinterpret_cast<value_t>(curr));
+                bool appended = append_into(node, sep, curr);
                 (void)appended;
                 assert(appended);
             }
         }
-        //node->upperOrNext = lower_level[lower_level.size() - 1];
-        node->payloads[node->header.count] = reinterpret_cast<value_t>(lower_level[lower_level.size() - 1]);
+        node->children[node->header.count] = lower_level[lower_level.size() - 1];
         current_level.push_back(node);
         std::cout << "count per inner node: " << lower_level.size() / current_level.size() << std::endl;
 
         return construct_inner_nodes(current_level, load_factor);
     }
 
-    Node* construct(const std::vector<key_t>& keys, float load_factor) {
+    void construct(const std::vector<key_t>& keys, float load_factor) {
         assert(load_factor > 0 && load_factor <= 1.0);
         uint64_t n = keys.size();
 
-        std::vector<Node*> leaves;
-        Node* node = create_node(true);
+        std::vector<NodeBase*> leaves;
+        LeafNode* node = create_leaf();
         for (uint64_t i = 0; i < n; i++) {
             auto k = keys[i];
             value_t value = i;
-            bool full = node->header.count >= Node::maxEntries;
-            full = full || static_cast<float>(node->header.count) / static_cast<float>(Node::maxEntries) > load_factor;
+            bool full = node->header.count >= LeafNode::maxEntries;
+            full = full || static_cast<float>(node->header.count) / static_cast<float>(LeafNode::maxEntries) > load_factor;
             if (full) {
                 leaves.push_back(node);
-                node = create_node(true);
+                node = create_leaf();
                 bool inserted = append_into(node, k, value);
                 (void)inserted;
                 assert(inserted);
@@ -140,18 +184,21 @@ struct btree {
 
         std::cout << "count per leaf node: " << n / leaves.size() << std::endl;
 
-        Node* root = construct_inner_nodes(leaves, load_factor);
+        if (root) {
+            free_tree(root);
+        }
+        root = construct_inner_nodes(leaves, load_factor);
 
         std::cout << "tree size: " << tree_size_in_byte(root) / (1024*1024) << " MB" << std::endl;
-        return root;
     }
 
-    Node* construct_dense(uint32_t numElements, float load_factor) {
+    void construct_dense(uint32_t numElements, float load_factor) {
         std::vector<uint32_t> keys(numElements);
         std::iota(keys.begin(), keys.end(), 0);
-        return construct(keys, load_factor);
+        construct(keys, load_factor);
     }
 
+/*
     static unsigned lower_bound(Node* node, key_t key) {
         //cout << "search key: " << key << " in [" << node->keys[0] << ", " << node->keys[node->header.count - 1] << "]" << endl;
         unsigned lower = 0;
@@ -168,22 +215,25 @@ struct btree {
         } while (lower < upper);
         return lower;
     }
+*/
 
-    __host__ bool lookup(Node* tree, key_t key, value_t& result) {
-        Node* node = tree;
+    __host__ bool lookup(const NodeBase* tree, key_t key, value_t& result) {
+        NodeBase* node = tree;
         while (!node->header.isLeaf) {
-            unsigned pos = lower_bound(node, key);
+            const InnerNode* inner = static_cast<const InnerNode*>(node);
+            unsigned pos = std::lower_bound(inner->keys, inner->keys + inner->count, key) - inner->keys;
             //cout << "inner pos: " << pos << endl;
-            node = reinterpret_cast<Node*>(node->payloads[pos]);
+            node = inner->children[pos];
             if (node == nullptr) {
                 return false;
             }
         }
 
-        unsigned pos = lower_bound(node, key);
+        const LeafNode* leaf = static_cast<const LeafNode*>(node);
+        unsigned pos = std::lower_bound(leaf->keys, leaf->keys + leaf->header.count, key);
         //cout << "pos: " << pos << endl;
-        if ((pos < node->header.count) && (node->keys[pos] == key)) {
-            result = node->payloads[pos];
+        if ((pos < leaf->header.count) && (leaf->keys[pos] == key)) {
+            result = leaf->payloads[pos];
             return true;
         }
 
@@ -212,23 +262,24 @@ struct btree {
     }
 #endif
 
-    void prefetch_subtree(Node* node, int device) {
+    void prefetch_subtree(NodeBase* node, int device) {
         bool isLeaf = node->header.isLeaf;
 
         if (!isLeaf) {
-            for (unsigned i = 0; i <= node->header.count; ++i) {
-                Node* child = reinterpret_cast<Node*>(node->payloads[i]);
+            const InnerNode* inner = static_cast<const InnerNode*>(node);
+            for (unsigned i = 0; i <= inner->header.count; ++i) {
+                NodeBase* child = inner->payloads[i];
                 assert(child);
                 prefetchSubtree(child, device);
             }
         }
 
-        cudaMemPrefetchAsync(node, btree::Node::pageSize, device);
+        cudaMemPrefetchAsync(node, isLeaf ? LeafNode::pageSize : InnerNode::pageSize, device);
 
         if (isLeaf) return;
     };
 
-    void prefetch_tree(Node* tree, int device = -1) {
+    void prefetch_tree(NodeBase* tree, int device = -1) {
         printf("prefetching btree nodes...\n");
         if (device < 0) {
             cudaGetDevice(&device);
@@ -237,113 +288,121 @@ struct btree {
         cudaDeviceSynchronize();
     }
 
-    Node* copy_btree_to_gpu(Node* tree) {
-        Node* newTree;
-        cudaMalloc(&newTree, Node::pageSize);
+    NodeBase* copy_btree_to_gpu(NodeBase* tree) {
+        NodeBase* newTree;
+        cudaMalloc(&newTree, tree->header.isLeaf ? LeafNode::pageSize : InnerNode::pageSize);
         if (!tree->header.isLeaf) {
-            std::unique_ptr<uint8_t[]> tmpMem { new uint8_t[Node::pageSize] };
-            Node* tmp = reinterpret_cast<Node*>(tmpMem.get());
-            std::memcpy(tmp, tree, Node::pageSize);
+            const InnerNode* inner = static_cast<const InnerNode*>(tree);
+            std::unique_ptr<uint8_t[]> tmpMem { new uint8_t[InnerNode::pageSize] };
+            InnerNode* tmp = reinterpret_cast<InnerNode*>(tmpMem.get());
+            std::memcpy(tmp, tree, InnerNode::pageSize);
             for (unsigned i = 0; i <= tree->header.count; ++i) {
-                Node* child = reinterpret_cast<Node*>(tree->payloads[i]);
-                Node* newChild = copy_btree_to_gpu(child);
-                tmp->payloads[i] = reinterpret_cast<decltype(tmp->payloads[0])>(newChild);
+                NodeBase* child = inner->children[i];
+                NodeBase* newChild = copy_btree_to_gpu(child);
+                tmp->children[i] = newChild;
             }
-            cudaMemcpy(newTree, tmp, Node::pageSize, cudaMemcpyHostToDevice);
+            cudaMemcpy(newTree, tmp, InnerNode::pageSize, cudaMemcpyHostToDevice);
         } else {
-            cudaMemcpy(newTree, tree, Node::pageSize, cudaMemcpyHostToDevice);
+            cudaMemcpy(newTree, tree, LeafNode::pageSize, cudaMemcpyHostToDevice);
         }
         return newTree;
     }
 
-    size_t tree_size_in_byte(Node* tree) {
-        if (tree->header.isLeaf) { return Node::pageSize; }
+    size_t tree_size_in_byte(const NodeBase* tree) {
+        if (tree->header.isLeaf) { return LeafNode::pageSize; }
 
-        size_t size = Node::pageSize;
+        size_t size = InnerNode::pageSize;
         for (unsigned i = 0; i <= tree->header.count; ++i) {
-            Node* child = reinterpret_cast<Node*>(tree->payloads[i]);
+            const InnerNode* inner = static_cast<const InnerNode*>(tree);
+            const NodeBase* child = inner->children[i];
             assert(child);
             size += tree_size_in_byte(child);
         }
         return size;
     }
 
-    __device__ value_t btree_lookup(const Node* tree, key_t key) {
-        //printf("btree_lookup key: %lu\n", key);
-        const Node* node = tree;
+    static __device__ value_t lookup(const NodeBase* tree, key_t key) {
+        //printf("lookup key: %lu\n", key);
+        const NodeBase* node = tree;
         while (!node->header.isLeaf) {
-            unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
-            //unsigned pos = linear_search(key, node->keys, node->header.count);
+            const InnerNode* inner = static_cast<const InnerNode*>(node);
+            unsigned pos = branchy_binary_search(key, inner->keys, inner->header.count);
+            //unsigned pos = linear_search(key, inner->keys, inner->header.count);
             //printf("inner pos: %d\n", pos);
-            node = reinterpret_cast<const Node*>(node->payloads[pos]);/*
+            node = node->children[pos];/*
             if (node == nullptr) {
                 return Not_Found;
             }*/
         }
 
-        unsigned pos = branchy_binary_search(key, node->keys, node->header.count);
-        //unsigned pos = linear_search(key, node->keys, node->header.count);
+        const LeafNode* leaf = static_cast<const LeafNode*>(node);
+        unsigned pos = branchy_binary_search(key, leaf->keys, leaf->header.count);
+        //unsigned pos = linear_search(key, leaf->keys, leaf->header.count);
         //printf("leaf pos: %d\n", pos);
-        if ((pos < node->header.count) && (node->keys[pos] == key)) {
-            return node->payloads[pos];
+        if ((pos < leaf->header.count) && (leaf->keys[pos] == key)) {
+            return leaf->payloads[pos];
         }
 
         return Not_Found;
     }
 
-    __device__ value_t btree_lookup_with_hints(const Node* tree, key_t key) {
-        //printf("btree_lookup key: %lu\n", key);
+    static __device__ value_t lookup_with_hints(const NodeBase* tree, key_t key) {
+        //printf("lookup_with_hints key: %lu\n", key);
         float hint = 0.5f;
-        const Node* node = tree;
+        const NodeBase* node = tree;
         while (!node->header.isLeaf) {
-            unsigned pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
-            if (pos > 0 && pos < node->header.count) {
-                const auto prev = static_cast<float>(node->keys[pos - 1]);
-                const auto current = static_cast<float>(node->keys[pos]);
+            const InnerNode* inner = static_cast<const InnerNode*>(node);
+            unsigned pos = branch_free_exponential_search(key, inner->keys, inner->header.count, hint);
+            if (pos > 0 && pos < inner->header.count) {
+                const auto prev = static_cast<float>(inner->keys[pos - 1]);
+                const auto current = static_cast<float>(inner->keys[pos]);
                 hint = (static_cast<float>(key) - prev)/(current - prev);
-    //            printf("prev: %f current: %f hint: %f\n", prev, current, hint);
+                //printf("prev: %f current: %f hint: %f\n", prev, current, hint);
             } else {
                 hint = 0.5f;
             }
 
-            node = reinterpret_cast<const Node*>(node->payloads[pos]);
+            node = node->children[pos];
             /*
             if (node == nullptr) {
                 return Not_Found;
             }*/
         }
 
+        const LeafNode* leaf = static_cast<const LeafNode*>(node);
         //unsigned pos = naive_lower_bound(node, key);
-        unsigned pos = branch_free_exponential_search(key, node->keys, node->header.count, hint);
+        unsigned pos = branch_free_exponential_search(key, leaf->keys, leaf->header.count, hint);
         //printf("leaf pos: %d\n", pos);
     /*
-        if ((pos < node->header.count) && (node->keys[pos] == key)) {
-            return node->payloads[pos];
+        if ((pos < leaf->header.count) && (leaf->keys[pos] == key)) {
+            return leaf->payloads[pos];
         }
         return Not_Found;
     */
-        return (pos < node->header.count) && (node->keys[pos] == key) ? node->payloads[pos] : Not_Found;
+        return (pos < leaf->header.count) && (leaf->keys[pos] == key) ? leaf->payloads[pos] : Not_Found;
     }
 
     // this function has to be called by the entire warp, otherwise the function is likly to yield wrong results
-    __device__ value_t btree_cooperative_lookup(bool active, const Node* tree, key_t key) {
+    static __device__ value_t cooperative_lookup(bool active, const NodeBase* tree, key_t key) {
         assert(__all_sync(FULL_MASK, 1));
 
-    //    printf("btree_cooperative_lookup active: %d key: %u\n", active, key);
-        const Node* node = tree;
+        //printf("btree_cooperative_lookup active: %d key: %u\n", active, key);
+        const NodeBase* node = tree;
         while (__any_sync(FULL_MASK, active && !node->header.isLeaf)) {
-            unsigned pos = cooperative_linear_search(active, key, node->keys, node->header.count);
-    //        printf("inner pos: %d\n", pos);
+            const InnerNode* inner = static_cast<const InnerNode*>(node);
+            unsigned pos = cooperative_linear_search(active, key, inner->keys, inner->header.count);
+            //printf("inner pos: %d\n", pos);
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
-            node = active ? reinterpret_cast<const Node*>(node->payloads[pos]) : tree;
+            node = active ? inner->children[pos] : tree;
         }
 
-        unsigned pos = cooperative_linear_search(active, key, node->keys, node->header.count);
-    //    printf("leaf pos: %d\n", pos);
-        if (active && (pos < node->header.count) && (node->keys[pos] == key)) {
-            return node->payloads[pos];
+        const LeafNode* leaf = static_cast<const LeafNode*>(node);
+        unsigned pos = cooperative_linear_search(active, key, leaf->keys, leaf->header.count);
+        //printf("leaf pos: %d\n", pos);
+        if (active && (pos < leaf->header.count) && (leaf->keys[pos] == key)) {
+            return leaf->payloads[pos];
         }
 
         return Not_Found;
@@ -419,7 +478,7 @@ struct btree {
 #endif
 
 #if 0
-    __device__ value_t btree_lookup_with_hints(const Node* tree, key_t key) {
+    static __device__ value_t btree_lookup_with_hints(const Node* tree, key_t key) {
         //printf("btree_lookup key: %lu\n", key);
         float hint = 0.5;
         const Node* node;
