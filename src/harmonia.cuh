@@ -254,20 +254,16 @@ struct harmonia_tree {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads within the warp participate
 
         const unsigned my_lane_id = lane_id();
-
-        unsigned lower_bound = max_keys;
-
         unsigned leader = WINDOW_SIZE*(my_lane_id >> Degree);
-        const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
-
+        const uint32_t window_mask = ((1u << WINDOW_SIZE) - 1u) << leader;
         assert(my_lane_id >= leader);
         const int lane_offset = my_lane_id - leader;
+        unsigned lower_bound = max_keys;
 
         for (unsigned shift = 0; shift < WINDOW_SIZE; ++shift) {
             int key_idx = lane_offset - WINDOW_SIZE;
             const key_t leader_x = __shfl_sync(window_mask, x, leader);
             const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
-            const unsigned leader_size = __shfl_sync(window_mask, max_keys, leader);
 
             const auto leader_active = __shfl_sync(window_mask, active, leader);
             unsigned exhausted_cnt = leader_active ? 0 : WINDOW_SIZE;
@@ -276,9 +272,9 @@ struct harmonia_tree {
                 key_idx += WINDOW_SIZE;
 
                 key_t value;
-                if (key_idx < leader_size) value = leader_arr[key_idx];
-                matches = __ballot_sync(window_mask, key_idx < leader_size && value >= leader_x);
-                exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= leader_size));
+                if (key_idx < max_keys) value = leader_arr[key_idx];
+                matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
+                exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
             }
 
             if (my_lane_id == leader && matches != 0) {
