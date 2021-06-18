@@ -50,6 +50,11 @@ add_dependencies(rs_lookup RadixSpline)
 target_link_libraries(rs_lookup ${CUDART_LIBRARY} numa)
 target_include_directories(rs_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
 
+add_executable(index_lookup src/index_lookup.cu)
+add_dependencies(index_lookup RadixSpline)
+target_link_libraries(index_lookup ${CUDART_LIBRARY} numa)
+target_include_directories(index_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
+
 add_subdirectory(src/tpch)
 add_subdirectory(test)
 
@@ -58,6 +63,3 @@ add_executable(bf_search src/bf_search.cpp)
 add_executable(random_access src/random_access.cu)
 
 add_executable(cub_sort src/example_block_radix_sort.cu)
-
-#add_executable(parser test/tpch/parser.cpp src/tpch/parser.cpp src/tpch/common.cpp)
-#target_link_libraries(parser pthread)

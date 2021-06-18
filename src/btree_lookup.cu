@@ -10,7 +10,6 @@
 #include "zipf.hpp"
 
 #include "btree.cuh"
-#include "btree.cu"
 
 using namespace std;
 
@@ -19,43 +18,46 @@ static constexpr unsigned activeLanes = 32;
 static constexpr unsigned numLookups = 1e7;
 static unsigned numElements = 1e7;
 
-using namespace btree;
-using namespace btree::cuda;
+using namespace index_structures;
 
-__global__ void btree_bulk_lookup(const Node* __restrict__ root, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+using my_key_t = uint32_t;
+using payload_t = uint64_t;
+using btree_t = btree<my_key_t, payload_t, std::numeric_limits<payload_t>::max()>;
+
+__global__ void btree_bulk_lookup(const btree_t::NodeBase* __restrict__ root, unsigned n, const my_key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
     //n = 32;
 
 /*
-    __shared__ uint8_t rootRaw[Node::pageSize];
+    __shared__ uint8_t rootRaw[NodeBase::pageSize];
     if (threadIdx.x == 0) {
-        memcpy(rootRaw, tree, Node::pageSize);
+        memcpy(rootRaw, tree, NodeBase::pageSize);
     }
-    const Node* root = reinterpret_cast<Node*>(rootRaw);
+    const NodeBase* root = reinterpret_cast<NodeBase*>(rootRaw);
     __syncthreads();
 */
 
     for (int i = index; i < n; i += stride) {
-        tids[i] = btree_lookup(root, keys[i]);
-        //tids[i] = btree::cuda::btree_lookup_with_hints(root, keys[i]);
+        tids[i] = btree_t::lookup(root, keys[i]);
+        //tids[i] = btree_t::lookup_with_hints(root, keys[i]);
     }
 }
 
-__global__ void btree_bulk_cooperative_lookup(const Node* __restrict__ root, unsigned threadCount, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+__global__ void btree_bulk_cooperative_lookup(const btree_t::NodeBase* __restrict__ root, unsigned threadCount, unsigned n, const my_key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 //if (index < 32 || index > 63) return;
     for (int i = index; i < threadCount; i += stride) {
   //      printf("i: %d\n", i);
-        const auto tid = btree_cooperative_lookup(i < n, root, keys[i]);
+        const auto tid = btree_t::cooperative_lookup(i < n, root, keys[i]);
         if (i < n) tids[i] = tid;
     }
 }
 
 /*
-__global__ void btree_bulk_lookup_serialized(const Node* __restrict__ tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+__global__ void btree_bulk_lookup_serialized(const NodeBase* __restrict__ tree, unsigned n, const btree::my_key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     enum { MAX_ACTIVE = 16, RUNS = 32 / MAX_ACTIVE };
 
     const int lane_id = threadIdx.x % 32;
@@ -80,7 +82,7 @@ __global__ void btree_bulk_lookup_serialized(const Node* __restrict__ tree, unsi
 */
 
 template<unsigned MAX_ACTIVE>
-__global__ void btree_bulk_lookup_serialized(const Node* __restrict__ tree, unsigned n, const btree::key_t* __restrict__ keys, payload_t* __restrict__ tids) {
+__global__ void btree_bulk_lookup_serialized(const btree_t::NodeBase* __restrict__ tree, unsigned n, const my_key_t* __restrict__ keys, payload_t* __restrict__ tids) {
     //enum { MAX_ACTIVE = 16, RUNS = 32 / MAX_ACTIVE };
 
     const int lane_id = threadIdx.x % 32;
@@ -93,8 +95,8 @@ __global__ void btree_bulk_lookup_serialized(const Node* __restrict__ tree, unsi
     for (int i = index; i < n; i += stride) {
         //printf("ative mask: %d\n", active_lanes);
         if (active_lanes & lane_mask) {
-            tids[i] = btree_lookup(tree, keys[i]);
-            //tids[i] = btree::cuda::btree_lookup_with_hints(tree, keys[i]);
+            tids[i] = btree_t::lookup(tree, keys[i]);
+            //tids[i] = btree_t::lookup_with_hints(tree, keys[i]);
         }
     }
 }
@@ -107,14 +109,15 @@ int main(int argc, char** argv) {
     }
     std::cout << "index size: " << numElements << std::endl;
 
-    std::vector<btree::key_t> keys(numElements);
+    std::vector<my_key_t> keys(numElements);
     std::iota(keys.begin(), keys.end(), 0);
 
-    auto tree = btree::construct(keys, 0.9);
+    btree_t tree;
+    tree.construct(keys, 0.9);
     for (unsigned i = 0; i < numElements; ++i) {
         //printf("lookup %d\n", i);
-        btree::payload_t value;
-        bool found = btree::lookup(tree, keys[i], value);
+        payload_t value;
+        bool found = tree.lookup(keys[i], value);
         if (!found) throw 0;
     }
 
@@ -128,21 +131,20 @@ int main(int argc, char** argv) {
     std::cout << "lookup scale factor: " << lookupFactor << " numAugmentedLookups: " << numAugmentedLookups << std::endl;
 
     // generate lookup keys
-    std::vector<btree::key_t> lookupKeys(numAugmentedLookups);
+    std::vector<my_key_t> lookupKeys(numAugmentedLookups);
     std::iota(lookupKeys.begin(), lookupKeys.end(), 0);
     std::shuffle(std::begin(lookupKeys), std::end(lookupKeys), rng);
     // TODO zipfian lookup patterns
 
     // copy lookup keys
-    btree::key_t* d_lookupKeys;
-    cudaMalloc(&d_lookupKeys, numAugmentedLookups*sizeof(btree::key_t));
-    cudaMemcpy(d_lookupKeys, lookupKeys.data(), numAugmentedLookups*sizeof(btree::key_t), cudaMemcpyHostToDevice);
-    btree::payload_t* d_tids;
+    my_key_t* d_lookupKeys;
+    cudaMalloc(&d_lookupKeys, numAugmentedLookups*sizeof(my_key_t));
+    cudaMemcpy(d_lookupKeys, lookupKeys.data(), numAugmentedLookups*sizeof(my_key_t), cudaMemcpyHostToDevice);
+    payload_t* d_tids;
     cudaMalloc(&d_tids, numAugmentedLookups*sizeof(decltype(d_tids)));
 
     //btree::prefetchTree(tree, 0);
-    auto d_tree = tree;
-    d_tree = btree::copy_btree_to_gpu(tree);
+    auto d_tree = tree.copy_btree_to_gpu(tree.root);
 
     int blockSize = 32;
     int numBlocks = (numAugmentedLookups + blockSize - 1) / blockSize;
@@ -166,7 +168,8 @@ int main(int argc, char** argv) {
     } else {
         kernelStart = std::chrono::high_resolution_clock::now();
         for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-            btree_bulk_cooperative_lookup<<<numBlocks, blockSize>>>(d_tree, threadCount, numAugmentedLookups, d_lookupKeys, d_tids);
+            btree_bulk_lookup<<<numBlocks, blockSize>>>(d_tree, numAugmentedLookups, d_lookupKeys, d_tids);
+            //btree_bulk_cooperative_lookup<<<numBlocks, blockSize>>>(d_tree, threadCount, numAugmentedLookups, d_lookupKeys, d_tids);
             cudaDeviceSynchronize();
         }
     }
@@ -179,7 +182,7 @@ int main(int argc, char** argv) {
     if constexpr (activeLanes == 32) {
         // validate results
         printf("validating results...\n");
-        std::unique_ptr<btree::payload_t[]> h_tids(new btree::payload_t[numElements]);
+        std::unique_ptr<payload_t[]> h_tids(new payload_t[numElements]);
         cudaMemcpy(h_tids.get(), d_tids, numElements*sizeof(decltype(d_tids)), cudaMemcpyDeviceToHost);
         for (unsigned i = 0; i < numElements; ++i) {
             //printf("tid: %lu key[i]: %lu\n", reinterpret_cast<uint64_t>(h_tids[i]), lookupKeys[i]);

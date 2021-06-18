@@ -1,11 +1,14 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 #include <limits>
 
 #include "cuda_utils.cuh"
+#include "search.cuh"
 
 namespace index_structures {
 
@@ -217,11 +220,12 @@ struct btree {
     }
 */
 
-    __host__ bool lookup(const NodeBase* tree, key_t key, value_t& result) {
-        NodeBase* node = tree;
+    __host__ bool lookup(key_t key, value_t& result) {
+        assert(root);
+        NodeBase* node = root;
         while (!node->header.isLeaf) {
             const InnerNode* inner = static_cast<const InnerNode*>(node);
-            unsigned pos = std::lower_bound(inner->keys, inner->keys + inner->count, key) - inner->keys;
+            unsigned pos = std::lower_bound(inner->keys, inner->keys + inner->header.count, key) - inner->keys;
             //cout << "inner pos: " << pos << endl;
             node = inner->children[pos];
             if (node == nullptr) {
@@ -230,7 +234,7 @@ struct btree {
         }
 
         const LeafNode* leaf = static_cast<const LeafNode*>(node);
-        unsigned pos = std::lower_bound(leaf->keys, leaf->keys + leaf->header.count, key);
+        unsigned pos = std::lower_bound(leaf->keys, leaf->keys + leaf->header.count, key) - leaf->keys;
         //cout << "pos: " << pos << endl;
         if ((pos < leaf->header.count) && (leaf->keys[pos] == key)) {
             result = leaf->payloads[pos];
@@ -329,7 +333,8 @@ struct btree {
             unsigned pos = branchy_binary_search(key, inner->keys, inner->header.count);
             //unsigned pos = linear_search(key, inner->keys, inner->header.count);
             //printf("inner pos: %d\n", pos);
-            node = node->children[pos];/*
+            node = inner->children[pos];
+            /*
             if (node == nullptr) {
                 return Not_Found;
             }*/
