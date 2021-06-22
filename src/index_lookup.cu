@@ -25,17 +25,20 @@
 
 using namespace std;
 
-static const int blockSize = 256;
-static const unsigned maxRepetitions = 1;
+static const int blockSize = 64;
+//static const int blockSize = 256; // best for sorting on pascal
+static const unsigned maxRepetitions = 10;
 static const unsigned activeLanes = 32;
 static const unsigned defaultNumLookups = 1e8;
 static unsigned defaultNumElements = 1e7;
 static const unsigned max_bits = 26;
+static const bool partitial_sorting = false;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
 //using index_type = lower_bound_index<key_t, value_t>;
 using index_type = harmonia_index<key_t, value_t>;
+//using index_type = btree_index<key_t, value_t>;
 
 using indexed_allocator_t = cuda_allocator<key_t>;
 using lookup_keys_allocator_t = cuda_allocator<key_t>;
@@ -84,15 +87,10 @@ template<
 __global__ void lookup_kernel_with_sorting(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
-/*
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-*/
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
     typedef cub::BlockLoad<key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
 
     typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
-//    typedef cub::BlockRadixSort<key_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
 
     __shared__ union TempStorage {
         // Allocate shared memory for BlockLoad
@@ -115,16 +113,12 @@ __global__ void lookup_kernel_with_sorting(const IndexStructureType index_struct
     __syncthreads(); // ensure that all shared variables are initialized
 */
 
-//    uint32_t read = 0;
-
-if (lane_id == 0) printf("warp: %d n: %d BLOCK_THREADS: %d ITEMS_PER_ITERATION: %d\n", warp_id, n, BLOCK_THREADS, ITEMS_PER_ITERATION);
-
-//    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
+    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
     const unsigned tile_size = min(n, (n + BLOCK_THREADS - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
     const unsigned tid_limit = min(tid + tile_size, n);
 
-    if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+//if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
 
     const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
 
@@ -162,14 +156,16 @@ if (lane_id == 0) printf("warp: %d n: %d BLOCK_THREADS: %d ITEMS_PER_ITERATION: 
 
         __syncthreads();
 
+#if 0
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
 //if (lane_id == 0) printf("warp: %d iteration: %d - sorting... ===\n", warp_id, i);
-            BlockRadixSortT(temp_storage.sort).Sort(thread_data, 0, max_bits); // TODO
+            BlockRadixSortT(temp_storage.sort).Sort(thread_data, 4, max_bits); // TODO
              __syncthreads();
         }/* else {
 //if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
         }*/
+#endif
 
         // empty buffer
         unsigned old;
@@ -183,7 +179,6 @@ if (lane_id == 0) printf("warp: %d n: %d BLOCK_THREADS: %d ITEMS_PER_ITERATION: 
 
             if (actual_count == 0) break;
 
-            // TODO perform lookup
             bool active = lane_id < actual_count;
 
             uint32_t assoc_tid = 0;
@@ -232,6 +227,9 @@ void generate_datasets(std::vector<key_t>& keys, std::vector<key_t>& lookups) {
 
     std::uniform_int_distribution<> lookup_distrib(0, keys.size() - 1);
     std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distrib(rng)]; });
+
+//    std::sort(lookups.begin(), lookups.end());
+
 /*
     std::cout << "keys: " << stringify(keys.begin(), keys.end()) << std::endl;
     std::cout << "lookups: " << stringify(lookups.begin(), lookups.end()) << std::endl;
@@ -345,10 +343,15 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
 
 template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_lookup_keys, unsigned num_lookup_keys) {
-//    int num_blocks = 1; // TODO (num_lookup_keys + blockSize - 1) / blockSize;
-    int num_sms;
-    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-    int num_blocks = num_sms*3; // TODO
+    int num_blocks;
+    
+    if constexpr (!partitial_sorting) {
+        num_blocks = (num_lookup_keys + blockSize - 1) / blockSize;
+    } else {
+        int num_sms;
+        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
+        num_blocks = num_sms*3; // TODO
+    }
     printf("numblocks: %d\n", num_blocks);
 
     // create result array
@@ -358,8 +361,11 @@ auto run_lookup_benchmark(IndexStructureType index_structure, const key_t* d_loo
     printf("executing kernel...\n");
     auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-//        lookup_kernel<<<num_blocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
-        lookup_kernel_with_sorting<blockSize, 4, IndexStructureType><<<num_blocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
+        if constexpr (!partitial_sorting) {
+            lookup_kernel<<<num_blocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
+        } else {
+            lookup_kernel_with_sorting<blockSize, 4, IndexStructureType><<<num_blocks, blockSize>>>(index_structure, num_lookup_keys, d_lookup_keys, d_tids);
+        }
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
