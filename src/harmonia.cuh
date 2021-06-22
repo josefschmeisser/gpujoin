@@ -543,21 +543,31 @@ struct harmonia_tree {
 
     __host__ void optimize_ntg(const std::vector<key_t>& sample) {
         std::vector<unsigned> ntg_degrees;
-	unsigned current_ntg_degree = 5;
+//	unsigned current_ntg_degree = 5;
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
-
+            unsigned current_ntg_degree = 5;
+            double avg_steps_before, avg_steps_after;
             uint64_t acc_steps = 0;
             for (const key_t key : sample) {
                 acc_steps += count_ntg_steps_at_target_depth(current_depth, current_ntg_degree, key);
-
-                std::cout << "depth " << current_depth << " acc_steps: " << acc_steps << std::endl;
             }
-            auto avg_steps = acc_steps/sample.size();
+            avg_steps_before = static_cast<double>(acc_steps)/sample.size();
 
-	    std::cout << "depth " << current_depth << " avg_steps: " << avg_steps << std::endl;
+	    std::cout << "depth " << current_depth << " avg_steps_before: " << avg_steps_before << std::endl;
 
             // narrow the thread group
+            do {
+                current_ntg_degree -= 1;
+                for (const key_t key : sample) {
+                    acc_steps += count_ntg_steps_at_target_depth(current_depth, current_ntg_degree, key);
+                }
+                avg_steps_after = static_cast<double>(acc_steps)/sample.size();
+                std::cout << "depth " << current_depth << " avg_steps_after : " << avg_steps_after << std::endl;
 
+            } while (2*avg_steps_before/avg_steps_after > 1. && current_ntg_degree > 0);
+            current_ntg_degree += 1; // the final narrowing does not improve the throughput
+
+	    std::cout << "depth " << current_depth << " final ntg_degree: " << current_ntg_degree << std::endl;
 	    ntg_degrees.push_back(current_ntg_degree);
         }
     }
