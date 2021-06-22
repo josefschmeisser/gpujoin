@@ -519,8 +519,8 @@ struct harmonia_tree {
 
 	const unsigned ntg_size = 1u << ntg_degree;
 	const unsigned lb = std::lower_bound(arr, arr + max_keys, x) - arr;
-        printf("lb: %u\n", lb);
-	return (lb + ntg_size - 1)/ntg_size;
+//        printf("lb: %u\n", lb);
+	return 1 + std::min(lb, ntg_size - 1)/ntg_size;
     }
 
 
