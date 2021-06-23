@@ -411,12 +411,12 @@ struct harmonia_tree {
     }
 
     // TODO test
-    __device__ unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
+    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         unsigned lower_bound = max_keys;
-	const unsigned my_lane_id = lane_id();
-	const unsigned ntg_size = 1u << ntg_degree;
+        const unsigned my_lane_id = lane_id();
+        const unsigned ntg_size = 1u << ntg_degree;
         unsigned leader = ntg_size*(my_lane_id >> ntg_degree); // equivalent to ntg_size*(my_lane_id div ntg_size)
         const int lane_offset = my_lane_id - leader;
         const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, ntg_size) << leader;
@@ -451,7 +451,7 @@ struct harmonia_tree {
     }
 
     // utilize the full warp for each query
-    __device__ unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
+    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         unsigned lower_bound = max_keys;
@@ -488,7 +488,7 @@ struct harmonia_tree {
         return lower_bound;
     }
 #if 0
-    __device__ unsigned cooperative_linear_search_unconstrained(const bool active, const key_t x, const key_t* arr, const unsigned ntg_size) {
+    __device__ static unsigned cooperative_linear_search_unconstrained(const bool active, const key_t x, const key_t* arr, const unsigned ntg_size) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         unsigned lower_bound = max_keys;
@@ -536,7 +536,8 @@ struct harmonia_tree {
         for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
             const key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
-            lb = cooperative_linear_search(active, key, node_start, tree->ntg_degree[current_depth]);
+//            lb = cooperative_linear_search<4>(active, key, node_start);
+            lb = cooperative_linear_search(active, key, node_start, tree->ntg_degree[current_depth]); // TODO
             actual = node_start[lb];
 
             unsigned new_pos = tree->children[pos] + lb;
@@ -548,7 +549,8 @@ struct harmonia_tree {
         }
 
         if (active && pos < tree->size && key == actual) {
-            return tree->values[pos];
+//            return tree->values[pos];
+            return pos; // FIXME compile time switch
         }
 
         return not_found;
@@ -607,7 +609,7 @@ struct harmonia_tree {
                 avg_steps_after = static_cast<double>(acc_steps)/sample.size();
                 std::cout << "depth " << current_depth << " avg_steps_after : " << avg_steps_after << std::endl;
 
-                factor = 1.5*avg_steps_before/avg_steps_after;
+                factor = 1.7*avg_steps_before/avg_steps_after;
                 std::cout << "factor: " << factor << std::endl;
                 avg_steps_before = avg_steps_after;
             } while (factor > 1. && current_ntg_degree > 1);
