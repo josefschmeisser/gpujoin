@@ -54,6 +54,16 @@ add_executable(index_lookup src/index_lookup.cu)
 add_dependencies(index_lookup RadixSpline)
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa)
 target_include_directories(index_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
+# https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
+# https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
+target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+#                       --generate-line-info
+#                       --use_fast_math
+#                       --relocatable-device-code=true
+#                        -Xptxas --def-load-cache=cg
+#                        -Xptxas -dscm=cg
+#                        -lineinfo
+                       >)
 
 add_subdirectory(src/tpch)
 add_subdirectory(test)
