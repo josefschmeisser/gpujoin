@@ -290,7 +290,7 @@ struct harmonia_tree {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads within the warp participate
 
         const unsigned my_lane_id = lane_id();
-        unsigned leader = WINDOW_SIZE*(my_lane_id >> Degree);
+        unsigned leader = WINDOW_SIZE*(my_lane_id >> Degree); // equivalent to WINDOW_SIZE*(my_lane_id div WINDOW_SIZE)
         const uint32_t window_mask = ((1u << WINDOW_SIZE) - 1u) << leader;
         assert(my_lane_id >= leader);
         const int lane_offset = my_lane_id - leader;
@@ -310,6 +310,7 @@ struct harmonia_tree {
 
                 key_t value;
                 if (key_idx < max_keys) value = leader_arr[key_idx];
+//                const key_t value = leader_arr[(key_idx < max_keys) ? key_idx : 0]; // almost 10 percent slower than the conditional version
                 matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
                 exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
             }
@@ -409,16 +410,16 @@ struct harmonia_tree {
         return not_found;
     }
 
-#if 1
+    // TODO test
     __device__ unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         unsigned lower_bound = max_keys;
 	const unsigned my_lane_id = lane_id();
 	const unsigned ntg_size = 1u << ntg_degree;
-        unsigned leader = ntg_size*(my_lane_id >> ntg_degree);
+        unsigned leader = ntg_size*(my_lane_id >> ntg_degree); // equivalent to ntg_size*(my_lane_id div ntg_size)
         const int lane_offset = my_lane_id - leader;
-        const uint32_t window_mask = (ntg_size - 1u) << leader;
+        const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, ntg_size) << leader;
         assert(my_lane_id >= leader);
 
         // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
@@ -449,7 +450,84 @@ struct harmonia_tree {
         return lower_bound;
     }
 
-#if 1
+    // utilize the full warp for each query
+    __device__ unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
+        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
+
+        unsigned lower_bound = max_keys;
+	const unsigned my_lane_id = lane_id();
+        unsigned leader = 0;
+        const int lane_offset = my_lane_id - leader;
+        assert(my_lane_id >= leader);
+
+        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
+        for (unsigned shift = 0; shift < 32; ++shift) {
+            int key_idx = lane_offset - 32;
+            const key_t leader_x = __shfl_sync(FULL_MASK, x, leader);
+            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(FULL_MASK, reinterpret_cast<uint64_t>(arr), leader));
+
+            const auto leader_active = __shfl_sync(FULL_MASK, active, leader);
+            unsigned exhausted_cnt = leader_active ? 0 : 32;
+            uint32_t matches = 0;
+            while (matches == 0 && exhausted_cnt < 32) {
+                key_idx += 32;
+
+                key_t value;
+                if (key_idx < max_keys) value = leader_arr[key_idx];
+                matches = __ballot_sync(FULL_MASK, key_idx < max_keys && value >= leader_x);
+                exhausted_cnt = __popc(__ballot_sync(FULL_MASK, key_idx >= max_keys));
+            }
+
+            if (my_lane_id == leader && matches != 0) {
+                lower_bound = key_idx + __ffs(matches) - 1 - leader;
+            }
+
+            leader += 1;
+        }
+
+        return lower_bound;
+    }
+#if 0
+    __device__ unsigned cooperative_linear_search_unconstrained(const bool active, const key_t x, const key_t* arr, const unsigned ntg_size) {
+        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
+
+        unsigned lower_bound = max_keys;
+	const unsigned my_lane_id = lane_id();
+
+        unsigned leader = ntg_size*(my_lane_id / ntg_size); // subtract the remainder
+        const int lane_offset = my_lane_id - leader;
+        const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, ntg_size) << leader;
+        assert(my_lane_id >= leader);
+
+        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
+        for (unsigned shift = 0; shift < ntg_size; ++shift) {
+            int key_idx = lane_offset - ntg_size;
+            const key_t leader_x = __shfl_sync(window_mask, x, leader);
+            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
+
+            const auto leader_active = __shfl_sync(window_mask, active, leader);
+            unsigned exhausted_cnt = leader_active ? 0 : ntg_size;
+            uint32_t matches = 0;
+            while (matches == 0 && exhausted_cnt < ntg_size) {
+                key_idx += ntg_size;
+
+                key_t value;
+                if (key_idx < max_keys) value = leader_arr[key_idx];
+                matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
+                exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
+            }
+
+            if (my_lane_id == leader && matches != 0) {
+                lower_bound = key_idx + __ffs(matches) - 1 - leader;
+            }
+
+            leader += 1;
+        }
+
+        return lower_bound;
+    }
+#endif
+
     __device__ static value_t ntg_lookup(const bool active, const device_handle_t* tree, const key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
@@ -475,56 +553,15 @@ struct harmonia_tree {
 
         return not_found;
     }
-#endif
 
     __host__ unsigned count_ntg_steps(const key_t x, const key_t* arr, const unsigned ntg_degree) {
-#if 0
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
-
-        unsigned lower_bound = max_keys;
-	const unsigned my_lane_id = lane_id();
 	const unsigned ntg_size = 1u << ntg_degree;
-        unsigned leader = ntg_size*(my_lane_id >> ntg_degree);
-        const int lane_offset = my_lane_id - leader;
-        const uint32_t window_mask = (ntg_size - 1u) << leader;
-        assert(my_lane_id >= leader);
-
-        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
-        for (unsigned shift = 0; shift < ntg_size; ++shift) {
-            int key_idx = lane_offset - ntg_size;
-            const key_t leader_x = __shfl_sync(window_mask, x, leader);
-            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
-
-            const auto leader_active = __shfl_sync(window_mask, active, leader);
-            unsigned exhausted_cnt = leader_active ? 0 : ntg_size;
-            uint32_t matches = 0;
-            while (matches == 0 && exhausted_cnt < ntg_size) {
-                key_idx += ntg_size;
-
-                key_t value;
-                if (key_idx < max_keys) value = leader_arr[key_idx];
-                matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
-                exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
-            }
-
-            if (my_lane_id == leader && matches != 0) {
-                lower_bound = key_idx + __ffs(matches) - 1 - leader;
-            }
-
-            leader += 1;
-        }
-
-        return lower_bound;
-#endif
-
-	const unsigned ntg_size = 1u << ntg_degree;
+//        std::cout << "ntg_degree: " << ntg_degree << " ntg_size: " << ntg_size << std::endl;
 	const unsigned lb = std::lower_bound(arr, arr + max_keys, x) - arr;
-//        printf("lb: %u\n", lb);
-	return 1 + std::min(lb, ntg_size - 1)/ntg_size;
+//        std::cout << "lb: " << lb << std::endl;
+	return 1 + std::min(lb, max_keys - 1)/ntg_size;
     }
 
-
-//    __host__ unsigned optimize_ntg_degree_for_level(const unsigned target_depth, const unsigned current_ntg_degree) {
     // return: the number of ntg windows shifts required
     __host__ unsigned count_ntg_steps_at_target_depth(const unsigned target_depth, const unsigned current_ntg_degree, const key_t key) {
         // traverse upper levels
@@ -538,12 +575,15 @@ struct harmonia_tree {
  
         // reached the target depth; count the ntg window shifts 
 	const key_t* node_start = &keys[max_keys*pos];
-	return count_ntg_steps(key, node_start, current_ntg_degree);
+	const auto steps = count_ntg_steps(key, node_start, current_ntg_degree);
+//        std::cout << "steps: " << steps << " key: " << key << std::endl;
+        return steps;
     }
 
-    __host__ void optimize_ntg(const std::vector<key_t>& sample) {
+//    __host__ void optimize_ntg(const std::vector<key_t>& sample) {
+    __host__ void optimize_ntg(std::vector<key_t>& sample) {
+//sample.resize(20);
         std::vector<unsigned> ntg_degrees;
-//	unsigned current_ntg_degree = 5;
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             unsigned current_ntg_degree = 5;
             double avg_steps_before, avg_steps_after;
@@ -556,22 +596,27 @@ struct harmonia_tree {
 	    std::cout << "depth " << current_depth << " avg_steps_before: " << avg_steps_before << std::endl;
 
             // narrow the thread group
+//            unsigned reductions = 
+            double factor;
             do {
                 current_ntg_degree -= 1;
+                acc_steps = 0;
                 for (const key_t key : sample) {
                     acc_steps += count_ntg_steps_at_target_depth(current_depth, current_ntg_degree, key);
                 }
                 avg_steps_after = static_cast<double>(acc_steps)/sample.size();
                 std::cout << "depth " << current_depth << " avg_steps_after : " << avg_steps_after << std::endl;
 
-            } while (2*avg_steps_before/avg_steps_after > 1. && current_ntg_degree > 0);
+                factor = 1.5*avg_steps_before/avg_steps_after;
+                std::cout << "factor: " << factor << std::endl;
+                avg_steps_before = avg_steps_after;
+            } while (factor > 1. && current_ntg_degree > 1);
             current_ntg_degree += 1; // the final narrowing does not improve the throughput
 
-	    std::cout << "depth " << current_depth << " final ntg_degree: " << current_ntg_degree << std::endl;
+	    std::cout << "=== depth " << current_depth << " final ntg_degree: " << current_ntg_degree << std::endl;
 	    ntg_degrees.push_back(current_ntg_degree);
         }
     }
-#endif
 };
 
 }
