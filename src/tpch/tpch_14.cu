@@ -11,12 +11,7 @@
 #include <cstring>
 #include <chrono>
 
-
-//#include <cub/block/block_load.cuh>
-//#include <cub/block/block_store.cuh>
 #include <cub/block/block_radix_sort.cuh>
-
-//#include "thirdparty/cub_test/test_util.h"
 
 #include "cuda_utils.cuh"
 #include "LinearProbingHashTable.cuh"
@@ -40,7 +35,6 @@ static const uint32_t upper_shipdate = 2449992; // 1995-10-01
 static const uint32_t invalid_tid __attribute__((unused)) = std::numeric_limits<uint32_t>::max();
 
 __device__ unsigned int count = 0;
-__shared__ bool isLastBlockDone;
 __managed__ int tupleCount;
 
 using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
@@ -114,80 +108,6 @@ __global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__
         atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
 }
-
-
-#if 0
-struct btree_index {
-    const btree::Node* tree_;
-
-    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
-        auto tree = btree::construct(h_column, 0.7);
-        if (prefetch_index) {
-            btree::prefetchTree(tree, 0);
-        }
-        tree_ = tree;
-    }
-
-    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-        return btree::cuda::btree_lookup(tree_, key);
-    //    return btree::cuda::btree_lookup_with_hints(tree_, key); // TODO
-    }
-
-    __device__ __forceinline__ btree::payload_t cooperative_lookup(bool active, const btree::key_t key) const {
-        return btree::cuda::btree_cooperative_lookup(active, tree_, key);
-    }
-};
-
-struct radix_spline_index {
-    rs::DeviceRadixSpline<btree::key_t>* d_rs_;
-    const btree::key_t* d_column_;
-
-    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
-        d_column_ = d_column;
-        auto h_rs = rs::build_radix_spline(h_column);
-
-        // copy radix spline
-        const auto start = std::chrono::high_resolution_clock::now();
-        d_rs_ = rs::copy_radix_spline<rs_placement_policy>(h_rs);
-        const auto finish = std::chrono::high_resolution_clock::now();
-        const auto duration = chrono::duration_cast<chrono::microseconds>(finish - start).count()/1000.;
-        std::cout << "radixspline transfer time: " << duration << " ms\n";
-
-        auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline<btree::key_t>*>(&h_rs);
-        assert(h_column.size() == rrs->num_keys_);
-    }
-
-    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-        const unsigned estimate = rs::cuda::get_estimate(d_rs_, key);
-        const unsigned begin = (estimate < d_rs_->max_error_) ? 0 : (estimate - d_rs_->max_error_);
-        const unsigned end = (estimate + d_rs_->max_error_ + 2 > d_rs_->num_keys_) ? d_rs_->num_keys_ : (estimate + d_rs_->max_error_ + 2);
-
-        const auto bound_size = end - begin;
-        const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const btree::key_t& a, const btree::key_t& b) -> int {
-            return a < b;
-        });
-        return (pos < d_rs_->num_keys_) ? static_cast<btree::payload_t>(pos) : invalid_tid;
-    }
-};
-
-struct lower_bound_index {
-    struct device_data_t {
-        const btree::key_t* d_column;
-        const unsigned d_size;
-    }* device_data;
-
-    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
-        device_data_t tmp { d_column, static_cast<unsigned>(h_column.size()) };
-        cudaMalloc(&device_data, sizeof(device_data_t));
-        cudaMemcpy(device_data, &tmp, sizeof(device_data_t), cudaMemcpyHostToDevice);
-    }
-
-    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-//        return branchy_binary_search(key, device_data->d_column, device_data->d_size);
-        return branch_free_binary_search(key, device_data->d_column, device_data->d_size);
-    }
-};
-#endif
 
 template<class IndexStructureType>
 __global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
@@ -287,12 +207,6 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
     }
 }
 
-
-/*
-__managed__ unsigned total_scanned = 0;
-__managed__ unsigned total_matches = 0;
-*/
-
 template<
     int   BLOCK_THREADS,
     int   ITEMS_PER_THREAD,
@@ -301,17 +215,9 @@ __launch_bounds__ (BLOCK_THREADS)
 __global__ void ij_full_kernel_2(
     const lineitem_table_plain_t* __restrict__ lineitem,
     const unsigned lineitem_size,
-//    const part_table_plain_t* __restrict__ part,
     IndexStructureType index_structure,
     JoinEntry* __restrict__ join_entries)
 {
-/*
-    const char* prefix = "PROMO";
-
-    int64_t sum1 = 0;
-    int64_t sum2 = 0;
-*/
-
     enum {
         MAX_ITEMS_PER_WARP = ITEMS_PER_THREAD * 32,
         WARPS_PER_BLOCK = BLOCK_THREADS / 32,
@@ -328,7 +234,6 @@ __global__ void ij_full_kernel_2(
     __shared__ uint32_t fully_occupied_warps;
     __shared__ uint32_t exhausted_warps;
 
-// TODO
     __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
     /*
@@ -414,8 +319,6 @@ __global__ void ij_full_kernel_2(
             }
 
             tid += BLOCK_THREADS; // each tile is organized as a consecutive succession of its corresponding block
-
-//            __syncwarp();
         }
 
         __syncthreads(); // wait until all threads have gathered enough elements
