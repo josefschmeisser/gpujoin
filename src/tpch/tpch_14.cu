@@ -1,14 +1,12 @@
 #include "common.hpp"
 
 #include <algorithm>
-#include <bits/stdint-uintn.h>
 #include <cstddef>
 #include <cstdio>
 #include <device_atomic_functions.h>
 #include <driver_types.h>
 #include <iostream>
 #include <limits>
-#include <math.h>
 #include <cassert>
 #include <cstring>
 #include <chrono>
@@ -20,25 +18,26 @@
 
 //#include "thirdparty/cub_test/test_util.h"
 
-
 #include "cuda_utils.cuh"
 #include "LinearProbingHashTable.cuh"
-#include "btree.cuh"
-#include "btree.cu"
-#include "rs.cu"
+#include "indexes.cuh"
 
 using namespace cub;
 
 using vector_copy_policy = vector_to_managed_array;
 using rs_placement_policy = vector_to_managed_array;
 
-static constexpr bool prefetch_index = false;
+using indexed_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_partkey)>;
+using payload_t = uint32_t;
+
+static constexpr bool prefetch_index __attribute__((unused)) = false;
 static constexpr bool sort_indexed_relation = true;
 static constexpr int block_size = 128;
 static int num_sms;
 
-const uint32_t lower_shipdate = 2449962; // 1995-09-01
-const uint32_t upper_shipdate = 2449992; // 1995-10-01
+static const uint32_t lower_shipdate = 2449962; // 1995-09-01
+static const uint32_t upper_shipdate = 2449992; // 1995-10-01
+static const uint32_t invalid_tid __attribute__((unused)) = std::numeric_limits<uint32_t>::max();
 
 __device__ unsigned int count = 0;
 __shared__ bool isLastBlockDone;
@@ -117,6 +116,7 @@ __global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__
 }
 
 
+#if 0
 struct btree_index {
     const btree::Node* tree_;
 
@@ -166,7 +166,7 @@ struct radix_spline_index {
         const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const btree::key_t& a, const btree::key_t& b) -> int {
             return a < b;
         });
-        return (pos < d_rs_->num_keys_) ? static_cast<btree::payload_t>(pos) : btree::invalidTid;
+        return (pos < d_rs_->num_keys_) ? static_cast<btree::payload_t>(pos) : invalid_tid;
     }
 };
 
@@ -183,12 +183,11 @@ struct lower_bound_index {
     }
 
     __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-//        return btree::cuda::branchy_binary_search(key, device_data->d_column, device_data->d_size);
-        return btree::cuda::branch_free_binary_search(key, device_data->d_column, device_data->d_size);
+//        return branchy_binary_search(key, device_data->d_column, device_data->d_size);
+        return branch_free_binary_search(key, device_data->d_column, device_data->d_size);
     }
 };
-
-using chosen_index_structure = radix_spline_index;// btree_index;
+#endif
 
 template<class IndexStructureType>
 __global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
@@ -206,8 +205,8 @@ __global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineit
         }
 
         auto payload = index_structure(lineitem->l_partkey[i]);
-        if (payload != btree::invalidTid) {
-            const size_t part_tid = reinterpret_cast<size_t>(payload);
+        if (payload != invalid_tid) {
+            const auto part_tid = reinterpret_cast<unsigned>(payload);
 
             const auto extendedprice = lineitem->l_extendedprice[i];
             const auto discount = lineitem->l_discount[i];
@@ -258,14 +257,14 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int i = index; i < lineitem_size + 31; i += stride) {
-        btree::payload_t payload = btree::invalidTid;
+        payload_t payload = invalid_tid;
         if (i < lineitem_size &&
             lineitem->l_shipdate[i] >= lower_shipdate &&
             lineitem->l_shipdate[i] < upper_shipdate) {
             payload = index_structure(lineitem->l_partkey[i]);
         }
 
-        int match = payload != btree::invalidTid;
+        int match = payload != invalid_tid;
         unsigned mask = __ballot_sync(FULL_MASK, match);
         unsigned my_lane = lane_id();
         unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
@@ -288,24 +287,6 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
     }
 }
 
-
-template<class T>
-__device__ T atomic_sub_safe(T* address, T val) {
-    unsigned expected, update, old;
-    old = *address;
-    do {
-        expected = old;
-        update = (old > val) ? (old - val) : 0;
-        old = atomicCAS(address, expected, update);
-    } while (expected != old);
-    return old;
-}
-
-
-template<class T>
-__forceinline__ __device__ T round_up_pow2(T value) {
-    return static_cast<T>(1) << (sizeof(T)*8 - __clz(value - 1));
-}
 
 /*
 __managed__ unsigned total_scanned = 0;
@@ -491,12 +472,17 @@ __global__ void ij_full_kernel_2(
 
         __syncthreads(); // wait until all threads have tried to fill their registers
 
-        if (fully_occupied_warps == WARPS_PER_BLOCK) {
+        if (fully_occupied_warps == WARPS_PER_BLOCK) {/*
             if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
             assert(join_pairs[0].l_partkey == (join_pairs_raw[0] & FULL_MASK));
-/*
-            BlockRadixSortT(temp_storage).SortBlockedToStriped(join_pairs_raw, 8, 21); // TODO
 */
+
+uint64_t* arr = nullptr;
+typedef uint64_t items_t[ITEMS_PER_THREAD];
+items_t& test = (items_t&)arr;
+
+            BlockRadixSortT(temp_storage).SortBlockedToStriped(test, 8, 21); // TODO
+
         }
 
         unsigned output_base = 0;
@@ -514,16 +500,16 @@ __global__ void ij_full_kernel_2(
             lane_dst_idx_prefix_sum += (lane_id >= offset) ? value : 0;
         }
         lane_dst_idx_prefix_sum -= local_idx;
-
+// FIXME warp excution order is not deterministic
         uint32_t active_lanes = __ballot_sync(FULL_MASK, local_idx > 0);
         for (unsigned i = 0; active_lanes != 0; ++i) {
             bool active = i < local_idx;
             auto& p = join_pairs[i];
-            const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
-//            const auto tid = index_structure(p.l_partkey);
+//            const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
+            const auto tid = index_structure(p.l_partkey);
 
             if (active) {
-                assert(tid != btree::invalidTid);
+                assert(tid != invalid_tid);
                 auto& join_entry = join_entries[output_base + lane_dst_idx_prefix_sum++];
                 join_entry.lineitem_tid = p.lineitem_tid;
                 join_entry.part_tid = tid;
@@ -599,12 +585,13 @@ struct helper {
         part_size = db.part.p_partkey.size();
 
         {
-            const auto start = std::chrono::high_resolution_clock::now();
+            using namespace std;
+            const auto start = chrono::high_resolution_clock::now();
             //auto [lineitem_device, lineitem_device_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
             std::tie(lineitem_device, lineitem_device_ptrs) = copy_relation<vector_copy_policy>(db.lineitem);
             //auto [part_device, part_device_ptrs] = copy_relation<vector_copy_policy>(db.part);
             std::tie(part_device, part_device_ptrs) = copy_relation<vector_copy_policy>(db.part);
-            const auto finish = std::chrono::high_resolution_clock::now();
+            const auto finish = chrono::high_resolution_clock::now();
             const auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
             std::cout << "transfer time: " << d << " ms\n";
         }
@@ -628,7 +615,7 @@ struct helper {
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 #endif
@@ -641,7 +628,7 @@ struct helper {
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 
@@ -665,7 +652,7 @@ struct helper {
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 
@@ -727,7 +714,7 @@ struct helper {
         compare_join_results(join_entries2, matches2, join_entries1, matches1);
         compare_join_results(join_entries1, matches1, join_entries2, matches2);
 
-        const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
+        const auto d1 = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
 
         num_blocks = (lineitem_size + block_size - 1) / block_size;
@@ -737,11 +724,13 @@ struct helper {
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start2).count()/1000.;
+        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - start2).count()/1000.;
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 
     void run_two_phase_ij_buffer() {
+        using namespace std;
+
         decltype(output_index) matches1 = 0;
 
         enum { BLOCK_THREADS = 128, ITEMS_PER_THREAD = 8 }; // TODO optimize
@@ -777,6 +766,8 @@ struct helper {
 
 template<class IndexType>
 void load_and_run_ij(const std::string& path, bool as_full_pipline_breaker) {
+    if (prefetch_index) { throw "not implemented"; }
+
     helper<IndexType> h;
     h.load_database(path);
     if (as_full_pipline_breaker) {
@@ -798,7 +789,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    helper<lower_bound_index> h;
+    helper<int> h;
     h.load_database(argv[1]);
     h.run_hj();
 #else
@@ -812,7 +803,7 @@ int main(int argc, char** argv) {
     switch (index_type) {
         case IndexType::btree: {
             printf("using btree\n");
-            load_and_run_ij<btree_index>(argv[1], full_pipline_breaker);
+            load_and_run_ij<btree_index<indexed_t, payload_t>>(argv[1], full_pipline_breaker);
             break;
         }/* TODO: add cooperative_lookup
         case IndexType::radixspline: {
