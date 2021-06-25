@@ -8,6 +8,18 @@ __forceinline__ __device__ unsigned lane_id() {
 }
 
 template<class T>
+__device__ T atomic_add_sat(T* address, T val, T saturation) {
+    unsigned expected, update, old;
+    old = *address;
+    do {
+        expected = old;
+        update = (old + val > saturation) ? saturation : old + val;
+        old = atomicCAS(address, expected, update);
+    } while (expected != old);
+    return old;
+}
+
+template<class T>
 __device__ T atomic_sub_safe(T* address, T val) {
     unsigned expected, update, old;
     old = *address;
