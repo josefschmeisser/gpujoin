@@ -212,7 +212,7 @@ template<
     int   ITEMS_PER_THREAD,
     class IndexStructureType >
 __launch_bounds__ (BLOCK_THREADS)
-__global__ void ij_full_kernel_2(
+__global__ void ij_lookup_kernel_2(
     const lineitem_table_plain_t* __restrict__ lineitem,
     const unsigned lineitem_size,
     IndexStructureType index_structure,
@@ -428,6 +428,134 @@ items_t& test = (items_t&)arr;
     }
 }
 
+#if 0
+template<
+    unsigned BLOCK_THREADS,
+    unsigned ITEMS_PER_THREAD,
+    class    IndexStructureType >
+__launch_bounds__ (BLOCK_THREADS)
+__global__ void ij_lookup_kernel_3(
+    const lineitem_table_plain_t* __restrict__ lineitem,
+    const unsigned lineitem_size,
+    const IndexStructureType index_structure,
+    JoinEntry* __restrict__ join_entries)
+{
+    enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
+
+    // shared memory entry type
+    union join_pair_t {
+        struct { // TODO high low
+            uint32_t l_partkey;
+            uint32_t lineitem_tid;
+        };
+        uint64_t raw;
+    };
+
+    typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+
+    __shared__ union TempStorage {
+        // Allocate shared memory for BlockLoad
+//        typename BlockLoad::TempStorage load;
+
+        typename BlockRadixSortT::TempStorage sort;
+    } temp_storage;
+
+//    __shared__ uint64_t buffer[ITEMS_PER_ITERATION];
+    __shared__ join_pair_t buffer[ITEMS_PER_ITERATION];
+    __shared__ uint32_t buffer_pos;
+
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
+
+//    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
+    unsigned tid_begin = blockIdx.x * tile_size; // first tid where scanning starts at each new iteration
+    const unsigned tid_limit = min(tid_begin + tile_size, lineitem_size);
+//if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+
+    const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
+
+    using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
+    uint64_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+    key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
+
+    for (unsigned i = 0; i < iteration_count; ++i) {
+        // reset shared memory variables
+        if (lane_id == 0) {
+            buffer_pos = 0;
+        }
+
+//if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
+
+        unsigned valid_items = min(ITEMS_PER_ITERATION, lineitem_size - tid_begin);
+//if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
+
+        #pragma unroll
+        for (unsigned j = 0; j < ITEMS_PER_THREAD; ++j) {
+            // sort_buffer::produce
+            payload_t payload = invalid_tid;
+            unsigned lineitem_tid = tid_begin + threadIdx.x*ITEMS_PER_THREAD + j;
+            if (lineitem_tid < lineitem_size &&
+                lineitem->l_shipdate[lineitem_tid] >= lower_shipdate &&
+                lineitem->l_shipdate[lineitem_tid] < upper_shipdate)
+            {
+//                payload = index_structure(lineitem->l_partkey[i]);
+                auto& join_pair = buffer[threadIdx.x*ITEMS_PER_THREAD + j];
+                join_pair.lineitem_tid = lineitem_tid;
+                join_pair.l_partkey = lineitem->l_partkey[lineitem_tid];
+                assert(join_pair.raw & 0xffffffff == lineitem_tid); // TODO
+            }
+        }
+
+        __syncthreads();
+
+#if 1
+        // we only perform the sort step when the buffer is completely filled
+        if (valid_items == ITEMS_PER_ITERATION) {
+//if (lane_id == 0) printf("warp: %d iteration: %d - sorting... ===\n", warp_id, i);
+            BlockRadixSortT(temp_storage.sort).Sort(thread_data, 4, 24); // TODO
+             __syncthreads();
+        }
+#endif
+
+        // empty buffer
+        unsigned old;
+        do {
+            if (lane_id == 0) {
+                old = atomic_add_sat(&buffer_pos, 32u, valid_items);
+            }
+            old = __shfl_sync(FULL_MASK, old, 0);
+            unsigned actual_count = min(valid_items - old, 32);
+//if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+
+            if (actual_count == 0) break;
+
+            bool active = lane_id < actual_count;
+
+            uint32_t assoc_tid = 0;
+            key_t element = 0xffffffff;
+            if (active) {
+                assoc_tid = buffer[old + lane_id] >> 32;
+                element = buffer[old + lane_id] & 0xffffffff;
+//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+            }
+
+            const auto tid_b = index_structure.cooperative_lookup(active, element);
+            if (active) {
+//printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+//                tids[assoc_tid] = tid_b;
+                // TODO
+            }
+
+//printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
+
+        } while (true);//actual_count == 32);
+
+
+        tid_begin += valid_items;
+    }
+}
+#endif
 
 __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const part_table_plain_t* __restrict__ part, const JoinEntry* __restrict__ join_entries, size_t n) {
     int64_t sum1 = 0;
@@ -595,7 +723,7 @@ struct helper {
         int num_blocks = num_sms*2; // TODO
 
         const auto start1 = std::chrono::high_resolution_clock::now();
-        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
+        ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
         cudaDeviceSynchronize();
 
         cudaError_t error = cudaMemcpyFromSymbol(&matches1, output_index, sizeof(matches1), 0, cudaMemcpyDeviceToHost);
@@ -646,7 +774,7 @@ struct helper {
         int num_blocks = num_sms*4; // TODO
 
         const auto start1 = std::chrono::high_resolution_clock::now();
-        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
+        ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
