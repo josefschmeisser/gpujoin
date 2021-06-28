@@ -557,6 +557,246 @@ __global__ void ij_lookup_kernel_3(
 }
 #endif
 
+
+
+
+
+
+
+
+template<
+    unsigned BLOCK_THREADS,
+    unsigned ITEMS_PER_THREAD,
+    class    IndexStructureType >
+__launch_bounds__ (BLOCK_THREADS)
+__global__ void ij_lookup_kernel_3(
+    const lineitem_table_plain_t* __restrict__ lineitem,
+    const unsigned lineitem_size,
+    const IndexStructureType index_structure,
+    JoinEntry* __restrict__ join_entries)
+{
+    enum {
+        ITEMS_PER_WARP = ITEMS_PER_THREAD * 32, // soft upper limit
+        WARPS_PER_BLOCK = BLOCK_THREADS / 32,
+        // the last summand ensures that each thread can write one more element during the last scan iteration
+//        BUFFER_SIZE = ITEMS_PER_THREAD*BLOCK_THREADS + BLOCK_THREADS,
+        BUFFER_SIZE = BLOCK_THREADS*(ITEMS_PER_THREAD + 1),
+        BUFFER_SOFT_LIMIT = ITEMS_PER_THREAD*BLOCK_THREADS
+    };
+
+    // shared memory entry type
+    union join_pair_t {
+        struct { // TODO high low
+            uint32_t l_partkey;
+            uint32_t lineitem_tid;
+        };
+        uint64_t raw;
+    };
+
+    typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+
+    __shared__ join_pair_t buffer[ITEMS_PER_ITERATION];
+    __shared__ uint32_t buffer_idx;
+
+    __shared__ uint32_t fully_occupied_warps;
+    __shared__ uint32_t exhausted_warps;
+
+    __shared__ typename BlockRadixSortT::TempStorage temp_storage;
+
+
+    using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
+    uint64_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+    key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
+
+
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
+
+//    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
+//    unsigned tid_begin = blockIdx.x * tile_size; // first tid where scanning starts at each new iteration
+    unsigned tid = blockIdx.x * tile_size + threadIdx.x
+    const unsigned tid_limit = min(tid_begin + tile_size, lineitem_size);
+//if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+
+    // initialize shared variables
+    if (warp_id == 0 && lane_id == 0) {
+        buffer_idx = 0;
+        fully_occupied_warps = 0;
+        exhausted_warps = 0;
+    }
+    __syncthreads(); // ensure that all shared variables are initialized
+
+    uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
+
+    while (exhausted_warps < WARPS_PER_BLOCK || buffer_idx > 0) {
+        uint32_t warp_items = 0; // count of items stored into the buffer by this warp (has to be reset after each iteration)
+
+//        while (unexhausted_lanes && underfull_lanes && buffer_idx < BUFFER_SOFT_LIMIT) {
+        while (unexhausted_lanes && warp_items < ) { // TODO
+            int active = tid < tid_limit;
+
+            // TODO vectorize loads
+
+            // filter predicate
+            if (active) {
+                active = lineitem->l_shipdate[tid] >= lower_shipdate && lineitem->l_shipdate[tid] < upper_shipdate;
+            }
+
+            // fetch attributes
+            uint32_t l_partkey;
+            if (active) {
+                l_partkey = lineitem->l_partkey[tid];
+            }
+
+            // negotiate buffer target positions among all threads in this warp
+            const uint32_t right = __funnelshift_l(FULL_MASK, 0, lane_id);
+            const uint32_t active_mask = __ballot_sync(FULL_MASK, active);
+            uint32_t dest_idx = 0;
+            if (lane_id == 0) {
+                const auto item_cnt = __popc(active_mask);
+                dest_idx = atomicAdd(&buffer_idx, item_cnt);
+                warp_items += item_cnt;
+            }
+            dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0); // propagate the first buffer target index
+            dest_idx += __popc(active_mask & right); // add each's participating thread's offset
+
+            // matrialize attributes
+            if (active) {
+                auto& join_pair = buffer[threadIdx.x*ITEMS_PER_THREAD + j];
+                join_pair.lineitem_tid = lineitem_tid;
+                join_pair.l_partkey = lineitem->l_partkey[lineitem_tid];
+                assert(join_pair.raw & 0xffffffff == lineitem_tid); // TODO
+            }
+
+            unexhausted_lanes = __ballot_sync(FULL_MASK, tid < tid_limit);
+            if (unexhausted_lanes == 0 && lane_id == 0) {
+                atomicInc(&exhausted_warps, UINT_MAX);
+            }
+
+            tid += BLOCK_THREADS; // each tile is organized as a consecutive succession of its corresponding block
+        }
+
+        __syncthreads(); // wait until all threads have gathered enough elements
+
+        // determine the number of items required to fully populate this lane
+        const unsigned required = ITEMS_PER_THREAD - local_idx;
+        int refill_cnt = 0;
+        unsigned ideal_refill_cnt = required;
+
+        // compute the number of required items across all lanes
+        if (underfull_lanes) {
+            #pragma unroll
+            for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+                ideal_refill_cnt += __shfl_down_sync(FULL_MASK, ideal_refill_cnt, offset);
+            }
+        }
+
+        // distribute buffered items among the threads in this warp
+        if (ideal_refill_cnt > 0) {
+            uint32_t refill_idx_start;
+            if (lane_id == 0) {
+                const auto old = atomic_sub_safe(&buffer_idx, ideal_refill_cnt);
+                refill_cnt = (old > ideal_refill_cnt) ? ideal_refill_cnt : old;
+                refill_idx_start = old - refill_cnt;
+            }
+
+            refill_cnt = __shfl_sync(FULL_MASK, refill_cnt, 0);
+            refill_idx_start = __shfl_sync(FULL_MASK, refill_idx_start, 0);
+
+            int prefix_sum = required;
+            // calculate the inclusive prefix sum among all threads in this warp
+            #pragma unroll
+            for (int offset = 1; offset < 32; offset <<= 1) {
+                auto value = __shfl_up_sync(FULL_MASK, prefix_sum, offset);
+                prefix_sum += (lane_id >= offset) ? value : 0;
+            }
+            // calculate the exclusive prefix sum
+            prefix_sum -= required;
+
+            // refill registers with buffered elements
+            const auto limit = min(prefix_sum + required, refill_cnt);
+            for (; prefix_sum < limit; ++prefix_sum) {
+                auto& p = join_pairs[local_idx++];
+                p.lineitem_tid = lineitem_tid_buffer[refill_idx_start + prefix_sum];
+                p.l_partkey = l_partkey_buffer[refill_idx_start + prefix_sum];
+            }
+
+            ideal_refill_cnt -= refill_cnt;
+        }
+
+        if (ideal_refill_cnt == 0 && lane_id == 0) {
+            atomicInc(&fully_occupied_warps, UINT_MAX);
+        }
+
+        __syncthreads(); // wait until all threads have tried to fill their registers
+
+        if (fully_occupied_warps == WARPS_PER_BLOCK) {/*
+            if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
+            assert(join_pairs[0].l_partkey == (join_pairs_raw[0] & FULL_MASK));
+*/
+
+uint64_t* arr = nullptr;
+typedef uint64_t items_t[ITEMS_PER_THREAD];
+items_t& test = (items_t&)arr;
+
+            BlockRadixSortT(temp_storage).SortBlockedToStriped(test, 8, 21); // TODO
+
+        }
+
+        unsigned output_base = 0;
+        const auto count = MAX_ITEMS_PER_WARP - ideal_refill_cnt;
+        if (lane_id == 0) {
+            output_base = atomicAdd(&output_index, count);
+        }
+        output_base = __shfl_sync(FULL_MASK, output_base, 0);
+
+        int lane_dst_idx_prefix_sum = local_idx;
+        // calculate the inclusive prefix sum among all threads in this warp
+        #pragma unroll
+        for (int offset = 1; offset < 32; offset <<= 1) {
+            auto value = __shfl_up_sync(FULL_MASK, lane_dst_idx_prefix_sum, offset);
+            lane_dst_idx_prefix_sum += (lane_id >= offset) ? value : 0;
+        }
+        lane_dst_idx_prefix_sum -= local_idx;
+// FIXME warp excution order is not deterministic
+        uint32_t active_lanes = __ballot_sync(FULL_MASK, local_idx > 0);
+        for (unsigned i = 0; active_lanes != 0; ++i) {
+            bool active = i < local_idx;
+            auto& p = join_pairs[i];
+//            const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
+            const auto tid = index_structure(p.l_partkey);
+
+            if (active) {
+                assert(tid != invalid_tid);
+                auto& join_entry = join_entries[output_base + lane_dst_idx_prefix_sum++];
+                join_entry.lineitem_tid = p.lineitem_tid;
+                join_entry.part_tid = tid;
+            }
+            active_lanes = __ballot_sync(FULL_MASK, active);
+        }
+
+        // reset state
+        __syncthreads(); // wait until each wrap is done
+        if (lane_id == 0) {
+            fully_occupied_warps = 0;
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const part_table_plain_t* __restrict__ part, const JoinEntry* __restrict__ join_entries, size_t n) {
     int64_t sum1 = 0;
     int64_t sum2 = 0;
