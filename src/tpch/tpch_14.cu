@@ -564,6 +564,7 @@ __global__ void ij_lookup_kernel_3(
 
 
 
+__managed__ unsigned debug_cnt = 0;
 
 template<
     unsigned BLOCK_THREADS,
@@ -617,7 +618,7 @@ __global__ void ij_lookup_kernel_3(
     const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
     tid += threadIdx.x; // each threads starts at it's correponding offset
 
-if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
+//if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
 
     // initialize shared variables
     if (warp_id == 0 && lane_id == 0) {
@@ -655,6 +656,7 @@ if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile
             uint32_t dest_idx = 0;
             if (lane_id == 0) {
                 dest_idx = atomicAdd(&buffer_idx, item_cnt);
+ //atomicAdd(&debug_cnt, item_cnt);
             }
             dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0); // propagate the first buffer target index
             dest_idx += __popc(active_mask & right_mask); // add each's participating thread's offset
@@ -718,6 +720,7 @@ if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile
             const auto acquired_cnt = min(old, 32u);
             const auto first_pos = old - acquired_cnt;
 //if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+//if (lane_id == 0) atomicAdd(&debug_cnt, acquired_cnt);
 
             if (acquired_cnt == 0u) break;
 
@@ -745,6 +748,7 @@ if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile
             // negotiate output buffer target positions
             const uint32_t active_mask = __ballot_sync(FULL_MASK, active);
             const auto item_cnt = __popc(active_mask);
+//assert(item_cnt == acquired_cnt);
             uint32_t dest_idx = 0;
             if (lane_id == 0) {
                 dest_idx = atomicAdd(&output_index, item_cnt);
@@ -958,6 +962,7 @@ struct helper {
         cudaError_t error = cudaMemcpyFromSymbol(&matches1, output_index, sizeof(matches1), 0, cudaMemcpyDeviceToHost);
         assert(error == cudaSuccess);
         printf("join matches1: %u\n", matches1);
+        printf("debug_cnt: %u\n", debug_cnt);
 
         error = cudaMemcpyToSymbol(output_index, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice);
         assert(error == cudaSuccess);
@@ -1032,7 +1037,7 @@ void load_and_run_ij(const std::string& path, bool as_full_pipline_breaker) {
     h.load_database(path);
     if (as_full_pipline_breaker) {
         printf("full pipline breaker\n");
-        h.run_two_phase_ij_buffer_debug();
+        h.run_two_phase_ij_buffer();
     } else {
         h.run_ij();
     }
