@@ -256,8 +256,9 @@ __global__ void ij_lookup_kernel_2(
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
     const unsigned tile_size = round_up_pow2((lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
-    unsigned tid = blockIdx.x * tile_size + threadIdx.x;
-    const unsigned tid_limit = min(tid + tile_size, lineitem_size);
+    unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
+    const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
+    tid += threadIdx.x; // each threads starts at it's correponding offset
 
     // initialize shared variables
     if (warp_id == 0 && lane_id == 0) {
@@ -470,7 +471,7 @@ __global__ void ij_lookup_kernel_3(
 //    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
     const unsigned tile_size = min(lineitem_size, (lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
     unsigned tid_begin = blockIdx.x * tile_size; // first tid where scanning starts at each new iteration
-    const unsigned tid_limit = min(tid_begin + tile_size, lineitem_size);
+    const unsigned tid_limit = ; // TODO
 //if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
 
     const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
@@ -609,12 +610,14 @@ __global__ void ij_lookup_kernel_3(
     const int warp_id = threadIdx.x / 32;
     const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, lane_id);
 
-//    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
+//    const unsigned tile_size = round_up_pow2((lineitem_size + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
+  //  const unsigned tile_size = (lineitem_size + BLOCK_THREADS - 1) / gridDim.x; // TODO cache-line allignment should be sufficient
     const unsigned tile_size = min(lineitem_size, (lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
-//    unsigned tid_begin = blockIdx.x * tile_size; // first tid where scanning starts at each new iteration
-    unsigned tid = blockIdx.x * tile_size + threadIdx.x;
-    const unsigned tid_limit = min(tid + tile_size, lineitem_size);
-//if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+    unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
+    const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
+    tid += threadIdx.x; // each threads starts at it's correponding offset
+
+if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
 
     // initialize shared variables
     if (warp_id == 0 && lane_id == 0) {
