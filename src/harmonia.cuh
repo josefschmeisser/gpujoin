@@ -286,6 +286,7 @@ struct harmonia_tree {
         assert(ret == cudaSuccess);
     }
 
+#if 0
     __host__ void create_device_handle() {//device_handle_t& handle) {
         // copy upper tree levels to device constant memory
         copy_children_portion_to_cached_memory();
@@ -329,6 +330,47 @@ struct harmonia_tree {
         ret = cudaMemcpy(device_handle, &tmp, sizeof(device_handle_t), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
     }
+#endif
+
+
+    __host__ void create_device_handle(device_handle_t& handle) {
+        // copy upper tree levels to device constant memory
+        copy_children_portion_to_cached_memory();
+
+        key_t* d_keys;
+        auto ret = cudaMalloc(&d_keys, sizeof(key_t)*keys.size());
+        assert(ret == cudaSuccess);
+        ret = cudaMemcpy(d_keys, keys.data(), sizeof(key_t)*keys.size(), cudaMemcpyHostToDevice);
+        assert(ret == cudaSuccess);
+
+        child_ref_t* d_children;
+        ret = cudaMalloc(&d_children, sizeof(child_ref_t)*children.size());
+//printf("child array bytes: %u\n", sizeof(child_ref_t)*children.size());
+        assert(ret == cudaSuccess);
+        ret = cudaMemcpy(d_children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
+        assert(ret == cudaSuccess);
+/* TODO
+        if constexpr (!Sorted_Only) {
+            ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
+            assert(ret == cudaSuccess);
+            ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
+            assert(ret == cudaSuccess);
+        }
+*/
+        // initialize fields
+        handle.depth = depth;
+        handle.caching_depth = caching_depth;
+        handle.size = size;
+        handle.keys = d_keys;
+        handle.children = d_children;
+        // TODO
+
+	for (unsigned i = 0; i < max_depth; ++i) {
+            handle.ntg_degree[i] = 3;
+	}
+    }
+
+
 
     template<unsigned Degree>
     __device__ static value_t cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
@@ -575,76 +617,78 @@ struct harmonia_tree {
     }
 #endif
 
-    __device__ static value_t ntg_lookup(const bool active, const device_handle_t* tree, const key_t key) {
+    __device__ static value_t ntg_lookup(const bool active, const device_handle_t& tree, const key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         key_t actual;
         unsigned lb = 0, pos = 0;
-        const auto max_depth = tree->depth;
-        for (unsigned current_depth = 0; current_depth < max_depth; ++current_depth) {
-            const key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+  //      const auto max_depth = tree.depth;
+        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
+            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
 //            lb = cooperative_linear_search<4>(active, key, node_start);
-            lb = cooperative_linear_search(active, key, node_start, tree->ntg_degree[current_depth]); // TODO
+            lb = cooperative_linear_search(active, key, node_start, tree.ntg_degree[current_depth]);
             actual = node_start[lb];
 
-            unsigned new_pos = tree->children[pos] + lb;
-//            active = active && new_pos < tree->size; // TODO
+            unsigned new_pos = tree.children[pos] + lb;
+//            active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
 
-        if (active && pos < tree->size && key == actual) {
-//            return tree->values[pos];
+        if (active && pos < tree.size && key == actual) {
+//            return tree.values[pos];
             return pos; // FIXME compile time switch
         }
 
         return not_found;
     }
 
-    __device__ static value_t ntg_lookup_with_caching(const bool active, const device_handle_t* tree, const key_t key) {
+#if 1
+    __device__ static value_t ntg_lookup_with_caching(const bool active, const device_handle_t& tree, const key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         key_t actual;
         unsigned lb = 0, pos = 0, current_depth = 0; 
-        // 
-        for (; current_depth < tree->caching_depth; ++current_depth) {
-            const key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+        // use the portion of the children array which is stored in constant memory; hence, accesses to this array will be cached
+        for (; current_depth < tree.caching_depth; ++current_depth) {
+            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
-            lb = cooperative_linear_search(active, key, node_start, tree->ntg_degree[current_depth]); // TODO
+            lb = cooperative_linear_search(active, key, node_start, tree.ntg_degree[current_depth]);
             actual = node_start[lb];
 
             unsigned new_pos = harmonia_upper_levels[pos] + lb;
-//            assert(harmonia_upper_levels[pos] && tree->children[pos]);
-//            active = active && new_pos < tree->size; // TODO
+//            active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
-        for (; current_depth < tree->depth; ++current_depth) {
-            const key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+        // once the upper portion of the children array is exhausted, we switch to the full array which is kept in global memory
+        for (; current_depth < tree.depth; ++current_depth) {
+            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
-            lb = cooperative_linear_search(active, key, node_start, tree->ntg_degree[current_depth]); // TODO
+            lb = cooperative_linear_search(active, key, node_start, tree.ntg_degree[current_depth]);
             actual = node_start[lb];
 
-            unsigned new_pos = tree->children[pos] + lb;
-//            active = active && new_pos < tree->size; // TODO
+            unsigned new_pos = tree.children[pos] + lb;
+//            active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
 
-        if (active && pos < tree->size && key == actual) {
-//            return tree->values[pos];
+        if (active && pos < tree.size && key == actual) {
+//            return tree.values[pos];
             return pos; // FIXME compile time switch
         }
 
         return not_found;
     }
+#endif
 
     __host__ unsigned count_ntg_steps(const key_t x, const key_t* arr, const unsigned ntg_degree) {
 	const unsigned ntg_size = 1u << ntg_degree;
