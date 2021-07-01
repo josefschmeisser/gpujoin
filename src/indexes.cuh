@@ -1,37 +1,48 @@
 #pragma once
 
-#include <sys/types.h>
-#include "search.cuh"
+#include <cstdint>
+#include <numeric>
 
-/* TODO
+#include "search.cuh"
 #include "btree.cuh"
-#include "btree.cu"
-*/
 #include "harmonia.cuh"
 #include "rs.cuh"
 
-#if 0
+template<class Key, class Value>
 struct btree_index {
-    const btree::Node* tree_;
+    using key_t = Key;
+    using value_t = Value;
 
-    __host__ void construct(const std::vector<btree::key_t>& h_column, const btree::key_t* d_column) {
-        auto tree = btree::construct(h_column, 0.7);
+    static const value_t invalid_tid = std::numeric_limits<value_t>::max();
+
+    using btree_t = index_structures::btree<key_t, value_t, invalid_tid>;
+
+    btree_t h_tree_;
+    const typename btree_t::NodeBase* d_tree_;
+
+    __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column) {
+        h_tree_.construct(h_column, 0.7);
+        d_tree_ = h_tree_.copy_btree_to_gpu(h_tree_.root);
+/*
         if (prefetch_index) {
             btree::prefetchTree(tree, 0);
         }
-        tree_ = tree;
+        tree_ = tree;*/
     }
 
-    __device__ __forceinline__ btree::payload_t operator() (const btree::key_t key) const {
-        return btree::cuda::btree_lookup(tree_, key);
-    //    return btree::cuda::btree_lookup_with_hints(tree_, key); // TODO
+    template<class Allocator>
+    __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column, Allocator& allocator);
+    // TODO
+
+    __device__ __forceinline__ value_t operator() (const key_t key) const {
+        return btree_t::lookup(d_tree_, key);
+        //return btree_t::lookup_with_hints(tree_, key); // TODO
     }
 
-    __device__ __forceinline__ btree::payload_t cooperative_lookup(bool active, const btree::key_t key) const {
-        return btree::cuda::btree_cooperative_lookup(active, tree_, key);
+    __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
+        return btree_t::cooperative_lookup(active, d_tree_, key);
     }
 };
-#endif
 
 template<class Key, class Value>
 struct radix_spline_index {
@@ -58,7 +69,7 @@ struct radix_spline_index {
         assert(h_column.size() == rrs->num_keys_);
     }
 
-    __device__ __forceinline__ value_t operator() (const key_t key) const {
+    __device__ __forceinline__ value_t lookup(const key_t key) const {
         const unsigned estimate = rs::cuda::get_estimate(d_rs_, key);
         const unsigned begin = (estimate < d_rs_->max_error_) ? 0 : (estimate - d_rs_->max_error_);
         const unsigned end = (estimate + d_rs_->max_error_ + 2 > d_rs_->num_keys_) ? d_rs_->num_keys_ : (estimate + d_rs_->max_error_ + 2);
@@ -71,6 +82,7 @@ struct radix_spline_index {
     }
 };
 
+#if 0
 template<class Key, class Value>
 struct harmonia_index {
     using key_t = Key;
@@ -91,10 +103,47 @@ struct harmonia_index {
 
 //    __device__ __forceinline__ value_t lookup(const key_t key) const;
 
-    __device__ __forceinline__ value_t cooperative_lookup(bool active, key_t key) const {
-        return harmonia_t::lookup<4>(active, d_tree, key);
+    __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
+//	return harmonia_t::lookup<4>(active, d_tree, key);
+//        return harmonia_t::ntg_lookup(active, d_tree, key);
+        return harmonia_t::ntg_lookup_with_caching(active, d_tree, key);
     }
 };
+#endif
+
+
+template<class Key, class Value>
+struct harmonia_index {
+    using key_t = Key;
+    using value_t = Value;
+
+    static const value_t invalid_tid = std::numeric_limits<value_t>::max();
+
+    using harmonia_t = harmonia::harmonia_tree<key_t, value_t, 32 + 1, invalid_tid>;
+
+    harmonia_t tree;
+    typename harmonia_t::memory_guard_t guard;
+
+    struct device_index_t {
+        typename harmonia_t::device_handle_t d_tree;
+
+        //__device__ __forceinline__ value_t lookup(const key_t key) const;
+
+        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
+            //return harmonia_t::lookup<4>(active, d_tree, key);
+            //return harmonia_t::ntg_lookup(active, d_tree, key);
+            return harmonia_t::ntg_lookup_with_caching(active, d_tree, key);
+        }
+    } device_index;
+
+    __host__ void construct(const std::vector<key_t>& h_column, const key_t* /*d_column*/) {
+        tree.construct(h_column);
+        tree.create_device_handle(device_index.d_tree);
+    }
+};
+
+
+
 
 template<class Key, class Value>
 struct lower_bound_index {
