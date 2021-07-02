@@ -5,7 +5,6 @@
 #include <vector>
 #include <numeric>
 
-#include "btree.cuh"
 #include "harmonia.cuh"
 #include "thirdparty/cub_test/test_util.h"
 
@@ -60,7 +59,7 @@ using harmonia_type = harmonia::harmonia_tree<
     std::numeric_limits<uint32_t>::max()>;
 using harmonia_handle = harmonia_type::device_handle_t;
 
-__global__ void lookup_kernel(const harmonia_handle* __restrict__ tree, unsigned n, const uint32_t* __restrict__ keys, uint32_t* __restrict__ tids) {
+__global__ void lookup_kernel(const harmonia_handle& __restrict__ tree, unsigned n, const uint32_t* __restrict__ keys, uint32_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -71,7 +70,7 @@ __global__ void lookup_kernel(const harmonia_handle* __restrict__ tree, unsigned
         auto tid = harmonia_type::lookup(active, tree, keys[i]);
         if (active) {
             tids[i] = tid;
-//            printf("tids[%d] = %d\n", i, tids[i]);
+            printf("tids[%d] = %d\n", i, tids[i]);
         }
 
         i += stride;
@@ -85,10 +84,12 @@ void test_harmonia_cuda_lookup(unsigned n) {
     std::iota(keys.begin(), keys.end(), 0);
 
     //template<class Key, class Value, unsigned fanout>
-    harmonia_tree<uint32_t, uint32_t, 8 + 1, std::numeric_limits<uint32_t>::max()> tree;
+    using harmonia_t = harmonia_tree<uint32_t, uint32_t, 8 + 1, std::numeric_limits<uint32_t>::max()>;
+    harmonia_t tree;
     tree.construct(keys);
-    tree.create_device_handle();
-    harmonia_type::device_handle_t* device_handle = tree.device_handle;
+
+    harmonia_t::device_handle_t device_handle;
+    tree.create_device_handle(device_handle);
 
     uint32_t* d_keys;
     cudaMalloc(&d_keys, sizeof(uint32_t)*keys.size());
