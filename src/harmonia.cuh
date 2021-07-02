@@ -12,6 +12,7 @@
 
 #include "utils.hpp"
 #include "cuda_utils.cuh"
+#include "device_array.hpp"
 
 #ifndef FULL_MASK
 #define FULL_MASK 0xffffffff
@@ -65,6 +66,12 @@ struct harmonia_tree {
         unsigned depth;
     }* device_handle = nullptr;
 */
+
+    struct memory_guard_t {
+        device_array_wrapper<key_t> keys_guard;
+        device_array_wrapper<child_ref_t> children_guard;
+        device_array_wrapper<value_t> values_guard;
+    };
 
     struct intermediate_node {
         bool is_leaf = false;
@@ -349,20 +356,22 @@ struct harmonia_tree {
         assert(ret == cudaSuccess);
         ret = cudaMemcpy(d_children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
-/* TODO
+
+        value_t* d_values = nullptr;
         if /*constexpr*/ (!Sorted_Only) {
-            ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
+            ret = cudaMalloc(&d_values, sizeof(value_t)*values.size());
             assert(ret == cudaSuccess);
-            ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
+            ret = cudaMemcpy(d_values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
             assert(ret == cudaSuccess);
         }
-*/
+
         // initialize fields
         handle.depth = depth;
         handle.caching_depth = caching_depth;
         handle.size = size;
         handle.keys = d_keys;
         handle.children = d_children;
+        handle.values = d_values;
         // TODO
 
 	for (unsigned i = 0; i < max_depth; ++i) {
@@ -418,26 +427,26 @@ struct harmonia_tree {
     // This has to be a function template so that it won't get compiled when Sorted_Only is false.
     // To make it a function template, we have to add the second predicate to std::enable_if_t which is dependent on the function template parameter.
     // And with the help of SFINAE only the correct implementation will get compiled.
-    __device__ static std::enable_if_t<Sorted_Only && Degree < 6, value_t> lookup(const bool active, const device_handle_t* tree, const key_t key) {
+    __device__ static std::enable_if_t<Sorted_Only && Degree < 6, value_t> lookup(const bool active, const device_handle_t& tree, const key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         key_t actual;
         unsigned lb = 0, pos = 0;
-        for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
-            const key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
+            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search<Degree>(active, key, node_start);
             actual = node_start[lb];
 
-            unsigned new_pos = tree->children[pos] + lb;
-//            active = active && new_pos < tree->size; // TODO
+            unsigned new_pos = tree.children[pos] + lb;
+//            active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
 
-        if (active && pos < tree->size && key == actual) {
+        if (active && pos < tree.size && key == actual) {
             return pos;
         }
 
@@ -445,27 +454,27 @@ struct harmonia_tree {
     }
 
     template<unsigned Degree = 2>
-    __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t* tree, key_t key) {
+    __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t& tree, key_t key) {
         assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         key_t actual;
         unsigned lb = 0, pos = 0;
-        for (unsigned current_depth = 0; current_depth < tree->depth; ++current_depth) {
-            const key_t* node_start = tree->keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
+            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search<Degree>(active, key, node_start);
             actual = node_start[lb];
 
-            unsigned new_pos = tree->children[pos] + lb;
-//            active = active && new_pos < tree->size; // TODO
+            unsigned new_pos = tree.children[pos] + lb;
+//            active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
         }
 
-        if (active && pos < tree->size && key == actual) {
-            return tree->values[pos];
+        if (active && pos < tree.size && key == actual) {
+            return tree.values[pos];
         }
 
         return not_found;

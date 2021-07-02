@@ -372,7 +372,7 @@ auto run_lookup_benchmark(IndexStructureType& index_structure, const key_t* d_lo
         if /*constexpr*/ (!partitial_sorting) {
             lookup_kernel<<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
         } else {
-            lookup_kernel_with_sorting_v1<blockSize, 4, IndexStructureType><<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
+            lookup_kernel_with_sorting_v1<blockSize, 4><<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
         }
         cudaDeviceSynchronize();
     }
