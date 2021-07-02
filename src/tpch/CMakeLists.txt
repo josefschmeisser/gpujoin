@@ -1,10 +1,12 @@
 message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
 
 add_library(tpch_common STATIC common.cpp parser.cpp)
+set_property(TARGET tpch_common PROPERTY CXX_STANDARD 17) # no cuda compiliation units involved; so we can use c++17 here
 target_link_libraries(tpch_common pthread)
 
 set(CPU_TPCH_SRC_FILES cpu_bench.cpp cpu_only.cpp)
 add_executable(tpch ${CPU_TPCH_SRC_FILES})
+set_property(TARGET tpch PROPERTY CXX_STANDARD 17) # no cuda compiliation units involved; so we can use c++17 here
 target_include_directories(tpch PRIVATE $<BUILD_INTERFACE:${JEVENTS_INCLUDE_DIR}>)
 target_link_libraries(tpch tpch_common ${JEVENTS_LIBRARY_PATH} pthread)
 if(ENABLE_PERFBENCHMARKING)

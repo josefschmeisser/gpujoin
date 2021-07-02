@@ -81,14 +81,14 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
     printf("same type\n");
     if (std::is_same<OutputAllocator, numa_allocator<T>>::value) {
         if (allocator.node() == vec.get_allocator().node()) {
-            return device_array_wrapper(vec.data(), vec.size());
+            return device_array_wrapper<T>(vec.data(), vec.size());
         } else {
             T* ptr = allocator.allocate(vec.size()*sizeof(T));
             std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
-            return device_array_wrapper(ptr, vec.size(), allocator);
+            return device_array_wrapper<T>(ptr, vec.size(), allocator);
         }
     } else if (std::is_same<OutputAllocator, cuda_allocator<T, false>>::value) {
-        return device_array_wrapper(vec.data(), vec.size());
+        return device_array_wrapper<T>(vec.data(), vec.size());
     }
     throw std::runtime_error("not available");
 }

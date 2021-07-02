@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <numeric>
 #include <vector>
+#include <unordered_set>
 
 #include <cuda_runtime_api.h>
 #include <numa.h>
@@ -73,4 +74,20 @@ std::string stringify(InputIt first, InputIt last) {
         return std::move(a) + ',' + std::to_string(b);
     };
     return std::accumulate(std::next(first), last, std::to_string(*first), comma_fold);
+}
+
+// TODO test
+template<class InputIt, class OutputIt, class URBG>
+void simple_sample(InputIt first, InputIt last, OutputIt out, size_t n, URBG&& rg) {
+    size_t size = std::distance(first, last);
+    std::uniform_int_distribution<> distrib(0, size - 1);
+    std::unordered_set<size_t> seen;
+    while (n > 0) {
+        size_t i = distrib(rg);
+        if (seen.count(i) > 0) continue;
+        seen.emplace(i);
+        *out = std::move(*(first + i));
+        ++out;
+        --n;
+    }
 }

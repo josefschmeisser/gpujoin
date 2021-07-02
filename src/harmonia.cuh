@@ -225,7 +225,13 @@ struct harmonia_tree {
         auto& root = tree_levels.front()->front();
 
         // allocate arrays
-        const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
+        // transform_reduce was introduced with c++17
+        //const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
+        unsigned node_count = 0;
+        for (const auto& level : tree_levels) {
+            node_count += level->size();
+        }
+
         const auto key_array_size = max_keys*node_count;
         keys.resize(key_array_size);
         children.resize(node_count);
@@ -254,7 +260,9 @@ struct harmonia_tree {
         // optimize ntg sizes
         std::vector<key_t> key_sample;
         key_sample.reserve(1000);
-        std::sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
+        // sample was introduced with c++17
+        //std::sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
+        simple_sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
         optimize_ntg(key_sample);
     }
 
@@ -284,13 +292,15 @@ struct harmonia_tree {
         const size_t available_bytes = sizeof(harmonia_upper_levels);
         printf("harmonia accessible memory: %lu\n", available_bytes);
 
+        //const auto [resulting_caching_depth, bytes_to_copy] = determine_children_caching_limit(available_bytes);
+        size_t bytes_to_copy;
+        std::tie(caching_depth, bytes_to_copy) = determine_children_caching_limit(available_bytes);
 
-        const auto [resulting_caching_depth, bytes_to_copy] = determine_children_caching_limit(available_bytes);
-        printf("harmonia constant memory required: %lu depth limit: %u full depth: %u\n", bytes_to_copy, resulting_caching_depth, depth);
-
-        caching_depth = resulting_caching_depth;
+        //caching_depth = resulting_caching_depth;
         auto ret = cudaMemcpyToSymbol(harmonia_upper_levels, children.data(), bytes_to_copy);
         assert(ret == cudaSuccess);
+
+        printf("harmonia constant memory required: %lu depth limit: %u full depth: %u\n", bytes_to_copy, caching_depth, depth);
     }
 
 #if 0

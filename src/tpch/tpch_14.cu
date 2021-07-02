@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cstring>
 #include <chrono>
+#include <unordered_map>
 
 #include <cub/block/block_radix_sort.cuh>
 
