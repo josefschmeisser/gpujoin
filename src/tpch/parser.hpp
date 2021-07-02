@@ -1,7 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <bits/stdint-intn.h>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
