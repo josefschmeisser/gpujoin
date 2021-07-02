@@ -29,7 +29,7 @@ struct cuda_allocator {
         if (0 == s)
             return NULL;
         pointer temp;
-        if constexpr (managed) {
+        if /*constexpr*/ (managed) {
             cudaMallocManaged(&temp, s * sizeof(T));
         } else {
             cudaMalloc(&temp, s * sizeof(T));

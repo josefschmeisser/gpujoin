@@ -222,14 +222,14 @@ struct harmonia_tree {
         const auto key_array_size = max_keys*node_count;
         keys.resize(key_array_size);
         children.resize(node_count);
-	if constexpr (!Sorted_Only) {
+	if /*constexpr*/ (!Sorted_Only) {
             values.resize(input.size());
 	}
 
         store_nodes(tree_levels);
         store_structure(tree_levels);
 
-        if constexpr (!Sorted_Only) {
+        if /*constexpr*/ (!Sorted_Only) {
             // insert values
             for (unsigned i = 0; i < input.size(); ++i) {
                 values[i] = i;
@@ -304,7 +304,7 @@ struct harmonia_tree {
         ret = cudaMemcpy(d_children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
 /* TODO
-        if constexpr (!Sorted_Only) {
+        if /*constexpr*/ (!Sorted_Only) {
             ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
             assert(ret == cudaSuccess);
             ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
@@ -350,7 +350,7 @@ struct harmonia_tree {
         ret = cudaMemcpy(d_children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
 /* TODO
-        if constexpr (!Sorted_Only) {
+        if /*constexpr*/ (!Sorted_Only) {
             ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
             assert(ret == cudaSuccess);
             ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
@@ -489,7 +489,7 @@ struct harmonia_tree {
         }
 
         if (active && pos < size && key == actual) {
-            if constexpr (Sorted_Only) {
+            if /*constexpr*/ (Sorted_Only) {
                 return pos;
             } else {
                 return values[pos];

@@ -353,7 +353,7 @@ template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType& index_structure, const key_t* d_lookup_keys, unsigned num_lookup_keys) {
     int num_blocks;
     
-    if constexpr (!partitial_sorting) {
+    if /*constexpr*/ (!partitial_sorting) {
         num_blocks = (num_lookup_keys + blockSize - 1) / blockSize;
     } else {
         int num_sms;
@@ -369,7 +369,7 @@ auto run_lookup_benchmark(IndexStructureType& index_structure, const key_t* d_lo
     printf("executing kernel...\n");
     auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
-        if constexpr (!partitial_sorting) {
+        if /*constexpr*/ (!partitial_sorting) {
             lookup_kernel<<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
         } else {
             lookup_kernel_with_sorting_v1<blockSize, 4, IndexStructureType><<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
@@ -445,7 +445,7 @@ auto tt = create_device_array_from(v, a);
 */
 
     std::unique_ptr<value_t[]> h_tids;
-    if constexpr (activeLanes < 32) {
+    if /*constexpr*/ (activeLanes < 32) {
 
     } else {
         auto result = run_lookup_benchmark(*index, d_lookup_keys.data(), lookup_keys.size());
