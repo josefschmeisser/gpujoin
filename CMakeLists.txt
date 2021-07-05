@@ -12,6 +12,10 @@ find_package(CUDA)
 # put predefined cmake projects in their own solution folder
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+# CUDA_ARCHITECTURES was introduced in 3.18, however, we have to support older cmake versions as well
+cmake_policy(SET CMP0104 OLD)
+set_property(GLOBAL PROPERTY CUDA_ARCHITECTURES OFF)
+
 set(MY_CUDA_TARGET "pascal" CACHE STRING "CUDA target architecture chosen by the user at CMake configure time")
 set_property(CACHE MY_CUDA_TARGET PROPERTY STRINGS pascal volta)
 
@@ -35,6 +39,9 @@ endif(ENABLE_PERFBENCHMARKING)
 
 include(lib/RadixSpline.cmake)
 include(lib/gtest.cmake)
+include(lib/cub.cmake)
+
+message(STATUS "cub include dir: ${CUB_INCLUDE_DIR}")
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
@@ -51,9 +58,9 @@ target_link_libraries(rs_lookup ${CUDART_LIBRARY} numa)
 target_include_directories(rs_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
 
 add_executable(index_lookup src/index_lookup.cu)
-add_dependencies(index_lookup RadixSpline)
+add_dependencies(index_lookup RadixSpline cub)
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa)
-target_include_directories(index_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
+target_include_directories(index_lookup PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")
 # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
 # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
 target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
