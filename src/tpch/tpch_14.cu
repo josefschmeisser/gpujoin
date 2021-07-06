@@ -889,7 +889,7 @@ struct helper {
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 
         int num_blocks = (lineitem_size + block_size - 1) / block_size;
-        ij_full_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, part_device, index_structure);
+        ij_full_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, part_device, index_structure.device_index);
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
@@ -904,7 +904,7 @@ struct helper {
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 
         int num_blocks = (part_size + block_size - 1) / block_size;
-        ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure, join_entries);
+        ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries);
         cudaDeviceSynchronize();
 
         decltype(output_index) matches;
@@ -957,7 +957,7 @@ struct helper {
         int num_blocks = num_sms*2; // TODO
 
         const auto start1 = std::chrono::high_resolution_clock::now();
-        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
+        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
 
         cudaError_t error = cudaMemcpyFromSymbol(&matches1, output_index, sizeof(matches1), 0, cudaMemcpyDeviceToHost);
@@ -970,7 +970,7 @@ struct helper {
         JoinEntry* join_entries2;
         cudaMallocManaged(&join_entries2, sizeof(JoinEntry)*lineitem_size);
         num_blocks = (part_size + block_size - 1) / block_size;
-        ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure, join_entries2);
+        ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries2);
         cudaDeviceSynchronize();
 
         error = cudaMemcpyFromSymbol(&matches2, output_index, sizeof(matches2), 0, cudaMemcpyDeviceToHost);
@@ -1009,7 +1009,7 @@ struct helper {
         int num_blocks = num_sms*4; // TODO
 
         const auto start1 = std::chrono::high_resolution_clock::now();
-        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD, IndexType><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure, join_entries1);
+        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
