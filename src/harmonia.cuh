@@ -55,17 +55,7 @@ struct harmonia_tree {
         unsigned depth;
         unsigned caching_depth;
         unsigned ntg_degree[max_depth]; // ntg size for each level starting at the root level
-    }* device_handle = nullptr;
-
-/*
-    struct device_handle_t {
-        key_t* keys;
-        child_ref_t* children;
-        value_t* values;
-        unsigned size;
-        unsigned depth;
-    }* device_handle = nullptr;
-*/
+    };
 
     struct memory_guard_t {
         device_array_wrapper<key_t> keys_guard;
@@ -85,13 +75,6 @@ struct harmonia_tree {
 
     using tree_level_t = std::vector<std::unique_ptr<intermediate_node>>;
     using tree_levels_t = std::vector<std::unique_ptr<tree_level_t>>;
-
-    ~harmonia_tree() {
-        // free device handle
-        if (device_handle) {
-// TODO
-        }
-    }
 
     __host__ key_t max_key(const intermediate_node& subtree) {
         if (subtree.is_leaf) {
@@ -349,7 +332,7 @@ struct harmonia_tree {
     }
 #endif
 
-
+#if 1
     __host__ void create_device_handle(device_handle_t& handle) {
         // copy upper tree levels to device constant memory
         copy_children_portion_to_cached_memory();
@@ -388,8 +371,38 @@ struct harmonia_tree {
             handle.ntg_degree[i] = 3;
 	}
     }
+#endif
 
+    template<class DeviceAllocator>
+    __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
+        // initialize fields
+        handle.depth = depth;
+        handle.caching_depth = caching_depth;
+        handle.size = size;
 
+        // copy upper tree levels to device constant memory
+        copy_children_portion_to_cached_memory();
+
+        // migrate key array
+        typename DeviceAllocator::rebind<key_t>::other keys_allocator = device_allocator;
+        guard.keys_guard = create_device_array_from(keys, keys_allocator);
+        handle.keys = guard.keys_guard.data();
+
+        // migrate children array
+        typename DeviceAllocator::rebind<child_ref_t>::other children_allocator = device_allocator;
+        guard.children_guard = create_device_array_from(children, children_allocator);
+        handle.children = guard.children_guard.data();
+
+        if /*constexpr*/ (!Sorted_Only) {
+            typename DeviceAllocator::rebind<value_t>::other values_allocator = device_allocator;
+            guard.values_guard = create_device_array_from(values, values_allocator);
+            handle.values = guard.values_guard.data();
+        }
+
+	for (unsigned i = 0; i < max_depth; ++i) {
+            handle.ntg_degree[i] = 3;
+	}
+    }
 
     template<unsigned Degree>
     __device__ static value_t cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
