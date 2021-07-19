@@ -33,7 +33,7 @@ struct numa_allocator {
         if (0 == s) {
             return NULL;
         }
-        pointer temp = numa_alloc_onnode(s, node_);
+        pointer temp = numa_alloc_onnode(s * sizeof(T), node_);
         if (temp == NULL) {
             throw std::bad_alloc();
         }

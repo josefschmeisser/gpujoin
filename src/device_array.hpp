@@ -60,7 +60,8 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
     printf("different types\n");
     // we are limited to c++14, so no constexpr ifs here...
     if (std::is_same<OutputAllocator, numa_allocator<T>>::value) {
-        T* ptr = allocator.allocate(vec.size()*sizeof(T));
+        typename OutputAllocator::rebind<T>::other array_allocator = allocator;
+        T* ptr = array_allocator.allocate(vec.size()); // allocators already take the target type size into account
         std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
         return device_array_wrapper<T>(ptr, vec.size(), allocator);
     } else if (std::is_same<OutputAllocator, cuda_allocator<T, true>>::value) {
@@ -70,7 +71,7 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
         auto ret = cudaMalloc((void**)&ptr, vec.size()*sizeof(T));
         if (ret != cudaSuccess) throw std::runtime_error("cudaMalloc failed, code: " + std::to_string(ret));
         ret = cudaMemcpy(ptr, vec.data(), vec.size()*sizeof(T), cudaMemcpyHostToDevice);
-        if (ret != cudaSuccess) throw std::runtime_error("cudaMalloc failed, code: " + std::to_string(ret));
+        if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
         return device_array_wrapper<T>(ptr, vec.size(), allocator);
     }
     throw std::runtime_error("not available");
@@ -83,7 +84,8 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
         if (allocator.node() == vec.get_allocator().node()) {
             return device_array_wrapper<T>(vec.data(), vec.size());
         } else {
-            T* ptr = allocator.allocate(vec.size()*sizeof(T));
+            typename OutputAllocator::rebind<T>::other array_allocator = allocator;
+            T* ptr = array_allocator.allocate(vec.size());
             std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
             return device_array_wrapper<T>(ptr, vec.size(), allocator);
         }
