@@ -44,7 +44,6 @@ struct harmonia_tree {
     std::vector<value_t> values;
     unsigned size;
     unsigned depth;
-    unsigned caching_depth;
     std::vector<unsigned> ntg_degrees;
 
     struct device_handle_t {
@@ -271,12 +270,12 @@ struct harmonia_tree {
         return {current_depth, pos*sizeof(child_ref_t)};
     }
 
-//    __host__ void copy_to_children_portion_to_cached_memory(void* constant_memory, size_t size_limit) {
-    __host__ void copy_children_portion_to_cached_memory() {
+    __host__ unsigned copy_children_portion_to_cached_memory() {
         const size_t available_bytes = sizeof(harmonia_upper_levels);
         printf("harmonia accessible memory: %lu\n", available_bytes);
 
         //const auto [resulting_caching_depth, bytes_to_copy] = determine_children_caching_limit(available_bytes);
+        unsigned caching_depth;
         size_t bytes_to_copy;
         std::tie(caching_depth, bytes_to_copy) = determine_children_caching_limit(available_bytes);
 
@@ -285,11 +284,12 @@ struct harmonia_tree {
         assert(ret == cudaSuccess);
 
         printf("harmonia constant memory required: %lu depth limit: %u full depth: %u\n", bytes_to_copy, caching_depth, depth);
+        return caching_depth;
     }
 
     __host__ void create_device_handle(device_handle_t& handle) {
         // copy upper tree levels to device constant memory
-        copy_children_portion_to_cached_memory();
+        const auto caching_depth = copy_children_portion_to_cached_memory();
 
         key_t* d_keys;
         auto ret = cudaMalloc(&d_keys, sizeof(key_t)*keys.size());
@@ -299,7 +299,6 @@ struct harmonia_tree {
 
         child_ref_t* d_children;
         ret = cudaMalloc(&d_children, sizeof(child_ref_t)*children.size());
-//printf("child array bytes: %u\n", sizeof(child_ref_t)*children.size());
         assert(ret == cudaSuccess);
         ret = cudaMemcpy(d_children, children.data(), sizeof(child_ref_t)*children.size(), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
@@ -319,16 +318,10 @@ struct harmonia_tree {
         handle.keys = d_keys;
         handle.children = d_children;
         handle.values = d_values;
-        // TODO
 
-/*
-	for (unsigned i = 0; i < max_depth; ++i) {
-            handle.ntg_degree[i] = 3;
-	}
-*/
+        // copy ntg degrees to device accessible array
         assert(ntg_degrees.size() < max_depth);
         for (unsigned i = 0; i < ntg_degrees.size(); ++i) {
-//            handle.ntg_degree[i] = 3;
             handle.ntg_degree[i] = ntg_degrees[i];
         }
     }
@@ -336,7 +329,7 @@ struct harmonia_tree {
     template<class DeviceAllocator>
     __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
         // copy upper tree levels to device constant memory
-        copy_children_portion_to_cached_memory();
+        const auto caching_depth = copy_children_portion_to_cached_memory();
 
         // initialize fields
         handle.depth = depth;
@@ -359,9 +352,9 @@ struct harmonia_tree {
             handle.values = guard.values_guard.data();
         }
 
+        // copy ntg degrees to device accessible array
         assert(ntg_degrees.size() < max_depth);
         for (unsigned i = 0; i < ntg_degrees.size(); ++i) {
-//            handle.ntg_degree[i] = 3;
             handle.ntg_degree[i] = ntg_degrees[i];
         }
     }
