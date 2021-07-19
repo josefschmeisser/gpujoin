@@ -375,13 +375,13 @@ struct harmonia_tree {
 
     template<class DeviceAllocator>
     __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
+        // copy upper tree levels to device constant memory
+        copy_children_portion_to_cached_memory();
+
         // initialize fields
         handle.depth = depth;
         handle.caching_depth = caching_depth;
         handle.size = size;
-
-        // copy upper tree levels to device constant memory
-        copy_children_portion_to_cached_memory();
 
         // migrate key array
         typename DeviceAllocator::rebind<key_t>::other keys_allocator = device_allocator;
