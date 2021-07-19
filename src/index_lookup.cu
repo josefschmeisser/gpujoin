@@ -310,13 +310,15 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
 }
 #endif
 
-
+enum dataset_type : unsigned { dense = 0, uniform };
 
 template<class IndexStructureType>
-void generate_datasets(std::vector<key_t>& keys, std::vector<key_t>& lookups) {
+void generate_datasets(dataset_type dt, std::vector<key_t>& keys, std::vector<key_t>& lookups) {
     auto rng = std::default_random_engine {};
 
-    {
+    if (dt == dense) {
+        std::iota(keys.begin(), keys.end(), 0);
+    } else if (dt == uniform) {
         // create random keys
         std::uniform_int_distribution<> key_distrib(0, 1 << (max_bits - 1));
         std::unordered_set<key_t> unique;
@@ -328,6 +330,8 @@ void generate_datasets(std::vector<key_t>& keys, std::vector<key_t>& lookups) {
 
         std::copy(unique.begin(), unique.end(), keys.begin());
         std::sort(keys.begin(), keys.end());
+    } else {
+        assert(false);
     }
 
     std::uniform_int_distribution<> lookup_distrib(0, keys.size() - 1);
@@ -429,7 +433,7 @@ int main(int argc, char** argv) {
     std::vector<key_t> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(defaultNumLookups);
-    generate_datasets<index_type>(indexed, lookup_keys);
+    generate_datasets<index_type>(dense, indexed, lookup_keys);
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
