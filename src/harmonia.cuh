@@ -45,6 +45,7 @@ struct harmonia_tree {
     unsigned size;
     unsigned depth;
     unsigned caching_depth;
+    std::vector<unsigned> ntg_degrees;
 
     struct device_handle_t {
         const key_t* __restrict__ keys;
@@ -367,11 +368,17 @@ struct harmonia_tree {
         handle.values = d_values;
         // TODO
 
+/*
 	for (unsigned i = 0; i < max_depth; ++i) {
             handle.ntg_degree[i] = 3;
 	}
+*/
+        assert(ntg_degrees.size() < max_depth);
+        for (unsigned i = 0; i < ntg_degrees.size(); ++i) {
+//            handle.ntg_degree[i] = 3;
+            handle.ntg_degree[i] = ntg_degrees[i];
+        }
     }
-#endif
 
     template<class DeviceAllocator>
     __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
@@ -399,9 +406,11 @@ struct harmonia_tree {
             handle.values = guard.values_guard.data();
         }
 
-	for (unsigned i = 0; i < max_depth; ++i) {
-            handle.ntg_degree[i] = 3;
-	}
+        assert(ntg_degrees.size() < max_depth);
+        for (unsigned i = 0; i < ntg_degrees.size(); ++i) {
+//            handle.ntg_degree[i] = 3;
+            handle.ntg_degree[i] = ntg_degrees[i];
+        }
     }
 
     template<unsigned Degree>
@@ -751,7 +760,8 @@ struct harmonia_tree {
 //    __host__ void optimize_ntg(const std::vector<key_t>& sample) {
     __host__ void optimize_ntg(std::vector<key_t>& sample) {
 //sample.resize(20);
-        std::vector<unsigned> ntg_degrees;
+//        std::vector<unsigned> ntg_degrees;
+        ntg_degrees.clear();
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             unsigned current_ntg_degree = 5;
             double avg_steps_before, avg_steps_after;
