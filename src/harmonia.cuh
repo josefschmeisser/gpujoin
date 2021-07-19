@@ -287,53 +287,6 @@ struct harmonia_tree {
         printf("harmonia constant memory required: %lu depth limit: %u full depth: %u\n", bytes_to_copy, caching_depth, depth);
     }
 
-#if 0
-    __host__ void create_device_handle() {//device_handle_t& handle) {
-        // copy upper tree levels to device constant memory
-        copy_children_portion_to_cached_memory();
-
-        key_t* d_keys;
-        auto ret = cudaMalloc(&d_keys, sizeof(key_t)*keys.size());
-        assert(ret == cudaSuccess);
-        ret = cudaMemcpy(d_keys, keys.data(), sizeof(key_t)*keys.size(), cudaMemcpyHostToDevice);
-        assert(ret == cudaSuccess);
-
-        child_ref_t* d_children;
-        ret = cudaMalloc(&d_children, sizeof(child_ref_t)*children.size());
-//printf("child array bytes: %u\n", sizeof(child_ref_t)*children.size());
-        assert(ret == cudaSuccess);
-        ret = cudaMemcpy(d_children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
-        assert(ret == cudaSuccess);
-/* TODO
-        if /*constexpr*/ (!Sorted_Only) {
-            ret = cudaMalloc(&tmp.values, sizeof(value_t)*values.size());
-            assert(ret == cudaSuccess);
-            ret = cudaMemcpy(tmp.values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
-            assert(ret == cudaSuccess);
-        }
-*/
-        // initialize fields
-        device_handle_t tmp;
-        tmp.depth = depth;
-        tmp.caching_depth = caching_depth;
-        tmp.size = size;
-        tmp.keys = d_keys;
-        tmp.children = d_children;
-        // TODO
-
-	for (unsigned i = 0; i < max_depth; ++i) {
-            tmp.ntg_degree[i] = 3;
-	}
-
-        // create cuda struct
-        ret = cudaMalloc(&device_handle, sizeof(device_handle_t));
-        assert(ret == cudaSuccess);
-        ret = cudaMemcpy(device_handle, &tmp, sizeof(device_handle_t), cudaMemcpyHostToDevice);
-        assert(ret == cudaSuccess);
-    }
-#endif
-
-#if 1
     __host__ void create_device_handle(device_handle_t& handle) {
         // copy upper tree levels to device constant memory
         copy_children_portion_to_cached_memory();
@@ -348,14 +301,14 @@ struct harmonia_tree {
         ret = cudaMalloc(&d_children, sizeof(child_ref_t)*children.size());
 //printf("child array bytes: %u\n", sizeof(child_ref_t)*children.size());
         assert(ret == cudaSuccess);
-        ret = cudaMemcpy(d_children, children.data(), sizeof(key_t)*children.size(), cudaMemcpyHostToDevice);
+        ret = cudaMemcpy(d_children, children.data(), sizeof(child_ref_t)*children.size(), cudaMemcpyHostToDevice);
         assert(ret == cudaSuccess);
 
         value_t* d_values = nullptr;
         if /*constexpr*/ (!Sorted_Only) {
             ret = cudaMalloc(&d_values, sizeof(value_t)*values.size());
             assert(ret == cudaSuccess);
-            ret = cudaMemcpy(d_values, values.data(), sizeof(key_t)*values.size(), cudaMemcpyHostToDevice);
+            ret = cudaMemcpy(d_values, values.data(), sizeof(value_t)*values.size(), cudaMemcpyHostToDevice);
             assert(ret == cudaSuccess);
         }
 
