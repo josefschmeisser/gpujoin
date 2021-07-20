@@ -34,6 +34,7 @@ struct huge_page_allocator {
     } default_page_type_;
 
     template <class U> struct rebind { typedef huge_page_allocator<U> other; };
+    huge_page_allocator() throw() : default_node_(0), default_page_type_(transparent_huge) {}
     huge_page_allocator(unsigned default_node, page_type default_page_type) throw() : default_node_(default_node), default_page_type_(default_page_type) {}
     huge_page_allocator(const huge_page_allocator& other) throw() : default_node_(other.default_node_), default_page_type_(other.default_page_type_) {}
 
@@ -46,7 +47,6 @@ struct huge_page_allocator {
 
     size_type round_to_next_page(size_type size, size_type page_size) {
         const auto align_mask = ~(page_size - 1);
-//printf("%p, %p", align_mask, (size + page_size - 1));
         return (size + page_size - 1) & align_mask;
     }
 
@@ -83,7 +83,6 @@ struct huge_page_allocator {
         }
 
         const auto aligned_size = round_to_next_page(size, 1 << default_page_type_);
-printf("page_type: %u, size: %lu, aligned_size: %lu\n", default_page_type_, size, aligned_size);
         const unsigned long allowed_nodes = *numa_get_mems_allowed()->maskp;
         const unsigned long maxnode = numa_get_mems_allowed()->size;
         const unsigned long node_mask = (1 << default_node_) & allowed_nodes;
@@ -91,8 +90,7 @@ printf("page_type: %u, size: %lu, aligned_size: %lu\n", default_page_type_, size
             throw std::runtime_error("node not available for process");
         }
 
-//        const auto r = mbind(ptr, aligned_size, MPOL_BIND, &node_mask, __builtin_popcountl(node_mask), MPOL_MF_STRICT);
-        const auto r = mbind(ptr, aligned_size, MPOL_BIND, &node_mask, 32, MPOL_MF_STRICT);
+        const auto r = mbind(ptr, aligned_size, MPOL_BIND, &node_mask, maxnode, MPOL_MF_STRICT);
         if (r != 0) {
             throw std::runtime_error("mbind failed: "s + std::strerror(errno));
         }
@@ -104,9 +102,7 @@ printf("page_type: %u, size: %lu, aligned_size: %lu\n", default_page_type_, size
         using namespace std::string_literals;
 
         const size_type size = s*sizeof(T);
-printf("%lu\n", 1<<default_page_type_);
         const auto aligned_size = round_to_next_page(s*sizeof(T), 1 << default_page_type_);
-printf("%lu\n", aligned_size);
         const auto r = munmap(p, aligned_size);
         if (r != 0) {
             throw std::runtime_error("munmap failed: "s + std::strerror(errno));
