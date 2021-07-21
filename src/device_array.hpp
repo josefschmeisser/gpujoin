@@ -55,6 +55,7 @@ struct device_array_wrapper {
     T* data() { return device_array_->data(); }
 };
 
+#if 0
 template<class T, class OutputAllocator, class InputAllocator>
 auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
     printf("different types\n");
@@ -93,4 +94,39 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
         return device_array_wrapper<T>(vec.data(), vec.size());
     }
     throw std::runtime_error("not available");
+}
+#endif
+
+template<class T, class OutputAllocator, class InputAllocator>
+auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
+    printf("different types\n");
+
+    using array_allocator_type = typename OutputAllocator::rebind<T>::other;
+
+    // check if rebinding is sufficient
+    if (std::is_same<InputAllocator, array_allocator_type>::value) {
+        printf("same allocator after all\n");
+        return device_array_wrapper<T>(vec.data(), vec.size());
+    }
+
+    // allocate memory
+    array_allocator_type array_allocator = array_allocator;
+    T* ptr = array_allocator.allocate(vec.size()); // allocators already take the target type size into account
+
+    // we are limited to c++14, so no constexpr if here...
+    if (is_cuda_allocator<OutputAllocator>::value) {
+        // we have to use cudaMemcpy here since device memory can't be accessed by the host
+        const auto ret = cudaMemcpy(ptr, vec.data(), vec.size()*sizeof(T), cudaMemcpyHostToDevice);
+        if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
+        return device_array_wrapper<T>(ptr, vec.size(), allocator);
+    } else {
+        std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
+        return device_array_wrapper<T>(ptr, vec.size(), allocator);
+    }
+}
+
+template<class T, class OutputAllocator>
+auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAllocator& allocator) {
+    printf("same type\n");
+    return device_array_wrapper<T>(vec.data(), vec.size());
 }

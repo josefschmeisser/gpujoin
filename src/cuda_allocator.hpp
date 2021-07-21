@@ -4,7 +4,7 @@
 #include <new>
 #include <limits>
 
-template <class T, bool managed = false> 
+template <class T, bool Managed = false> 
 struct cuda_allocator {
     typedef size_t size_type;
     typedef ptrdiff_t difference_type;
@@ -26,16 +26,23 @@ struct cuda_allocator {
     const_pointer address(const_reference x) const { return &x; }
 
     pointer allocate(size_type s, void const * = 0) {
-        if (0 == s)
+        if (0 == s) {
             return NULL;
-        pointer temp;
-        if /*constexpr*/ (managed) {
+        }
+
+        if (s > max_size()) {
+            throw std::bad_array_new_length();
+        }
+
+        pointer temp = nullptr;
+        if /*constexpr*/ (Managed) {
             cudaMallocManaged(&temp, s * sizeof(T));
         } else {
             cudaMalloc(&temp, s * sizeof(T));
         }
-        if (temp == NULL)
+        if (temp == nullptr) {
             throw std::bad_alloc();
+        }
         return temp;
     }
 
@@ -54,4 +61,14 @@ struct cuda_allocator {
     void destroy(pointer p) {
         p->~T();
     }
+};
+
+template<class T>
+struct is_cuda_allocator {
+    static constexpr bool value = false;
+};
+
+template<class T, bool Managed>
+struct is_cuda_allocator<cuda_allocator<T, Managed>> {
+    static constexpr bool value = true;
 };

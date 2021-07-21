@@ -6,7 +6,7 @@
 
 #include <numa.h>
 
-template <class T> 
+template <class T, unsigned NumaNode> 
 struct numa_allocator {
     typedef size_t size_type;
     typedef ptrdiff_t difference_type;
@@ -16,13 +16,19 @@ struct numa_allocator {
     typedef const T& const_reference;
     typedef T value_type;
 
-    unsigned node_ = 0;
-
+    //unsigned node_ = 0;
+/*
     template <class U> struct rebind { typedef numa_allocator<U> other; };
     numa_allocator(unsigned node) throw() : node_(node) {}
     numa_allocator(const numa_allocator& other) throw() : node_(other.node_) {}
 
     template <class U> numa_allocator(const numa_allocator<U>& other) throw() : node_(other.node_) {}
+*/
+    template <class U> struct rebind { typedef numa_allocator<U, NumaNode> other; };
+    numa_allocator() throw() {}
+    numa_allocator(const numa_allocator& other) throw() {}
+
+    template <class U> numa_allocator(const numa_allocator<U, NumaNode>& other) throw() {}
 
     ~numa_allocator() throw() {}
 
@@ -33,7 +39,12 @@ struct numa_allocator {
         if (0 == s) {
             return NULL;
         }
-        pointer temp = numa_alloc_onnode(s * sizeof(T), node_);
+
+        if (s > max_size()) {
+            throw std::bad_array_new_length();
+        }
+
+        pointer temp = numa_alloc_onnode(s * sizeof(T), NumaNode);
         if (temp == NULL) {
             throw std::bad_alloc();
         }
@@ -55,8 +66,18 @@ struct numa_allocator {
     void destroy(pointer p) {
         p->~T();
     }
-
+/*
     unsigned node() const {
         return node_;
-    }
+    }*/
+};
+
+template<class T>
+struct is_numa_allocator {
+    static constexpr bool value = false;
+};
+
+template<class T, unsigned NumaNode>
+struct is_numa_allocator<numa_allocator<T, NumaNode>> {
+    static constexpr bool value = true;
 };
