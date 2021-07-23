@@ -21,6 +21,8 @@
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"
 #include "numa_allocator.hpp"
+#include "huge_page_allocator.hpp"
+#include "mmap_allocator.hpp"
 #include "indexes.cuh"
 #include "device_array.hpp"
 
@@ -37,12 +39,20 @@ static const bool partitial_sorting = false;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
-//using index_type = lower_bound_index<key_t, value_t>;
-using index_type = harmonia_index<key_t, value_t>;
-//using index_type = btree_index<key_t, value_t>;
 
+// host allocator
+//template<class T> using host_allocator_t = huge_page_allocator<T>;
+template<class T> using host_allocator_t = mmap_allocator<T, huge_2mb, 1>;
+
+// device allocators
+template<class T> using device_index_allocator = cuda_allocator<T>;
 using indexed_allocator_t = cuda_allocator<key_t>;
 using lookup_keys_allocator_t = cuda_allocator<key_t>;
+
+//using index_type = lower_bound_index<key_t, value_t>;
+using index_type = harmonia_index<key_t, value_t, device_index_allocator, host_allocator_t>;
+//using index_type = btree_index<key_t, value_t>;
+
 
 template<class IndexStructureType>
 __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
@@ -313,7 +323,7 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
 enum dataset_type : unsigned { dense = 0, uniform };
 
 template<class IndexStructureType>
-void generate_datasets(dataset_type dt, std::vector<key_t>& keys, std::vector<key_t>& lookups) {
+void generate_datasets(dataset_type dt, std::vector<key_t, host_allocator_t<key_t>>& keys, std::vector<key_t, host_allocator_t<key_t>>& lookups) {
     auto rng = std::default_random_engine {};
 
     if (dt == dense) {
@@ -347,7 +357,7 @@ std::sort(lookups.begin(), lookups.end());
 }
 
 template<class IndexStructureType>
-std::unique_ptr<IndexStructureType> build_index(const std::vector<key_t>& h_keys, key_t* d_keys) {
+std::unique_ptr<IndexStructureType> build_index(const std::vector<key_t, host_allocator_t<key_t>>& h_keys, key_t* d_keys) {
     auto index = std::make_unique<IndexStructureType>();
     index->construct(h_keys, d_keys);
     return index;
@@ -430,7 +440,7 @@ int main(int argc, char** argv) {
     std::cout << "index size: " << num_elements << std::endl;
 
     // generate datasets
-    std::vector<key_t> indexed, lookup_keys;
+    std::vector<key_t, host_allocator_t<key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(defaultNumLookups);
     generate_datasets<index_type>(dense, indexed, lookup_keys);

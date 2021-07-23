@@ -28,6 +28,7 @@ __constant__ uint32_t harmonia_upper_levels[42*1024/sizeof(uint32_t)];
 template<
     class Key,
     class Value,
+    template<class T> class HostAllocator,
     unsigned fanout,
     Value not_found,
     bool Sorted_Only = true>
@@ -39,9 +40,10 @@ struct harmonia_tree {
     static const unsigned max_depth = 16;
     static constexpr auto max_keys = fanout - 1;
 
-    std::vector<key_t> keys;
-    std::vector<child_ref_t> children;
-    std::vector<value_t> values;
+    std::vector<key_t, HostAllocator<key_t>> keys;
+    std::vector<child_ref_t, HostAllocator<child_ref_t>> children;
+    std::vector<value_t, HostAllocator<value_t>> values;
+
     unsigned size;
     unsigned depth;
     std::vector<unsigned> ntg_degrees;
@@ -128,7 +130,8 @@ struct harmonia_tree {
         construct_inner_nodes(tree_levels);
     }
 
-    __host__ tree_levels_t construct_levels(const std::vector<key_t>& input) {
+    template<class Vector>
+    __host__ tree_levels_t construct_levels(const Vector& input) {
         uint64_t n = input.size();
 
         auto leaves = std::make_unique<tree_level_t>();
@@ -203,7 +206,9 @@ struct harmonia_tree {
         }
     }
 
-    __host__ void construct(const std::vector<key_t>& input) {
+//    __host__ void construct(const std::vector<key_t>& input) {
+    template<class Vector>
+    __host__ void construct(const Vector& input) {
         auto tree_levels = construct_levels(input);
         auto& root = tree_levels.front()->front();
 

@@ -14,7 +14,8 @@ Passing a struct by value has the advantage that the CUDA runtime copies the ent
 Reads to members of these structs are therefore cached and can futhermore be broadcasted/mutlicasted when accessed by multiple threads.
 */
 
-template<class Key, class Value>
+#if 0
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct btree_index {
     using key_t = Key;
     using value_t = Value;
@@ -39,8 +40,8 @@ struct btree_index {
     } device_index;
 
     __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column) {
-        h_tree_.construct(h_column, 0.7);
-        device_index.d_tree_ = h_tree_.copy_btree_to_gpu(h_tree_.root);
+        h_tree_.construct(h_column, 0.7); // TODO use HostAllocator
+        device_index.d_tree_ = h_tree_.copy_btree_to_gpu(h_tree_.root); // TODO use DeviceAllocator
 /*
         if (prefetch_index) {
             btree::prefetchTree(tree, 0);
@@ -53,7 +54,7 @@ struct btree_index {
     // TODO
 };
 
-template<class Key, class Value>
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct radix_spline_index {
     using key_t = Key;
     using value_t = Value;
@@ -92,15 +93,16 @@ struct radix_spline_index {
         assert(h_column.size() == rrs->num_keys_);
     }
 };
+#endif
 
-template<class Key, class Value>
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct harmonia_index {
     using key_t = Key;
     using value_t = Value;
 
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
-    using harmonia_t = harmonia::harmonia_tree<key_t, value_t, 32 + 1, invalid_tid>;
+    using harmonia_t = harmonia::harmonia_tree<key_t, value_t, HostAllocator, 32 + 1, invalid_tid>;
 
     harmonia_t tree;
     typename harmonia_t::memory_guard_t guard;
@@ -117,13 +119,15 @@ struct harmonia_index {
         }
     } device_index;
 
-    __host__ void construct(const std::vector<key_t>& h_column, const key_t* /*d_column*/) {
+    template<class Vector>
+    __host__ void construct(const Vector& h_column, const key_t* /*d_column*/) {
         tree.construct(h_column);
-        tree.create_device_handle(device_index.d_tree);
+        DeviceAllocator<key_t> device_allocator;
+        tree.create_device_handle(device_index.d_tree, device_allocator, guard);
     }
 };
 
-template<class Key, class Value>
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct lower_bound_index {
     using key_t = Key;
     using value_t = Value;
@@ -142,11 +146,6 @@ struct lower_bound_index {
     } device_index;
 
     __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column) {
-/*
-        device_data_t tmp { d_column, static_cast<unsigned>(h_column.size()) };
-        cudaMalloc(&device_data, sizeof(device_data_t));
-        cudaMemcpy(device_data, &tmp, sizeof(device_data_t), cudaMemcpyHostToDevice);
-*/
         device_index.d_column = d_column;
         device_index.d_size = h_column.size();
     }
