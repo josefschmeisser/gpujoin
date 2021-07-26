@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "rs/multi_map.h"
+#include "device_array.hpp"
 
 namespace rs {
 
@@ -48,16 +49,19 @@ struct DeviceRadixSpline {
     spline_point_t* spline_points_;
 };
 
-template<class Key>
-auto build_radix_spline(const std::vector<Key>& keys) {
+template<class Vector>
+auto build_radix_spline(const Vector& keys) {
+    using key_type = typename Vector::value_type;
+
     auto min = keys.front();
     auto max = keys.back();
-    rs::Builder<Key> rsb(min, max);
+    rs::Builder<key_type> rsb(min, max);
     for (const auto& key : keys) rsb.AddKey(key);
-    rs::RadixSpline<Key> rs = rsb.Finalize();
+    rs::RadixSpline<key_type> rs = rsb.Finalize();
     return rs;
 }
 
+#if 0
 template<class Policy, class Key>
 DeviceRadixSpline<Key>* copy_radix_spline(const rs::RadixSpline<Key>& radixSpline) {
     static Policy f;
@@ -76,6 +80,35 @@ DeviceRadixSpline<Key>* copy_radix_spline(const rs::RadixSpline<Key>& radixSplin
     cudaMalloc(&d_rs, sizeof(DeviceRadixSpline<Key>));
     cudaMemcpy(d_rs, &tmp, sizeof(DeviceRadixSpline<Key>), cudaMemcpyHostToDevice);
     return d_rs;
+}
+#endif
+
+template<class Key>
+struct device_array_guard {
+    using key_t = Key;
+
+    device_array_wrapper<rs_rt_entry_t> radix_table_guard;
+    device_array_wrapper<typename DeviceRadixSpline<key_t>::spline_point_t> spline_points_guard;
+};
+
+template<class Key, class TargetAllocator>
+auto migrate_radix_spline(rs::RadixSpline<Key>& rs, DeviceRadixSpline<Key>& d_rs, TargetAllocator& target_allocator) {
+    device_array_guard<Key> guard;
+
+    RawRadixSpline<Key>* rrs = reinterpret_cast<RawRadixSpline<Key>*>(&rs);
+    std::memcpy(&d_rs, &rs, sizeof(DeviceRadixSpline<Key>));
+
+    // copy radix table
+    typename TargetAllocator::rebind<rs_rt_entry_t>::other table_entry_allocator = target_allocator;
+    guard.radix_table_guard = create_device_array_from(rrs->radix_table_, table_entry_allocator);
+    d_rs.radix_table_ = guard.radix_table_guard.data();
+
+    // copy spline points
+    typename TargetAllocator::rebind<typename DeviceRadixSpline<Key>::spline_point_t>::other spline_point_allocator = target_allocator;
+    guard.spline_points_guard = create_device_array_from(rrs->spline_points_, spline_point_allocator);
+    d_rs.spline_points_ = guard.spline_points_guard.data();
+
+    return guard;
 }
 
 namespace cuda {

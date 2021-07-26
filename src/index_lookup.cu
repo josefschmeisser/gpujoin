@@ -46,16 +46,17 @@ template<class T> using host_allocator_t = mmap_allocator<T, huge_2mb, 1>;
 
 // device allocators
 template<class T> using device_index_allocator = cuda_allocator<T>;
-using indexed_allocator_t = cuda_allocator<key_t>;
-using lookup_keys_allocator_t = cuda_allocator<key_t>;
+using indexed_allocator_t = cuda_allocator<index_key_t>;
+using lookup_keys_allocator_t = cuda_allocator<index_key_t>;
 
-//using index_type = lower_bound_index<key_t, value_t>;
-using index_type = harmonia_index<key_t, value_t, device_index_allocator, host_allocator_t>;
-//using index_type = btree_index<key_t, value_t>;
+//using index_type = lower_bound_index<index_key_t, value_t>;
+//using index_type = harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
+//using index_type = btree_index<index_key_t, value_t>;
+using index_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 
 
 template<class IndexStructureType>
-__global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
+__global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -83,11 +84,11 @@ template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
     class    IndexStructureType>
-__global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
+__global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids) {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
-    typedef cub::BlockLoad<key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+    typedef cub::BlockLoad<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
 
     typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
 
@@ -126,7 +127,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     uint64_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
     key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
 
-    key_t input_thread_data[ITEMS_PER_THREAD];
+    index_key_t input_thread_data[ITEMS_PER_THREAD];
 
 
     for (int i = 0; i < iteration_count; ++i) {
@@ -181,7 +182,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             bool active = lane_id < actual_count;
 
             uint32_t assoc_tid = 0;
-            key_t element = 0xffffffff;
+            index_key_t element = 0xffffffff;
             if (active) {
                 assoc_tid = buffer[old + lane_id] >> 32;
                 element = buffer[old + lane_id] & 0xffffffff;
@@ -209,11 +210,11 @@ template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
     class    IndexStructureType>
-__global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_structure, unsigned n, const key_t* __restrict__ keys, value_t* __restrict__ tids) {
+__global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids) {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
-    typedef cub::BlockLoad<key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+    typedef cub::BlockLoad<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
 
     typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
 
@@ -297,7 +298,7 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
             bool active = lane_id < actual_count;
 
             uint32_t assoc_tid = 0;
-            key_t element = 0xffffffff;
+            index_key_t element = 0xffffffff;
             if (active) {
                 assoc_tid = buffer[old + lane_id] >> 32;
                 element = buffer[old + lane_id] & 0xffffffff;
@@ -323,7 +324,7 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
 enum dataset_type : unsigned { dense = 0, uniform };
 
 template<class IndexStructureType>
-void generate_datasets(dataset_type dt, std::vector<key_t, host_allocator_t<key_t>>& keys, std::vector<key_t, host_allocator_t<key_t>>& lookups) {
+void generate_datasets(dataset_type dt, std::vector<index_key_t, host_allocator_t<index_key_t>>& keys, std::vector<index_key_t, host_allocator_t<index_key_t>>& lookups) {
     auto rng = std::default_random_engine {};
 
     if (dt == dense) {
@@ -331,7 +332,7 @@ void generate_datasets(dataset_type dt, std::vector<key_t, host_allocator_t<key_
     } else if (dt == uniform) {
         // create random keys
         std::uniform_int_distribution<> key_distrib(0, 1 << (max_bits - 1));
-        std::unordered_set<key_t> unique;
+        std::unordered_set<index_key_t> unique;
         unique.reserve(keys.size());
         while (unique.size() < keys.size()) {
             const auto key = key_distrib(rng);
@@ -357,14 +358,14 @@ std::sort(lookups.begin(), lookups.end());
 }
 
 template<class IndexStructureType>
-std::unique_ptr<IndexStructureType> build_index(const std::vector<key_t, host_allocator_t<key_t>>& h_keys, key_t* d_keys) {
+std::unique_ptr<IndexStructureType> build_index(const std::vector<index_key_t, host_allocator_t<index_key_t>>& h_keys, index_key_t* d_keys) {
     auto index = std::make_unique<IndexStructureType>();
     index->construct(h_keys, d_keys);
     return index;
 }
 
 template<class IndexStructureType>
-auto run_lookup_benchmark(IndexStructureType& index_structure, const key_t* d_lookup_keys, unsigned num_lookup_keys) {
+auto run_lookup_benchmark(IndexStructureType& index_structure, const index_key_t* d_lookup_keys, unsigned num_lookup_keys) {
     int num_blocks;
     
     if /*constexpr*/ (!partitial_sorting) {
@@ -440,7 +441,7 @@ int main(int argc, char** argv) {
     std::cout << "index size: " << num_elements << std::endl;
 
     // generate datasets
-    std::vector<key_t, host_allocator_t<key_t>> indexed, lookup_keys;
+    std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(defaultNumLookups);
     generate_datasets<index_type>(dense, indexed, lookup_keys);

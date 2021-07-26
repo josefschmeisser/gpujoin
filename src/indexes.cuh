@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sys/types.h>
 #include <cstdint>
 #include <numeric>
 
@@ -53,12 +54,14 @@ struct btree_index {
     __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column, Allocator& allocator);
     // TODO
 };
+#endif
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct radix_spline_index {
     using key_t = Key;
     using value_t = Value;
 
+    rs::device_array_guard<key_t> guard;
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
     struct device_index_t {
@@ -76,24 +79,33 @@ struct radix_spline_index {
             });
             return (pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
+
+        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
+            assert(false); // TODO implement
+            return value_t();
+        }
     } device_index;
 
-    __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column) {
+    template<class Vector>
+    __host__ void construct(const Vector& h_column, const key_t* d_column) {
         device_index.d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
 
-        // copy radix spline
+        // migrate radix spline
         const auto start = std::chrono::high_resolution_clock::now();
-        device_index.d_rs_ = rs::copy_radix_spline<vector_to_device_array>(h_rs); // TODO
+
+//        device_index.d_rs_ = rs::copy_radix_spline<vector_to_device_array>(h_rs); // TODO
+        DeviceAllocator<key_t> device_allocator;
+        migrate_radix_spline(h_rs, device_index.d_rs_, device_allocator);
+
         const auto finish = std::chrono::high_resolution_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;
-        std::cout << "radixspline transfer time: " << duration << " ms\n";
+        std::cout << "radixspline migration time: " << duration << " ms\n";
 
         auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline<key_t>*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
     }
 };
-#endif
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct harmonia_index {
@@ -145,7 +157,8 @@ struct lower_bound_index {
         }
     } device_index;
 
-    __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column) {
+    template<class Vector>
+    __host__ void construct(const Vector& h_column, const key_t* d_column) {
         device_index.d_column = d_column;
         device_index.d_size = h_column.size();
     }
