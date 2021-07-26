@@ -16,7 +16,11 @@
 
 #include "cuda_utils.cuh"
 #include "LinearProbingHashTable.cuh"
+#include "cuda_allocator.hpp"
+#include "numa_allocator.hpp"
+#include "mmap_allocator.hpp"
 #include "indexes.cuh"
+#include "device_array.hpp"
 
 using namespace cub;
 
@@ -25,6 +29,12 @@ using rs_placement_policy = vector_to_managed_array;
 
 using indexed_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_partkey)>;
 using payload_t = uint32_t;
+
+// host allocator
+template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 1>;
+
+// device allocators
+template<class T> using device_index_allocator = cuda_allocator<T>;
 
 static constexpr bool prefetch_index __attribute__((unused)) = false;
 static constexpr bool sort_indexed_relation = true;
@@ -125,7 +135,7 @@ __global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineit
             continue;
         }
 
-        auto payload = index_structure(lineitem->l_partkey[i]);
+        auto payload = index_structure.lookup(lineitem->l_partkey[i]);
         if (payload != invalid_tid) {
             const auto part_tid = reinterpret_cast<unsigned>(payload);
 
@@ -693,7 +703,7 @@ __global__ void ij_lookup_kernel_3(
         __syncthreads(); // wait until all threads have gathered enough elements
 
 
-#if 0
+#if 1
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
@@ -1060,28 +1070,36 @@ int main(int argc, char** argv) {
     h.run_hj();
 #else
     if (argc < 3) {
-        printf("%s <tpch dataset path> <index type: {0: btree, 1: radixspline, 2: lowerbound> <1: full pipline breaker>\n", argv[0]);
+        printf("%s <tpch dataset path> <index type: {0: btree, 1: harmonia, 2: radixspline, 3: lowerbound> <1: full pipline breaker>\n", argv[0]);
         return 0;
     }
-    enum IndexType : unsigned { btree, radixspline, lowerbound } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
+    enum IndexType : unsigned { btree, harmonia, radixspline, lowerbound } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
     bool full_pipline_breaker = (argc < 4) ? false : std::stoi(argv[3]) != 0;
 
-    switch (index_type) {
+    switch (index_type) {/*
         case IndexType::btree: {
             printf("using btree\n");
             load_and_run_ij<btree_index<indexed_t, payload_t>>(argv[1], full_pipline_breaker);
             break;
-        }/* TODO: add cooperative_lookup
+        }*/
+        case IndexType::harmonia: {
+            printf("using harmonia\n");
+            using index_type = harmonia_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
+            load_and_run_ij<index_type>(argv[1], full_pipline_breaker);
+            break;
+        }
         case IndexType::radixspline: {
             printf("using radixspline\n");
-            load_and_run_ij<radix_spline_index>(argv[1], full_pipline_breaker);
+            using index_type = radix_spline_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
+            load_and_run_ij<index_type>(argv[1], full_pipline_breaker);
             break;
         }
         case IndexType::lowerbound: {
             printf("using lower bound search\n");
-            load_and_run_ij<lower_bound_index>(argv[1], full_pipline_breaker);
+            using index_type = lower_bound_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
+            load_and_run_ij<index_type>(argv[1], full_pipline_breaker);
             break;
-        }*/
+        }
         default:
             std::cerr << "unknown index type: " << index_type << std::endl;
             return 0;

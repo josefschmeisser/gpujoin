@@ -69,7 +69,7 @@ struct radix_spline_index {
         rs::DeviceRadixSpline<key_t> d_rs_;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            const unsigned estimate = rs::cuda::get_estimate(d_rs_, key);
+            const unsigned estimate = rs::cuda::get_estimate(&d_rs_, key); // FIXME accessing this member by a pointer will result in unached global loads
             const unsigned begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
             const unsigned end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
 
@@ -122,7 +122,10 @@ struct harmonia_index {
     struct device_index_t {
         typename harmonia_t::device_handle_t d_tree;
 
-        //__device__ __forceinline__ value_t lookup(const key_t key) const;
+        __device__ __forceinline__ value_t lookup(const key_t key) const {
+            assert(false); // not available
+            return value_t();
+        }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
             //return harmonia_t::lookup<4>(active, d_tree, key);
@@ -148,9 +151,16 @@ struct lower_bound_index {
 
     struct device_index_t {
         const key_t* d_column;
-        const unsigned d_size;
+        unsigned d_size;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
+            //auto pos = branchy_binary_search(key, d_column, d_size);
+            auto pos = branch_free_binary_search(key, d_column, d_size);
+            return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
+        }
+
+        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
+            // TODO implement cooperative binary search
             //auto pos = branchy_binary_search(key, d_column, d_size);
             auto pos = branch_free_binary_search(key, d_column, d_size);
             return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;

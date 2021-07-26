@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 #include <string>
+#include <memory>
+
 #include "cuda_allocator.hpp"
 #include "numa_allocator.hpp"
 

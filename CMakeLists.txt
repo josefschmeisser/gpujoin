@@ -72,7 +72,7 @@ target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
 #                        -lineinfo
                        >)
 
-#add_subdirectory(src/tpch) # TODO
+add_subdirectory(src/tpch) # TODO
 add_subdirectory(test)
 
 add_executable(bf_search src/bf_search.cpp)
