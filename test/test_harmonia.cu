@@ -11,13 +11,15 @@
 using namespace std;
 using namespace harmonia;
 
+template<class T> using harmonia_allocator = std::allocator<T>;
+
 void test_root_only() {
     std::cout << "run test_root_only: ";
     std::vector<uint32_t> keys(7);
     std::iota(keys.begin(), keys.end(), 0);
 
     //template<class Key, class Value, unsigned fanout>
-    harmonia_tree<uint32_t, uint32_t, 8 + 1, std::numeric_limits<uint32_t>::max()> tree;
+    harmonia_tree<uint32_t, uint32_t, harmonia_allocator, 8 + 1, std::numeric_limits<uint32_t>::max()> tree;
     tree.construct(keys);
 
     unsigned i = 0;
@@ -38,7 +40,7 @@ void test_harmonia_host_lookup(unsigned n) {
     std::iota(keys.begin(), keys.end(), 0);
 
     //template<class Key, class Value, unsigned fanout>
-    harmonia_tree<uint32_t, uint32_t, node_size + 1, std::numeric_limits<uint32_t>::max()> tree;
+    harmonia_tree<uint32_t, uint32_t, harmonia_allocator, node_size + 1, std::numeric_limits<uint32_t>::max()> tree;
     tree.construct(keys);
 
     unsigned i = 0;
@@ -55,6 +57,7 @@ void test_harmonia_host_lookup(unsigned n) {
 using harmonia_type = harmonia::harmonia_tree<
     uint32_t,
     uint32_t,
+    harmonia_allocator,
     8 + 1,
     std::numeric_limits<uint32_t>::max()>;
 using harmonia_handle = harmonia_type::device_handle_t;
@@ -84,7 +87,7 @@ void test_harmonia_cuda_lookup(unsigned n) {
     std::iota(keys.begin(), keys.end(), 0);
 
     //template<class Key, class Value, unsigned fanout>
-    using harmonia_t = harmonia_tree<uint32_t, uint32_t, 8 + 1, std::numeric_limits<uint32_t>::max()>;
+    using harmonia_t = harmonia_tree<uint32_t, uint32_t, harmonia_allocator, 8 + 1, std::numeric_limits<uint32_t>::max()>;
     harmonia_t tree;
     tree.construct(keys);
 
