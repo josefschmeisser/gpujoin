@@ -13,8 +13,10 @@ find_package(CUDA)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 # CUDA_ARCHITECTURES was introduced in 3.18, however, we have to support older cmake versions as well
-cmake_policy(SET CMP0104 OLD)
-set_property(GLOBAL PROPERTY CUDA_ARCHITECTURES OFF)
+if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.18.0")
+    cmake_policy(SET CMP0104 OLD)
+    set_property(GLOBAL PROPERTY CUDA_ARCHITECTURES OFF)
+endif()
 
 set(MY_CUDA_TARGET "pascal" CACHE STRING "CUDA target architecture chosen by the user at CMake configure time")
 set_property(CACHE MY_CUDA_TARGET PROPERTY STRINGS pascal volta)
