@@ -8,6 +8,7 @@ set_property(TARGET test_utils PROPERTY CXX_STANDARD 17) # no cuda compiliation 
 target_link_libraries(test_utils gtest gtest_main pthread)
 
 add_executable(test_harmonia test_harmonia.cu)
+target_include_directories(test_harmonia PRIVATE "$<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>")
 
 add_executable(test_huge_page_allocator test_huge_page_allocator.cpp)
 target_link_libraries(test_huge_page_allocator gtest gtest_main pthread numa)
