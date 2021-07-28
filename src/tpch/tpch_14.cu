@@ -25,13 +25,13 @@
 using namespace cub;
 
 using vector_copy_policy = vector_to_managed_array;
-using rs_placement_policy = vector_to_managed_array;
 
 using indexed_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_partkey)>;
 using payload_t = uint32_t;
 
 // host allocator
-template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 1>;
+//template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 1>;
+template<class T> using host_allocator = std::allocator<T>;
 
 // device allocators
 template<class T> using device_index_allocator = cuda_allocator<T>;
@@ -1076,12 +1076,13 @@ int main(int argc, char** argv) {
     enum IndexType : unsigned { btree, harmonia, radixspline, lowerbound } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
     bool full_pipline_breaker = (argc < 4) ? false : std::stoi(argv[3]) != 0;
 
-    switch (index_type) {/*
+    switch (index_type) {
         case IndexType::btree: {
             printf("using btree\n");
-            load_and_run_ij<btree_index<indexed_t, payload_t>>(argv[1], full_pipline_breaker);
+            using index_type = btree_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
+            load_and_run_ij<index_type>(argv[1], full_pipline_breaker);
             break;
-        }*/
+        }
         case IndexType::harmonia: {
             printf("using harmonia\n");
             using index_type = harmonia_index<indexed_t, payload_t, device_index_allocator, host_allocator>;

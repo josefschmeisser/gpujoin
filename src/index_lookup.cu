@@ -21,7 +21,6 @@
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"
 #include "numa_allocator.hpp"
-#include "huge_page_allocator.hpp"
 #include "mmap_allocator.hpp"
 #include "indexes.cuh"
 #include "device_array.hpp"
@@ -42,17 +41,18 @@ using value_t = uint32_t;
 
 // host allocator
 //template<class T> using host_allocator_t = huge_page_allocator<T>;
-template<class T> using host_allocator_t = mmap_allocator<T, huge_2mb, 1>;
+//template<class T> using host_allocator_t = mmap_allocator<T, huge_2mb, 1>;
+template<class T> using host_allocator_t = std::allocator<T>;
 
 // device allocators
 template<class T> using device_index_allocator = cuda_allocator<T>;
 using indexed_allocator_t = cuda_allocator<index_key_t>;
 using lookup_keys_allocator_t = cuda_allocator<index_key_t>;
 
-//using index_type = lower_bound_index<index_key_t, value_t>;
+//using index_type = lower_bound_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 //using index_type = harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
-//using index_type = btree_index<index_key_t, value_t>;
-using index_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
+using index_type = btree_index<index_key_t, value_t, device_index_allocator, host_allocator_t>; // TODO update
+//using index_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 
 
 template<class IndexStructureType>

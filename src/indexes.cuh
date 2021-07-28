@@ -15,7 +15,7 @@ Passing a struct by value has the advantage that the CUDA runtime copies the ent
 Reads to members of these structs are therefore cached and can futhermore be broadcasted/mutlicasted when accessed by multiple threads.
 */
 
-#if 0
+#if 1
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct btree_index {
     using key_t = Key;
@@ -30,7 +30,7 @@ struct btree_index {
     struct device_index_t {
         const typename btree_t::NodeBase* d_tree_;
 
-        __device__ __forceinline__ value_t operator() (const key_t key) const {
+        __device__ __forceinline__ value_t lookup(const key_t key) const {
             return btree_t::lookup(d_tree_, key);
             //return btree_t::lookup_with_hints(tree_, key); // TODO
         }
@@ -40,7 +40,8 @@ struct btree_index {
         }
     } device_index;
 
-    __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column) {
+    template<class Vector>
+    __host__ void construct(const Vector& h_column, const key_t* d_column) {
         h_tree_.construct(h_column, 0.7); // TODO use HostAllocator
         device_index.d_tree_ = h_tree_.copy_btree_to_gpu(h_tree_.root); // TODO use DeviceAllocator
 /*
