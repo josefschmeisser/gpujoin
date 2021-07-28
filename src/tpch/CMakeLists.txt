@@ -26,10 +26,10 @@ target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 # index join executable
 add_executable(cuda_tpch_14 tpch_14.cu)
 target_link_libraries(cuda_tpch_14 tpch_common numa pthread)
-target_include_directories(cuda_tpch_14 PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
+target_include_directories(cuda_tpch_14 PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")
 
 # hash join executable
 add_executable(cuda_hj_tpch_14 tpch_14.cu)
 target_compile_definitions(cuda_hj_tpch_14 PUBLIC USE_HJ)
 target_link_libraries(cuda_hj_tpch_14 tpch_common numa pthread)
-target_include_directories(cuda_hj_tpch_14 PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
+target_include_directories(cuda_hj_tpch_14 PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")

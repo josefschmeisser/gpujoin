@@ -82,6 +82,7 @@ add_executable(bf_search src/bf_search.cpp)
 add_executable(random_access src/random_access.cu)
 
 add_executable(cub_sort src/example_block_radix_sort.cu)
+target_include_directories(cub_sort PRIVATE "$<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>")
 
 add_executable(huge_pages src/huge_pages.cpp)
 target_link_libraries(huge_pages numa)
