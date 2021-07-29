@@ -19,6 +19,12 @@ struct abstract_device_array {
     abstract_device_array(const abstract_device_array&) = delete;
 
     T* data() { return ptr_; }
+
+    T* release() {
+        auto tmp = ptr_;
+        ptr_ = nullptr;
+        return tmp;
+    }
 };
 
 template<class T, class Allocator>
@@ -30,7 +36,9 @@ struct device_array : abstract_device_array<T> {
     device_array(const device_array&) = delete;
 
     ~device_array() {
-        allocator_.deallocate(this->ptr_, sizeof(T)*this->size_);
+        if (this->ptr_) {
+            allocator_.deallocate(this->ptr_, sizeof(T)*this->size_);
+        }
     }
 };
 
@@ -55,6 +63,8 @@ struct device_array_wrapper {
     }
 
     T* data() { return device_array_->data(); }
+
+    T* release() { return device_array_->release(); }
 };
 
 #if 0
@@ -120,10 +130,10 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
         // we have to use cudaMemcpy here since device memory can't be accessed by the host
         const auto ret = cudaMemcpy(ptr, vec.data(), vec.size()*sizeof(T), cudaMemcpyHostToDevice);
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
-        return device_array_wrapper<T>(ptr, vec.size(), allocator);
+        return device_array_wrapper<T>(ptr, vec.size(), array_allocator);
     } else {
         std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
-        return device_array_wrapper<T>(ptr, vec.size(), allocator);
+        return device_array_wrapper<T>(ptr, vec.size(), array_allocator);
     }
 }
 

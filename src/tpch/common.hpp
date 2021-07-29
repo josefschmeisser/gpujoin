@@ -154,12 +154,38 @@ auto copy_relation(const lineitem_table_t& src) {
     plain->l_comment = f(src.l_comment);
 
     lineitem_table_plain_t* dst;
-
     cudaMalloc(&dst, sizeof(lineitem_table_plain_t));
     cudaMemcpy(dst, plain.get(), sizeof(lineitem_table_plain_t), cudaMemcpyHostToDevice);
-/*
-    cudaMallocManaged(&dst, sizeof(lineitem_table_plain_t));
-    std::memcpy(dst, &tmp, sizeof(lineitem_table_plain_t));*/
+    return std::make_pair(dst, std::move(plain));
+}
+
+//template<class VectorAllocator, class TargetAllocator>
+template<class TargetAllocator>
+auto migrate_relation(lineitem_table_t& src, TargetAllocator& target_allocator) {
+    const auto N = src.l_orderkey.size();
+    auto plain = std::make_unique<lineitem_table_plain_t>();
+
+    // copy columns
+    plain->l_orderkey = create_device_array_from(src.l_orderkey, target_allocator).release();
+    plain->l_partkey = create_device_array_from(src.l_partkey, target_allocator).release();
+    plain->l_suppkey = create_device_array_from(src.l_suppkey, target_allocator).release();
+    plain->l_linenumber = create_device_array_from(src.l_linenumber, target_allocator).release();
+    plain->l_quantity = reinterpret_cast<typename decltype(src.l_quantity)::value_type::raw_type*>(create_device_array_from(src.l_quantity, target_allocator).release());
+    plain->l_extendedprice = reinterpret_cast<typename decltype(src.l_extendedprice)::value_type::raw_type*>(create_device_array_from(src.l_extendedprice, target_allocator).release());
+    plain->l_discount = reinterpret_cast<typename decltype(src.l_discount)::value_type::raw_type*>(create_device_array_from(src.l_discount, target_allocator).release());
+    plain->l_tax = reinterpret_cast<typename decltype(src.l_tax)::value_type::raw_type*>(create_device_array_from(src.l_tax, target_allocator).release());
+    plain->l_returnflag = create_device_array_from(src.l_returnflag, target_allocator).release();
+    plain->l_linestatus = create_device_array_from(src.l_linestatus, target_allocator).release();
+    plain->l_shipdate = reinterpret_cast<typename decltype(src.l_shipdate)::value_type::raw_type*>(create_device_array_from(src.l_shipdate, target_allocator).release());
+    plain->l_commitdate = reinterpret_cast<typename decltype(src.l_commitdate)::value_type::raw_type*>(create_device_array_from(src.l_commitdate, target_allocator).release());
+    plain->l_receiptdate = reinterpret_cast<typename decltype(src.l_receiptdate)::value_type::raw_type*>(create_device_array_from(src.l_receiptdate, target_allocator).release());
+    plain->l_shipinstruct = create_device_array_from(src.l_shipinstruct, target_allocator).release();
+    plain->l_shipmode = create_device_array_from(src.l_shipmode, target_allocator).release();
+    plain->l_comment = create_device_array_from(src.l_comment, target_allocator).release();
+
+    lineitem_table_plain_t* dst;
+    cudaMalloc(&dst, sizeof(lineitem_table_plain_t));
+    cudaMemcpy(dst, plain.get(), sizeof(lineitem_table_plain_t), cudaMemcpyHostToDevice);
     return std::make_pair(dst, std::move(plain));
 }
 
@@ -179,12 +205,31 @@ auto copy_relation(const part_table_t& src) {
     plain->p_comment = f(src.p_comment);
 
     part_table_plain_t* dst;
-
     cudaMalloc(&dst, sizeof(part_table_plain_t));
     cudaMemcpy(dst, plain.get(), sizeof(part_table_plain_t), cudaMemcpyHostToDevice);
-/*
-    cudaMallocManaged(&dst, sizeof(part_table_plain_t));
-    std::memcpy(dst, &tmp, sizeof(part_table_plain_t));*/
+    return std::make_pair(dst, std::move(plain));
+}
+
+//template<class VectorAllocator, class TargetAllocator>
+template<class TargetAllocator>
+auto migrate_relation(part_table_t& src, TargetAllocator& target_allocator) {
+    const auto N = src.p_partkey.size();
+    auto plain = std::make_unique<part_table_plain_t>();
+
+    // copy columns
+    plain->p_partkey = create_device_array_from(src.p_partkey, target_allocator).release();
+    plain->p_name = create_device_array_from(src.p_name, target_allocator).release();
+    plain->p_mfgr = create_device_array_from(src.p_mfgr, target_allocator).release();
+    plain->p_brand = create_device_array_from(src.p_brand, target_allocator).release();
+    plain->p_type = create_device_array_from(src.p_type, target_allocator).release();
+    plain->p_size = create_device_array_from(src.p_size, target_allocator).release();
+    plain->p_container = create_device_array_from(src.p_container, target_allocator).release();
+    plain->p_retailprice = reinterpret_cast<typename decltype(src.p_retailprice)::value_type::raw_type*>(create_device_array_from(src.p_retailprice, target_allocator).release());
+    plain->p_comment = create_device_array_from(src.p_comment, target_allocator).release();
+
+    part_table_plain_t* dst;
+    cudaMalloc(&dst, sizeof(part_table_plain_t));
+    cudaMemcpy(dst, plain.get(), sizeof(part_table_plain_t), cudaMemcpyHostToDevice);
     return std::make_pair(dst, std::move(plain));
 }
 

@@ -15,7 +15,6 @@ Passing a struct by value has the advantage that the CUDA runtime copies the ent
 Reads to members of these structs are therefore cached and can futhermore be broadcasted/mutlicasted when accessed by multiple threads.
 */
 
-#if 1
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct btree_index {
     using key_t = Key;
@@ -55,7 +54,6 @@ struct btree_index {
     __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column, Allocator& allocator);
     // TODO
 };
-#endif
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct radix_spline_index {

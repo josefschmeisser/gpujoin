@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <device_atomic_functions.h>
 #include <driver_types.h>
@@ -24,7 +25,7 @@
 
 using namespace cub;
 
-using vector_copy_policy = vector_to_managed_array;
+//using vector_copy_policy = vector_to_managed_array; // TODO remove
 
 using indexed_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_partkey)>;
 using payload_t = uint32_t;
@@ -35,6 +36,7 @@ template<class T> using host_allocator = std::allocator<T>;
 
 // device allocators
 template<class T> using device_index_allocator = cuda_allocator<T>;
+template<class T> using device_table_allocator = cuda_allocator<T>;
 
 static constexpr bool prefetch_index __attribute__((unused)) = false;
 static constexpr bool sort_indexed_relation = true;
@@ -616,6 +618,8 @@ __global__ void ij_lookup_kernel_3(
     __shared__ uint32_t fully_occupied_warps;
     __shared__ uint32_t exhausted_warps;
 
+//    __shared__ uint16_t histogram[32]; // counts the respective msb
+
     __shared__ typename BlockRadixSortT::TempStorage temp_storage;
 
     const int lane_id = threadIdx.x % 32;
@@ -862,10 +866,11 @@ struct helper {
         {
             using namespace std;
             const auto start = chrono::high_resolution_clock::now();
-            //auto [lineitem_device, lineitem_device_ptrs] = copy_relation<vector_copy_policy>(db.lineitem);
-            std::tie(lineitem_device, lineitem_device_ptrs) = copy_relation<vector_copy_policy>(db.lineitem);
-            //auto [part_device, part_device_ptrs] = copy_relation<vector_copy_policy>(db.part);
-            std::tie(part_device, part_device_ptrs) = copy_relation<vector_copy_policy>(db.part);
+            device_table_allocator<int> a;
+            //std::tie(lineitem_device, lineitem_device_ptrs) = copy_relation<vector_copy_policy>(db.lineitem);
+            std::tie(lineitem_device, lineitem_device_ptrs) = migrate_relation(db.lineitem, a);
+            //std::tie(part_device, part_device_ptrs) = copy_relation<vector_copy_policy>(db.part);
+            std::tie(part_device, part_device_ptrs) = migrate_relation(db.part, a);
             const auto finish = chrono::high_resolution_clock::now();
             const auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
             std::cout << "transfer time: " << d << " ms\n";
