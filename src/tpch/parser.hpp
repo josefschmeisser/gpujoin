@@ -179,9 +179,10 @@ struct map_tuple<Mapper, std::tuple<Ts...>> {
     using mapped_type = std::tuple<typename Mapper<Ts>::type...>;
 };
 
-template<class T>
+template<template<typename U> typename VectorAllocator, typename T>
 struct to_unique_ptr_to_vector {
-    using type = std::unique_ptr<std::vector<T>>;
+    template<typename V> using partial = to_unique_ptr_to_vector<VectorAllocator, V>;
+    using type = std::unique_ptr<std::vector<T, VectorAllocator<T>>>;
 };
 
 
@@ -237,9 +238,9 @@ struct tuple_for_index {
 };
 
 
-template<typename TupleType>
+template<typename TupleType, template<typename T> typename VectorAllocator>
 struct worker {
-    using dest_tuple_type = typename map_tuple<to_unique_ptr_to_vector, TupleType>::mapped_type;
+    using dest_tuple_type = typename map_tuple<to_unique_ptr_to_vector<VectorAllocator, void>::template partial, TupleType>::mapped_type;
 
     const char* data_start_;
     const char* partition_start_hint_;
@@ -266,8 +267,8 @@ struct worker {
     void run(dest_tuple_type& dest, size_t dest_begin);
 };
 
-template<typename TupleType>
-void worker<TupleType>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
+template<typename TupleType, template<typename T> typename VectorAllocator>
+void worker<TupleType, VectorAllocator>::initial_run(dest_tuple_type& dest, size_t dest_begin) {
     //printf("=== in worker #%u ===\n", thread_num_);
 /*
     printf("worker #%u initial_run partition_start_hint_: %p\n", thread_num_, partition_start_hint_);
@@ -320,8 +321,8 @@ std::ostream& operator<<(std::ostream& os, const numeric<Precision, Scale>& valu
     return os;
 }
 
-template<typename TupleType>
-void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t dest_begin) {
+template<typename TupleType, template<typename T> typename VectorAllocator>
+void worker<TupleType, VectorAllocator>::run(worker<TupleType, VectorAllocator>::dest_tuple_type& dest, size_t dest_begin) {
     constexpr uint64_t bar_pattern = 0x7C7C7C7C7C7C7C7Cull;
     constexpr uint64_t newline_pattern = 0x0A0A0A0A0A0A0A0Aull;
     constexpr auto column_count = std::tuple_size<TupleType>::value;
@@ -390,8 +391,8 @@ void worker<TupleType>::run(worker<TupleType>::dest_tuple_type& dest, size_t des
 
 unsigned sample_line_width(const char* data_start, size_t data_size);
 
-template<class TupleType>
-void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>::dest_tuple_type& dest) {
+template<class TupleType, template<typename T> typename VectorAllocator>
+void densify(std::vector<worker<TupleType, VectorAllocator>>& workers, typename worker<TupleType, VectorAllocator>::dest_tuple_type& dest) {
     size_t count = 0;
     std::vector<unsigned> state; // worker ids
     for (auto& worker : workers) {
@@ -464,27 +465,27 @@ void densify(std::vector<worker<TupleType>>& workers, typename worker<TupleType>
 template<typename... Ts>
 void allocate_vectors(std::tuple<Ts...>& input_tuple, size_t n) {
     std::apply([&n](Ts&... Args) {
-        ((Args.reset(new typename Ts::element_type()), Args->resize(n)), ...);
+        ((Args.reset(new typename Ts::element_type()), Args->resize(n)), ...); // the unique_ptrs will be allocated with the default allocator
     }, input_tuple);
 }
 
-template<typename TupleType>
+template<typename TupleType, template<typename T> typename VectorAllocator>
 auto create_vectors(size_t n) {
-    using mapped_type = typename map_tuple<to_unique_ptr_to_vector, TupleType>::mapped_type;
+    using mapped_type = typename map_tuple<to_unique_ptr_to_vector<VectorAllocator, void>::template partial, TupleType>::mapped_type;
     mapped_type new_tuple;
     allocate_vectors(new_tuple, n);
     return new_tuple;
 }
 
 
-template<typename TupleType>
+template<typename TupleType, template<typename T> typename VectorAllocator = std::allocator>
 auto parse(const std::string& file) {
-
+    // open file handle
     int handle = open(file.c_str(), O_RDONLY);
     lseek(handle, 0, SEEK_END);
     auto size = lseek(handle, 0, SEEK_CUR);
-    //std::cout << "size: " << size << std::endl;
     assert(size > 0);
+
     // ensure that the mapping size is a multiple of 8 (bytes beyound the file's
     // region are set to zero)
     auto mapping_size = size + 8; // padding for the last partition
@@ -501,10 +502,9 @@ auto parse(const std::string& file) {
 
     std::vector<int32_t> dest1;
     dest1.resize(est_record_count);
-
-
-    auto dest_tuple = create_vectors<TupleType>(est_record_count);
-    std::vector<worker<TupleType>> workers;
+//template<class V> using vec_a = std::allocator<V>;
+    auto dest_tuple = create_vectors<TupleType, VectorAllocator>(est_record_count);
+    std::vector<worker<TupleType, VectorAllocator>> workers;
 
     std::thread threads[num_threads];
 
@@ -544,6 +544,7 @@ auto parse(const std::string& file) {
     densify(workers, dest_tuple);
 
     // cleanup
+    // FIXME use RAII
     munmap(data, mapping_size);
     close(handle);
 
