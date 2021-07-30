@@ -14,6 +14,8 @@
 
 #include "utils.hpp"
 
+template<class T> using table_allocator = std::allocator<T>;
+
 template<unsigned Precision, unsigned Scale>
 struct numeric {
     static constexpr auto precision = Precision;
@@ -30,23 +32,28 @@ struct date {
 };
 static_assert(sizeof(date) == sizeof(date::raw_type));
 
+template<class T>
+struct column {
+    using type = std::vector<T, table_allocator<T>>;
+};
+
 struct lineitem_table_t {
-    std::vector<uint32_t> l_orderkey;
-    std::vector<uint32_t> l_partkey;
-    std::vector<uint32_t> l_suppkey;
-    std::vector<uint32_t> l_linenumber;
-    std::vector<numeric<15, 2>> l_quantity;
-    std::vector<numeric<15, 2>> l_extendedprice;
-    std::vector<numeric<15, 2>> l_discount;
-    std::vector<numeric<15, 2>> l_tax;
-    std::vector<char> l_returnflag;
-    std::vector<char> l_linestatus;
-    std::vector<date> l_shipdate;
-    std::vector<date> l_commitdate;
-    std::vector<date> l_receiptdate;
-    std::vector<std::array<char, 25>> l_shipinstruct;
-    std::vector<std::array<char, 10>> l_shipmode;
-    std::vector<std::array<char, 44>> l_comment;
+    column<uint32_t>::type l_orderkey;
+    column<uint32_t>::type l_partkey;
+    column<uint32_t>::type l_suppkey;
+    column<uint32_t>::type l_linenumber;
+    column<numeric<15, 2>>::type l_quantity;
+    column<numeric<15, 2>>::type l_extendedprice;
+    column<numeric<15, 2>>::type l_discount;
+    column<numeric<15, 2>>::type l_tax;
+    column<char>::type l_returnflag;
+    column<char>::type l_linestatus;
+    column<date>::type l_shipdate;
+    column<date>::type l_commitdate;
+    column<date>::type l_receiptdate;
+    column<std::array<char, 25>>::type l_shipinstruct;
+    column<std::array<char, 10>>::type l_shipmode;
+    column<std::array<char, 44>>::type l_comment;
 };
 
 struct lineitem_table_plain_t {
@@ -83,15 +90,15 @@ create table part
   );*/
 
 struct part_table_t {
-    std::vector<uint32_t> p_partkey;
-    std::vector<std::array<char, 55>> p_name;
-    std::vector<std::array<char, 25>> p_mfgr;
-    std::vector<std::array<char, 10>> p_brand;
-    std::vector<std::array<char, 25>> p_type;
-    std::vector<int32_t> p_size;
-    std::vector<std::array<char, 10>> p_container;
-    std::vector<numeric<15, 2>> p_retailprice;
-    std::vector<std::array<char, 23>> p_comment;
+    column<uint32_t>::type p_partkey;
+    column<std::array<char, 55>>::type p_name;
+    column<std::array<char, 25>>::type p_mfgr;
+    column<std::array<char, 10>>::type p_brand;
+    column<std::array<char, 25>>::type p_type;
+    column<int32_t>::type p_size;
+    column<std::array<char, 10>>::type p_container;
+    column<numeric<15, 2>>::type p_retailprice;
+    column<std::array<char, 23>>::type p_comment;
 };
 
 struct part_table_plain_t {
