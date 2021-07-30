@@ -7,7 +7,9 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <memory>
 #include <tuple>
+#include <utility>
 #include <vector>
 #include <thread>
 #include <string>
@@ -21,6 +23,7 @@
 #include <unistd.h>
 
 #include "common.hpp"
+#include "scope_guard.hpp"
 
 static constexpr bool serialize = false;
 static constexpr size_t min_partition_size = 32*1024*1024;
@@ -481,7 +484,13 @@ auto create_vectors(size_t n) {
 template<typename TupleType, template<typename T> typename VectorAllocator = std::allocator>
 auto parse(const std::string& file) {
     // open file handle
-    int handle = open(file.c_str(), O_RDONLY);
+    auto file_guard = make_scope_guard(open(file.c_str(), O_RDONLY), -1, &close);
+    int handle = file_guard.get(); // TODO
+    if (handle == -1) {
+        throw std::runtime_error(std::string("`open` failed: ") + std::strerror(errno));
+    }
+
+    // determine file length
     lseek(handle, 0, SEEK_END);
     auto size = lseek(handle, 0, SEEK_CUR);
     assert(size > 0);
@@ -490,7 +499,14 @@ auto parse(const std::string& file) {
     // region are set to zero)
     auto mapping_size = size + 8; // padding for the last partition
     // https://stackoverflow.com/questions/47604431/why-we-can-mmap-to-a-file-but-exceed-the-file-size
-    void* data = mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, handle, 0);
+    
+    auto mmap_guard = make_scope_guard(mmap(nullptr, mapping_size, PROT_READ, MAP_SHARED, handle, 0), static_cast<void*>(nullptr), [&mapping_size](void* ptr) {
+        munmap(ptr, mapping_size);
+    });
+    void* data = mmap_guard.get();
+    if (data == nullptr) {
+        throw std::runtime_error(std::string("`mmap` failed: ") + std::strerror(errno));
+    }
     const char* input = reinterpret_cast<const char*>(data);
 
     const auto est_line_width = sample_line_width(input, size);
@@ -502,7 +518,6 @@ auto parse(const std::string& file) {
 
     std::vector<int32_t> dest1;
     dest1.resize(est_record_count);
-//template<class V> using vec_a = std::allocator<V>;
     auto dest_tuple = create_vectors<TupleType, VectorAllocator>(est_record_count);
     std::vector<worker<TupleType, VectorAllocator>> workers;
 
@@ -542,11 +557,6 @@ auto parse(const std::string& file) {
 
     // fill potential gaps in the result vectors
     densify(workers, dest_tuple);
-
-    // cleanup
-    // FIXME use RAII
-    munmap(data, mapping_size);
-    close(handle);
 
     return dest_tuple;
 }
