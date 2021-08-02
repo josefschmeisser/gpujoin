@@ -618,9 +618,19 @@ __global__ void ij_lookup_kernel_3(
     __shared__ uint32_t fully_occupied_warps;
     __shared__ uint32_t exhausted_warps;
 
-//    __shared__ uint16_t histogram[32]; // counts the respective msb
+    __shared__ union {
+   //     uint16_t histogram[32]; // counts the respective msb
+        typename BlockRadixSortT::TempStorage temp_storage;
+    } temp_union;
 
-    __shared__ typename BlockRadixSortT::TempStorage temp_storage;
+
+    const float percentile = 0.9; // TODO
+    const float r = 0.05;
+    float moving_avg = -1.;
+    float moving_seq_avg = -1.;
+    float moving_percentile = -1.;
+
+uint32_t max_partkey = 0;
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
@@ -690,6 +700,39 @@ __global__ void ij_lookup_kernel_3(
 //                __threadfence();
                 assert((join_pair.raw & 0xffffffff) == l_partkey); // TODO
                 assert((join_pair.raw >> 32) == tid); // TODO
+
+
+
+                // update moving percentile
+/*
+                if (moving_percentile < 0.) {
+                    // initialize
+                    moving_percentile = l_partkey;
+                } else if (moving_percentile > l_partkey) {
+                    moving_percentile -= delta/percentile;
+                } else if (moving_percentile < l_partkey) {
+                    moving_percentile += delta/percentile;
+                }
+*/
+                if (moving_percentile < 0.) {
+                    // initialize
+                    moving_avg = l_partkey;
+                    moving_seq_avg = l_partkey*l_partkey;
+                    moving_percentile = l_partkey;
+                } else {
+                    moving_avg = r*l_partkey + (1. - r)*moving_avg;
+                    auto current_var = moving_avg - l_partkey;
+                    current_var *= current_var;
+                    moving_seq_avg = r*current_var + (1. - r)*moving_seq_avg;
+
+                    if (moving_percentile > l_partkey) {
+                        moving_percentile -= sqrtf(moving_seq_avg)*r/percentile;
+                    } else if (moving_percentile < l_partkey) {
+                        moving_percentile += sqrtf(moving_seq_avg)*r/percentile;
+                    }
+                }
+
+                max_partkey = (l_partkey > max_partkey) ? l_partkey : max_partkey;
             }
 
             unexhausted_lanes = __ballot_sync(FULL_MASK, tid < tid_limit);
@@ -706,6 +749,7 @@ __global__ void ij_lookup_kernel_3(
 
         __syncthreads(); // wait until all threads have gathered enough elements
 
+if (lane_id == 0) printf("moving_percentile: %f avg: %f max_partkey: %u diff %f\n", moving_percentile, moving_avg, max_partkey, static_cast<float>(max_partkey)-moving_percentile);
 
 #if 1
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
@@ -716,7 +760,7 @@ __global__ void ij_lookup_kernel_3(
             key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
 
             //BlockRadixSortT(temp_storage.sort).Sort(thread_data, 4, 22); // TODO
-            BlockRadixSortT(temp_storage).SortDescending(thread_data, 4, 22); // TODO
+            BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_data, 4, 22); // TODO
              __syncthreads();
         }
 #endif
@@ -789,6 +833,8 @@ __global__ void ij_lookup_kernel_3(
             atomicDec(&fully_occupied_warps, 0u);
         }
 
+        // reset moving percentile
+//        moving_percentile = -1.;
     }
 }
 
