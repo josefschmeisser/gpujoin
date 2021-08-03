@@ -129,7 +129,7 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
         std::array<char, 10>, // l_shipmode
         std::array<char, 44>  // l_comment
         >;
-    auto result = parse<lineitem_tuple>(file_name);
+    auto result = parse<lineitem_tuple, table_allocator>(file_name);
     table.l_orderkey.swap(*std::get<0>(result));
     table.l_partkey.swap(*std::get<1>(result));
     table.l_suppkey.swap(*std::get<2>(result));
@@ -194,7 +194,7 @@ static void load_part_table(const std::string& file_name, part_table_t& table) {
         numeric<15, 2>,
         std::array<char, 23>
         >;
-    auto result = parse<part_tuple>(file_name);
+    auto result = parse<part_tuple, table_allocator>(file_name);
     table.p_partkey.swap(*std::get<0>(result));
     table.p_name.swap(*std::get<1>(result));
     table.p_mfgr.swap(*std::get<2>(result));
