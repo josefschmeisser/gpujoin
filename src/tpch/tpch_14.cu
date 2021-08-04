@@ -702,18 +702,8 @@ uint32_t max_partkey = 0;
                 assert((join_pair.raw >> 32) == tid); // TODO
 
 
-
+#if 1
                 // update moving percentile
-/*
-                if (moving_percentile < 0.) {
-                    // initialize
-                    moving_percentile = l_partkey;
-                } else if (moving_percentile > l_partkey) {
-                    moving_percentile -= delta/percentile;
-                } else if (moving_percentile < l_partkey) {
-                    moving_percentile += delta/percentile;
-                }
-*/
                 if (moving_percentile < 0.) {
                     // initialize
                     moving_avg = l_partkey;
@@ -728,12 +718,20 @@ uint32_t max_partkey = 0;
                     if (moving_percentile > l_partkey) {
                         moving_percentile -= sqrtf(moving_seq_avg)*r/percentile;
                     } else if (moving_percentile < l_partkey) {
-                        moving_percentile += sqrtf(moving_seq_avg)*r/percentile;
+                        moving_percentile += sqrtf(moving_seq_avg)*r/(1. - percentile);
                     }
                 }
-
+#endif
                 max_partkey = (l_partkey > max_partkey) ? l_partkey : max_partkey;
             }
+
+/*
+// compute moving percentile
+unsigned g = __popc(__ballot_sync(FULL_MASK, active && l_partkey > moving_percentile));
+unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percentile));
+
+// end
+*/
 
             unexhausted_lanes = __ballot_sync(FULL_MASK, tid < tid_limit);
             if (unexhausted_lanes == 0 && lane_id == 0) {
@@ -834,7 +832,7 @@ if (lane_id == 0) printf("moving_percentile: %f avg: %f max_partkey: %u diff %f\
         }
 
         // reset moving percentile
-//        moving_percentile = -1.;
+        moving_percentile = -1.;
     }
 }
 
