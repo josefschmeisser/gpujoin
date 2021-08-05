@@ -1,5 +1,5 @@
 
-add_executable(test_parser tpch/test_parser.cpp) # ../src/tpch/parser.cpp ../src/tpch/common.cpp)
+add_executable(test_parser tpch/test_parser.cpp)
 set_property(TARGET test_parser PROPERTY CXX_STANDARD 17) # no cuda compiliation units involved; so we can use c++17 here
 target_link_libraries(test_parser tpch_common gtest gtest_main pthread)
 
@@ -8,7 +8,7 @@ set_property(TARGET test_utils PROPERTY CXX_STANDARD 17) # no cuda compiliation 
 target_link_libraries(test_utils gtest gtest_main pthread)
 
 add_executable(test_harmonia test_harmonia.cu)
-target_include_directories(test_harmonia PRIVATE "$<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>")
+target_link_libraries(test_harmonia cub)
 
 add_executable(test_huge_page_allocator test_huge_page_allocator.cpp)
 target_link_libraries(test_huge_page_allocator gtest gtest_main pthread numa)
