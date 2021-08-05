@@ -7,7 +7,7 @@ ExternalProject_Add(
     googletest
     PREFIX "google/gtm"
     GIT_REPOSITORY "https://github.com/google/googletest.git"
-    GIT_TAG release-1.8.0
+    GIT_TAG release-1.10.0
     TIMEOUT 10
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
@@ -20,14 +20,13 @@ ExternalProject_Add(
     gtest_src
     PREFIX "google/gtm"
     SOURCE_DIR "google/gtm/src/googletest/googletest"
-    INSTALL_DIR "google/gtm/gtest"
     CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/google/gtm/gtest
         -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
         -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
         -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
     DOWNLOAD_COMMAND ""
     UPDATE_COMMAND ""
+    INSTALL_COMMAND ""
 )
 
 # Build gmock
@@ -35,20 +34,20 @@ ExternalProject_Add(
     gmock_src
     PREFIX "google/gtm"
     SOURCE_DIR "google/gtm/src/googletest/googlemock"
-    INSTALL_DIR "google/gtm/gmock"
     CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/google/gtm/gmock
         -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
         -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
         -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
     DOWNLOAD_COMMAND ""
     UPDATE_COMMAND ""
+    INSTALL_COMMAND ""
 )
 
 # Prepare gtest
-ExternalProject_Get_Property(gtest_src install_dir)
-set(GTEST_INCLUDE_DIR ${install_dir}/include )
-set(GTEST_LIBRARY_PATH ${install_dir}/lib/libgtest.a)
+ExternalProject_Get_Property(gtest_src SOURCE_DIR)
+ExternalProject_Get_Property(gtest_src BINARY_DIR)
+set(GTEST_INCLUDE_DIR ${SOURCE_DIR}/include )
+set(GTEST_LIBRARY_PATH ${BINARY_DIR}/lib/libgtest.a)
 file(MAKE_DIRECTORY ${GTEST_INCLUDE_DIR})
 
 add_library(gtest STATIC IMPORTED)
@@ -56,14 +55,15 @@ set_property(TARGET gtest PROPERTY IMPORTED_LOCATION ${GTEST_LIBRARY_PATH})
 set_property(TARGET gtest APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${GTEST_INCLUDE_DIR})
 
 add_library(gtest_main STATIC IMPORTED)
-set(GTEST_MAIN_LIBRARY_PATH ${install_dir}/lib/libgtest_main.a)
+set(GTEST_MAIN_LIBRARY_PATH ${BINARY_DIR}/lib/libgtest_main.a)
 set_property(TARGET gtest_main PROPERTY IMPORTED_LOCATION ${GTEST_MAIN_LIBRARY_PATH})
 set_property(TARGET gtest_main APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${GTEST_INCLUDE_DIR})
 
 # Prepare gmock
-ExternalProject_Get_Property(gmock_src install_dir)
-set(GMOCK_INCLUDE_DIR ${install_dir}/include)
-set(GMOCK_LIBRARY_PATH ${install_dir}/lib/libgmock.a)
+ExternalProject_Get_Property(gtest_src SOURCE_DIR)
+ExternalProject_Get_Property(gtest_src BINARY_DIR)
+set(GMOCK_INCLUDE_DIR ${SOURCE_DIR}/include)
+set(GMOCK_LIBRARY_PATH ${BINARY_DIR}/lib/libgmock.a)
 file(MAKE_DIRECTORY ${GMOCK_INCLUDE_DIR})
 add_library(gmock STATIC IMPORTED)
 set_property(TARGET gmock PROPERTY IMPORTED_LOCATION ${GMOCK_LIBRARY_PATH})
