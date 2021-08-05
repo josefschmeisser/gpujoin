@@ -96,7 +96,7 @@ struct btree {
 
         // initialize key vector with the largest key value possible
         static constexpr auto maxKey = std::numeric_limits<key_t>::max();
-        for (unsigned i = 0; i < LeafNode::maxEntries; ++i) {
+        for (unsigned i = 0; i < InnerNode::maxEntries; ++i) {
             node->keys[i] = maxKey;
         }
 
@@ -115,7 +115,7 @@ struct btree {
 
     bool append_into(InnerNode* dst, key_t key, NodeBase* child) {
         assert(!dst->header.isLeaf);
-        if (dst->header.count >= LeafNode::maxEntries) { return false; }
+        if (dst->header.count >= InnerNode::maxEntries) { return false; }
 
         dst->keys[dst->header.count] = key;
         dst->children[dst->header.count] = child;
