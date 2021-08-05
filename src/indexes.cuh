@@ -184,9 +184,9 @@ struct no_op_index {
         const key_t* d_column;
         unsigned d_size;
 
-        __device__ __forceinline__ value_t lookup(const key_t key) const {}
+        __device__ __forceinline__ value_t lookup(const key_t key) const { return value_t(); }
 
-        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {}
+        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const { return value_t(); }
     } device_index;
 
     template<class Vector>

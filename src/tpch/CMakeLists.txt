@@ -7,7 +7,7 @@ target_link_libraries(tpch_common pthread)
 set(CPU_TPCH_SRC_FILES cpu_bench.cpp cpu_only.cpp)
 add_executable(tpch ${CPU_TPCH_SRC_FILES})
 set_property(TARGET tpch PROPERTY CXX_STANDARD 17) # no cuda compiliation units involved; so we can use c++17 here
-target_include_directories(tpch PRIVATE $<BUILD_INTERFACE:${JEVENTS_INCLUDE_DIR}>)
+#target_include_directories(tpch PRIVATE $<BUILD_INTERFACE:${JEVENTS_INCLUDE_DIR}>)
 target_link_libraries(tpch tpch_common ${JEVENTS_LIBRARY_PATH} pthread)
 if(ENABLE_PERFBENCHMARKING)
     add_dependencies(tpch jevents)
@@ -25,11 +25,11 @@ target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 
 # index join executable
 add_executable(cuda_tpch_14 tpch_14.cu)
-target_link_libraries(cuda_tpch_14 tpch_common numa pthread)
-target_include_directories(cuda_tpch_14 PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")
+target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
+#target_include_directories(cuda_tpch_14 PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")
 
 # hash join executable
 add_executable(cuda_hj_tpch_14 tpch_14.cu)
 target_compile_definitions(cuda_hj_tpch_14 PUBLIC USE_HJ)
-target_link_libraries(cuda_hj_tpch_14 tpch_common numa pthread)
-target_include_directories(cuda_hj_tpch_14 PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")
+target_link_libraries(cuda_hj_tpch_14 tpch_common numa pthread radixspline cub)
+#target_include_directories(cuda_hj_tpch_14 PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")

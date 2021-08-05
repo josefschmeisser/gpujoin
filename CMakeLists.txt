@@ -51,8 +51,8 @@ include_directories(
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
 )
 
-add_executable(btree_lookup src/btree_lookup.cu)
-target_link_libraries(btree_lookup ${CUDART_LIBRARY} numa)
+#add_executable(btree_lookup src/btree_lookup.cu)
+#target_link_libraries(btree_lookup ${CUDART_LIBRARY} numa)
 
 #add_executable(rs_lookup src/rs_lookup.cu)
 #add_dependencies(rs_lookup RadixSpline)
@@ -60,9 +60,9 @@ target_link_libraries(btree_lookup ${CUDART_LIBRARY} numa)
 #target_include_directories(rs_lookup PRIVATE $<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR}>)
 
 add_executable(index_lookup src/index_lookup.cu)
-add_dependencies(index_lookup RadixSpline cub)
-target_link_libraries(index_lookup ${CUDART_LIBRARY} numa)
-target_include_directories(index_lookup PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")
+#add_dependencies(index_lookup RadixSpline cub)
+target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
+#target_include_directories(index_lookup PRIVATE "$<BUILD_INTERFACE:${RADIXSPLINE_INCLUDE_DIR};${CUB_INCLUDE_DIR}>")
 # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
 # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
 target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
@@ -74,7 +74,7 @@ target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
 #                        -lineinfo
                        >)
 
-add_subdirectory(src/tpch) # TODO
+add_subdirectory(src/tpch)
 add_subdirectory(test)
 
 add_executable(bf_search src/bf_search.cpp)
@@ -82,7 +82,8 @@ add_executable(bf_search src/bf_search.cpp)
 add_executable(random_access src/random_access.cu)
 
 add_executable(cub_sort src/example_block_radix_sort.cu)
-target_include_directories(cub_sort PRIVATE "$<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>")
+#target_include_directories(cub_sort PRIVATE "$<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>")
+target_link_libraries(cub_sort cub)
 
 add_executable(huge_pages src/huge_pages.cpp)
 target_link_libraries(huge_pages numa)
