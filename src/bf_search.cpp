@@ -64,7 +64,7 @@ size_t branch_free_lower_bound_unrolled(T needle, const T* arr, size_t size) {
 
 template<class T, unsigned max_step = 8>
 size_t branch_free_exponential_search(T x, const T* arr, size_t n, float hint) {
-printf("=== search for: %d ===\n", x);
+    printf("=== search for: %d ===\n", x);
     unsigned lower = 0, upper = n;
     int start = static_cast<size_t>((n - 1)*hint);
 
@@ -72,12 +72,11 @@ printf("=== search for: %d ===\n", x);
 
     if (value == x) {
         printf("=== match ===\n");
-        //return start;
     }
 
     bool less = value < x;
     int offset = -1 + 2*less;// -2*less + 1;
-printf("less: %d offset: %d\n", less, offset);
+    printf("less: %d offset: %d\n", less, offset);
     //start = (arr[start + offset] > x) ? start + offset : start;
     unsigned current = std::max(0, std::min<int>(n - 1 , start + offset));
 
@@ -91,25 +90,25 @@ printf("less: %d offset: %d\n", less, offset);
     bool cont = ((arr[current] < x) == less);
     offset = cont ? offset<<1 : offset;
     current = std::max(0, std::min<int>(n - 1 , start + offset));
-printf("1. current: %u  arr[current]: %d offset: %d\n", current, arr[current], offset);
+    printf("1. current: %u  arr[current]: %d offset: %d\n", current, arr[current], offset);
 
     cont = ((arr[current] < x) == less);
     offset = cont ? offset<<1 : offset;
     current = std::max(0, std::min<int>(n - 1 , start + offset));
-printf("2. current: %u  arr[current]: %d offset: %d\n", current, arr[current], offset);
+    printf("2. current: %u  arr[current]: %d offset: %d\n", current, arr[current], offset);
 
     cont = ((arr[current] < x) == less);
     offset = cont ? offset<<1 : offset;
     current = std::max(0, std::min<int>(n - 1 , start + offset));
-printf("3. current: %u  arr[current]: %d offset: %d\n", current, arr[current], offset);
+    printf("3. current: %u  arr[current]: %d offset: %d\n", current, arr[current], offset);
 
 /*
     lower = start - (offset>>less);
     upper = start + (offset>>(1 - less));*/
     if (cont) {
         printf("+++ open bounds +++\n");
-    //    lower = less ? start + (offset>>less) : 0;
-    //    upper = less ? upper : start - (offset>>(1 - less));
+        //lower = less ? start + (offset>>less) : 0;
+        //upper = less ? upper : start - (offset>>(1 - less));
         lower = less  ? std::max<int>(0, start + (offset>>less)) : lower;
         upper = !less ? std::min<int>(n, 1 + start + (offset>>(1 - less))) : upper;
     } else {
@@ -117,16 +116,16 @@ printf("3. current: %u  arr[current]: %d offset: %d\n", current, arr[current], o
         lower = std::max<int>(0, start + (offset>>less));
         upper = std::min<int>(n, 1 + start + (offset>>(1 - less)));
     }
-
-auto pos = branch_free_lower_bound(x, arr, n);
-printf("lower: %lu upper: %lu position: %lu\n", lower, upper, pos);
-
+/*
+    auto pos = branch_free_lower_bound(x, arr, n);
+    printf("lower: %lu upper: %lu position: %lu\n", lower, upper, pos);
+*/
     return lower + branch_free_lower_bound(x, arr + lower, upper - lower);
 }
 
 template<class T, unsigned max_step = 8>
 size_t branch_free_exponential_search2(T x, const T* arr, size_t n, float hint) {
-printf("=== search for: %d ===\n", x);
+    printf("=== search for: %d ===\n", x);
     unsigned lower = 0, upper = n;
     int start = static_cast<size_t>((n - 1)*hint);
 
@@ -134,13 +133,12 @@ printf("=== search for: %d ===\n", x);
 
     if (value == x) {
         printf("=== match ===\n");
-        //return start;
     }
 
     bool cont = true;
     bool less = value < x;
     int offset = -1 + 2*less;
-printf("less: %d offset: %d\n", less, offset);
+    printf("less: %d offset: %d\n", less, offset);
     unsigned current = std::max(0, std::min<int>(n - 1 , start + offset));
 
     for (unsigned i = 0; i < max_step; ++i) {
@@ -149,31 +147,12 @@ printf("less: %d offset: %d\n", less, offset);
         current = std::max(0, std::min<int>(n - 1 , start + offset));
         printf("%u. current: %u  arr[current]: %d offset: %d\n", i, current, arr[current], offset);
     }
-printf("lower: %lu upper: %lu\n", lower, upper);
-
-/*
-    lower = less  ? std::max<int>(0, start + (offset>>less)) * (less) : lower;
-    upper = !less ? std::min<int>(n, 1 + start + (offset>>(1 - less))) : upper;
-*/
-
-/*
-    if (cont) {
-        printf("+++ open bounds +++\n");
-    //    lower = less ? start + (offset>>less) : 0;
-    //    upper = less ? upper : start - (offset>>(1 - less));
-    printf("term: %d\n", 1 + start + (offset>>(1 - less)));
-        lower = less  ? std::max<int>(0, start + (offset>>less)) : lower;
-        upper = !less ? std::min<int>(n, 1 + start + (offset>>(1 - less))) : upper;
-    } else {
-        printf("--- closed bounds ---\n");
-        lower = std::max<int>(0, start + (offset>>less));
-        upper = std::min<int>(n, 1 + start + (offset>>(1 - less)));
-    }*/
+    printf("lower: %u upper: %u\n", lower, upper);
 
     const auto pre_lower = std::max<int>(0, std::min<int>(n, start + (offset>>less)));
     const auto pre_upper = 1 + std::max<int>(0, std::min<int>(n, start + (offset>>(1 - less))));
 
-printf("pre_lower: %lu pre_upper: %lu\n", pre_lower, pre_upper);
+    printf("pre_lower: %d pre_upper: %d\n", pre_lower, pre_upper);
     if (cont) {
         printf("+++ open bounds +++\n");
     }
@@ -181,7 +160,7 @@ printf("pre_lower: %lu pre_upper: %lu\n", pre_lower, pre_upper);
     lower = (!cont || less) ? pre_lower : lower;
     upper = (!cont || !less) ? pre_upper : upper;
 
-printf("lower: %lu upper: %lu\n", lower, upper);
+    printf("lower: %d upper: %d\n", lower, upper);
 
     return lower + branch_free_lower_bound(x, arr + lower, upper - lower);
 }
@@ -198,7 +177,7 @@ int main() {
         std::cout << "value: " << i <<  " std::lower_bound: " << it - data.begin() << " bf: " << pos << " bf unrolled: " << pos2 << std::endl;
         */
 
- //       auto pos = branch_free_exponential_search(i, data.data(), data.size(), 0.5f);
+        //auto pos = branch_free_exponential_search(i, data.data(), data.size(), 0.5f);
         auto pos = branch_free_exponential_search2<int, 4>(i, data.data(), data.size(), 0.5f);
         assert(std_pos == pos);
         printf("std::lower_bound: %lu pos: %lu\n", std_pos, pos);
