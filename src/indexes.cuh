@@ -173,6 +173,26 @@ struct lower_bound_index {
     }
 };
 
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+struct no_op_index {
+    using key_t = Key;
+    using value_t = Value;
+
+    static const value_t invalid_tid = std::numeric_limits<value_t>::max();
+
+    struct device_index_t {
+        const key_t* d_column;
+        unsigned d_size;
+
+        __device__ __forceinline__ value_t lookup(const key_t key) const {}
+
+        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {}
+    } device_index;
+
+    template<class Vector>
+    __host__ void construct(const Vector& h_column, const key_t* d_column) {}
+};
+
 // traits
 template<class IndexType>
 struct requires_sorted_input;
