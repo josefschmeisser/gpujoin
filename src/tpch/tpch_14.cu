@@ -702,7 +702,7 @@ uint32_t max_partkey = 0;
                 assert((join_pair.raw >> 32) == tid); // TODO
 
 
-#if 1
+#if 0
                 // update moving percentile
                 if (moving_percentile < 0.) {
                     // initialize
@@ -747,9 +747,9 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
         __syncthreads(); // wait until all threads have gathered enough elements
 
-if (lane_id == 0) printf("moving_percentile: %f avg: %f max_partkey: %u diff %f\n", moving_percentile, moving_avg, max_partkey, static_cast<float>(max_partkey)-moving_percentile);
+//if (lane_id == 0) printf("moving_percentile: %f avg: %f max_partkey: %u diff %f\n", moving_percentile, moving_avg, max_partkey, static_cast<float>(max_partkey)-moving_percentile);
 
-#if 1
+#if 0
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
@@ -1058,7 +1058,7 @@ struct helper {
 
         decltype(output_index) matches1 = 0;
 
-        enum { BLOCK_THREADS = 128, ITEMS_PER_THREAD = 8 }; // TODO optimize
+        enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
 
         JoinEntry* join_entries1;
         cudaMalloc(&join_entries1, sizeof(JoinEntry)*lineitem_size);
@@ -1122,7 +1122,7 @@ int main(int argc, char** argv) {
         printf("%s <tpch dataset path> <index type: {0: btree, 1: harmonia, 2: radixspline, 3: lowerbound> <1: full pipline breaker>\n", argv[0]);
         return 0;
     }
-    enum IndexType : unsigned { btree, harmonia, radixspline, lowerbound } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
+    enum IndexType : unsigned { btree, harmonia, radixspline, lowerbound, nop } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
     bool full_pipline_breaker = (argc < 4) ? false : std::stoi(argv[3]) != 0;
 
     switch (index_type) {
@@ -1147,6 +1147,12 @@ int main(int argc, char** argv) {
         case IndexType::lowerbound: {
             printf("using lower bound search\n");
             using index_type = lower_bound_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
+            load_and_run_ij<index_type>(argv[1], full_pipline_breaker);
+            break;
+        }
+        case IndexType::nop: {
+            printf("using no_op_index\n");
+            using index_type = no_op_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
             load_and_run_ij<index_type>(argv[1], full_pipline_breaker);
             break;
         }
