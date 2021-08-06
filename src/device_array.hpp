@@ -111,8 +111,6 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
 
 template<class T, class OutputAllocator, class InputAllocator>
 auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
-    printf("different types\n");
-
     using array_allocator_type = typename OutputAllocator::rebind<T>::other;
 
     // check if rebinding is sufficient
@@ -139,6 +137,5 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
 
 template<class T, class OutputAllocator>
 auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAllocator& allocator) {
-    printf("same type\n");
     return device_array_wrapper<T>(vec.data(), vec.size());
 }
