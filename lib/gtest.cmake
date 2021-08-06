@@ -74,7 +74,8 @@ ExternalProject_Get_Property(gtest_src BINARY_DIR)
 if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.18.0") # not sure when this breaking change was really introduced
     set(library_path "${BINARY_DIR}")
 else()
-    cmake_path(APPEND library_path "${BINARY_DIR}" "lib")
+    #cmake_path(APPEND library_path "${BINARY_DIR}" "lib")
+    set(library_path "${BINARY_DIR}/lib")
 endif()
 
 set(GMOCK_INCLUDE_DIR ${SOURCE_DIR}/include)
