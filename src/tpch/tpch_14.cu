@@ -194,7 +194,7 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
         if (i < lineitem_size &&
             lineitem->l_shipdate[i] >= lower_shipdate &&
             lineitem->l_shipdate[i] < upper_shipdate) {
-            payload = index_structure(lineitem->l_partkey[i]);
+            payload = index_structure.lookup(lineitem->l_partkey[i]);
         }
 
         int match = payload != invalid_tid;
