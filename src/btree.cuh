@@ -9,16 +9,24 @@
 
 #include "cuda_utils.cuh"
 #include "search.cuh"
+#include "limited_vector.hpp"
 
 namespace index_structures {
 
 template<
     class Key,
     class Value,
+    template<class T> class HostAllocator,
     Value Not_Found>
 struct btree {
     using key_t = Key;
     using value_t = Value;
+
+    static constexpr size_t page_size = 4 * 1024;
+
+    struct page {
+        uint8_t bytes[page_size];
+    };
 
     struct NodeBase {
         union {
@@ -32,46 +40,43 @@ struct btree {
     static_assert(sizeof(NodeBase) == GPU_CACHE_LINE_SIZE);
 
     struct LeafNode : public NodeBase {
-        static const unsigned pageSize = 4 * 1024;
-        static const unsigned maxEntries = ((pageSize - sizeof(NodeBase)) / (sizeof(key_t) + sizeof(value_t))) - 1;
+        static const unsigned maxEntries = ((page_size - sizeof(NodeBase)) / (sizeof(key_t) + sizeof(value_t))) - 1;
 
         key_t keys[maxEntries];
         value_t payloads[maxEntries];
     };
-    static_assert(sizeof(LeafNode) < LeafNode::pageSize);
+    static_assert(sizeof(LeafNode) < page_size);
 
     struct InnerNode : public NodeBase {
-        static const unsigned pageSize = 4 * 1024;
-        static const unsigned maxEntries = ((pageSize - sizeof(NodeBase) - sizeof(NodeBase*)) / (sizeof(key_t) + sizeof(NodeBase*))) - 1;
+        static const unsigned maxEntries = ((page_size - sizeof(NodeBase) - sizeof(NodeBase*)) / (sizeof(key_t) + sizeof(NodeBase*))) - 1;
 
         key_t keys[maxEntries];
         NodeBase* children[maxEntries + 1];
     };
-    static_assert(sizeof(InnerNode) < InnerNode::pageSize);
+    static_assert(sizeof(InnerNode) < page_size);
 
     NodeBase* root = nullptr;
+    limited_vector<page, HostAllocator<page>> pages;
 
     ~btree() {
         free_tree(root);
     }
 
     __host__ void free_tree(NodeBase* node) {
-        // TODO
+        // no-op
     }
 
     LeafNode* create_leaf() {
-        LeafNode* node;
-        void** dst = reinterpret_cast<void**>(&node);
+        // allocate node
+        pages.emplace_back();
+        LeafNode* node = reinterpret_cast<LeafNode*>(pages.back().bytes);
 
-        // TODO use allocator
-        cudaMallocManaged(dst, LeafNode::pageSize);
-        //node = reinterpret_cast<Node*>(numa_alloc_onnode(Node::pageSize, 0));
         node->header.isLeaf = true;
-
+/*
         // validate alignment
         if ((reinterpret_cast<uintptr_t>(node) & GPU_CACHE_LINE_SIZE-1) != 0) { throw std::runtime_error("unaligned memory"); }
         if ((reinterpret_cast<uintptr_t>(&node->keys[0]) & GPU_CACHE_LINE_SIZE-1) != 0) { throw std::runtime_error("unaligned memory"); }
-
+*/
         // initialize key vector with the largest key value possible
         static constexpr auto maxKey = std::numeric_limits<key_t>::max();
         for (unsigned i = 0; i < LeafNode::maxEntries; ++i) {
@@ -82,18 +87,16 @@ struct btree {
     }
 
     InnerNode* create_inner() {
-        InnerNode* node;
-        void** dst = reinterpret_cast<void**>(&node);
+        // allocate node
+        pages.emplace_back();
+        InnerNode* node = reinterpret_cast<InnerNode*>(pages.back().bytes);
 
-        // TODO use allocator
-        cudaMallocManaged(dst, InnerNode::pageSize);
-        //node = reinterpret_cast<Node*>(numa_alloc_onnode(Node::pageSize, 0));
         node->header.isLeaf = false;
-
+/*
         // validate alignment
         if ((reinterpret_cast<uintptr_t>(node) & GPU_CACHE_LINE_SIZE-1) != 0) { throw std::runtime_error("unaligned memory"); }
         if ((reinterpret_cast<uintptr_t>(&node->keys[0]) & GPU_CACHE_LINE_SIZE-1) != 0) { throw std::runtime_error("unaligned memory"); }
-
+*/
         // initialize key vector with the largest key value possible
         static constexpr auto maxKey = std::numeric_limits<key_t>::max();
         for (unsigned i = 0; i < InnerNode::maxEntries; ++i) {
@@ -160,9 +163,32 @@ struct btree {
         return construct_inner_nodes(current_level, load_factor);
     }
 
-    void construct(const std::vector<key_t>& keys, float load_factor) {
+    size_t estimate_page_count_upper_bound(size_t key_count, float load_factor) {
+        unsigned leaf_space = std::floor(static_cast<float>(LeafNode::maxEntries) * load_factor);
+        unsigned inner_space = std::floor(static_cast<float>(InnerNode::maxEntries) * load_factor);
+        size_t leaf_count = (key_count + leaf_space - 1) / leaf_space;
+
+        size_t inner_count = 0;
+        size_t level_count = leaf_count;
+        while (level_count > 1) {
+            level_count = (level_count + inner_space - 1) / inner_space;
+            inner_count += level_count;
+        }
+
+        return leaf_count + inner_count;
+    }
+
+    template<class Vector>
+    void construct(const Vector& keys, float load_factor) {
         assert(load_factor > 0 && load_factor <= 1.0);
         uint64_t n = keys.size();
+
+        // determine an upper bound for the number of pages required
+        size_t pages_required = estimate_page_count_upper_bound(n, load_factor);
+        std::cout << "estimated page count: " << pages_required << std::endl;
+        //pages.reserve(pages_required);
+        decltype(pages) new_pages(pages_required);
+        pages.swap(new_pages);
 
         std::vector<NodeBase*> leaves;
         LeafNode* node = create_leaf();
@@ -193,6 +219,8 @@ struct btree {
         root = construct_inner_nodes(leaves, load_factor);
 
         std::cout << "tree size: " << tree_size_in_byte(root) / (1024*1024) << " MB" << std::endl;
+
+        std::cout << "actual page count: " << pages.size() << std::endl;
     }
 
     void construct_dense(uint32_t numElements, float load_factor) {
@@ -252,8 +280,8 @@ struct btree {
         }
 
         const auto prefetchNode = [&](const auto& self, Node* node) -> void {
-            cudaMemAdvise(node, Node::pageSize, cudaMemAdviseSetReadMostly, device);
-            cudaMemPrefetchAsync(node, btree::Node::pageSize, device);
+            cudaMemAdvise(node, page_size, cudaMemAdviseSetReadMostly, device);
+            cudaMemPrefetchAsync(node, page_size, device);
 
             if (node->header.isLeaf) return;
             for (unsigned i = 0; i <= node->header.count; ++i) {
@@ -278,7 +306,7 @@ struct btree {
             }
         }
 
-        cudaMemPrefetchAsync(node, isLeaf ? LeafNode::pageSize : InnerNode::pageSize, device);
+        cudaMemPrefetchAsync(node, page_size);
 
         if (isLeaf) return;
     };
@@ -294,28 +322,28 @@ struct btree {
 
     NodeBase* copy_btree_to_gpu(NodeBase* tree) {
         NodeBase* newTree;
-        cudaMalloc(&newTree, tree->header.isLeaf ? LeafNode::pageSize : InnerNode::pageSize);
+        cudaMalloc(&newTree, page_size);
         if (!tree->header.isLeaf) {
             const InnerNode* inner = static_cast<const InnerNode*>(tree);
-            std::unique_ptr<uint8_t[]> tmpMem { new uint8_t[InnerNode::pageSize] };
+            std::unique_ptr<uint8_t[]> tmpMem { new uint8_t[page_size] };
             InnerNode* tmp = reinterpret_cast<InnerNode*>(tmpMem.get());
-            std::memcpy(tmp, tree, InnerNode::pageSize);
+            std::memcpy(tmp, tree, page_size);
             for (unsigned i = 0; i <= tree->header.count; ++i) {
                 NodeBase* child = inner->children[i];
                 NodeBase* newChild = copy_btree_to_gpu(child);
                 tmp->children[i] = newChild;
             }
-            cudaMemcpy(newTree, tmp, InnerNode::pageSize, cudaMemcpyHostToDevice);
+            cudaMemcpy(newTree, tmp, page_size, cudaMemcpyHostToDevice);
         } else {
-            cudaMemcpy(newTree, tree, LeafNode::pageSize, cudaMemcpyHostToDevice);
+            cudaMemcpy(newTree, tree, page_size, cudaMemcpyHostToDevice);
         }
         return newTree;
     }
 
     size_t tree_size_in_byte(const NodeBase* tree) {
-        if (tree->header.isLeaf) { return LeafNode::pageSize; }
+        if (tree->header.isLeaf) { return page_size; }
 
-        size_t size = InnerNode::pageSize;
+        size_t size = page_size;
         for (unsigned i = 0; i <= tree->header.count; ++i) {
             const InnerNode* inner = static_cast<const InnerNode*>(tree);
             const NodeBase* child = inner->children[i];
@@ -415,7 +443,7 @@ struct btree {
 
 #if 0
     __device__ value_t btree_lookup_with_page_replication(const Node* tree, key_t key) {
-        __shared__ uint8_t page_cache[32][Node::pageSize];
+        __shared__ uint8_t page_cache[32][page_size];
 
         const Node* node = tree;
         while (!node->header.isLeaf) {
