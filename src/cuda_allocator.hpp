@@ -1,8 +1,14 @@
 #pragma once
 
 #include <stdlib.h>
+#include <cstddef>
 #include <new>
 #include <limits>
+
+#include <cuda_runtime.h>
+
+#include "allocator_traits.hpp"
+#include "utils.hpp"
 
 template <class T, bool Managed = false> 
 struct cuda_allocator {
@@ -14,11 +20,11 @@ struct cuda_allocator {
     typedef const T& const_reference;
     typedef T value_type;
 
-    template <class U> struct rebind { typedef cuda_allocator<U> other; };
+    template <class U> struct rebind { typedef cuda_allocator<U, Managed> other; };
     cuda_allocator() throw() {}
     cuda_allocator(const cuda_allocator&) throw() {}
 
-    template <class U> cuda_allocator(const cuda_allocator<U>&) throw(){}
+    template <class U, bool OtherManaged> cuda_allocator(const cuda_allocator<U, OtherManaged>&) throw(){}
 
     ~cuda_allocator() throw() {}
 
@@ -64,11 +70,20 @@ struct cuda_allocator {
 };
 
 template<class T>
-struct is_cuda_allocator {
-    static constexpr bool value = false;
+struct target_memcpy<cuda_allocator<T, false>> {
+    void* operator()(void* dest, void* src, size_t n) {
+        const auto ret = cudaMemcpy(dest, src, n, cudaMemcpyHostToDevice);
+        if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
+        return dest;
+    }
 };
 
 template<class T, bool Managed>
 struct is_cuda_allocator<cuda_allocator<T, Managed>> {
     static constexpr bool value = true;
+};
+
+template<class T>
+struct is_allocation_host_accessible<cuda_allocator<T, false>> {
+    static constexpr bool value = false;
 };
