@@ -102,7 +102,7 @@ struct huge_page_allocator {
         using namespace std::string_literals;
 
         const size_type size = s*sizeof(T);
-        const auto aligned_size = round_to_next_page(s*sizeof(T), 1 << default_page_type_);
+        const auto aligned_size = round_to_next_page(size, 1 << default_page_type_);
         const auto r = munmap(p, aligned_size);
         if (r != 0) {
             throw std::runtime_error("munmap failed: "s + std::strerror(errno));
