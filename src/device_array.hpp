@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 
+#include "allocator_traits.hpp"
 #include "cuda_allocator.hpp"
 #include "numa_allocator.hpp"
 
@@ -65,6 +66,10 @@ struct device_array_wrapper {
     T* data() { return device_array_->data(); }
 
     T* release() { return device_array_->release(); }
+
+    void swap(device_array_wrapper& other) {
+        std::swap(device_array_, other.device_array_);
+    }
 };
 
 #if 0

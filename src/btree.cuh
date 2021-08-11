@@ -8,6 +8,7 @@
 #include <limits>
 
 #include "cuda_utils.cuh"
+#include "device_array.hpp"
 #include "search.cuh"
 #include "limited_vector.hpp"
 
@@ -186,7 +187,6 @@ struct btree {
         // determine an upper bound for the number of pages required
         size_t pages_required = estimate_page_count_upper_bound(n, load_factor);
         std::cout << "estimated page count: " << pages_required << std::endl;
-        //pages.reserve(pages_required);
         decltype(pages) new_pages(pages_required);
         pages.swap(new_pages);
 
@@ -338,6 +338,40 @@ struct btree {
             cudaMemcpy(newTree, tree, page_size, cudaMemcpyHostToDevice);
         }
         return newTree;
+    }
+
+    template<class MemcpyFun>
+    NodeBase* migrate_subtree(NodeBase* src, page* dest_pages, size_t& current_pos, MemcpyFun&& memcpy_fun) {
+        NodeBase* dest = reinterpret_cast<NodeBase*>(&dest_pages[current_pos++]);
+        if (!src->header.isLeaf) {
+            const InnerNode* inner = static_cast<const InnerNode*>(src);
+            std::unique_ptr<uint8_t[]> tmpMem { new uint8_t[page_size] };
+            InnerNode* tmp = reinterpret_cast<InnerNode*>(tmpMem.get());
+            std::memcpy(tmp, src, page_size);
+            for (unsigned i = 0; i <= src->header.count; ++i) {
+                NodeBase* child = inner->children[i];
+                NodeBase* newChild = migrate_subtree(child, dest_pages, current_pos, memcpy_fun);
+                tmp->children[i] = newChild;
+            }
+            memcpy_fun(dest, tmp, page_size);
+        } else {
+            memcpy_fun(dest, src, page_size);
+        }
+        return dest;
+    }
+
+    template<class DeviceAllocator>
+    NodeBase* migrate(DeviceAllocator& device_allocator, device_array_wrapper<page>& guard) {
+        // allocate memory
+        typename DeviceAllocator::rebind<page>::other page_allocator = device_allocator;
+        page* migrated_pages = page_allocator.allocate(pages.size());
+        auto new_guard = device_array_wrapper<page>(migrated_pages, pages.size(), page_allocator);
+        guard.swap(new_guard);
+
+        // migrate tree
+        size_t pos = 0;
+        target_memcpy<DeviceAllocator> memcpy_fun;
+        return migrate_subtree(root, migrated_pages, pos, memcpy_fun);
     }
 
     size_t tree_size_in_byte(const NodeBase* tree) {

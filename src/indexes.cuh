@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <cstdint>
 #include <numeric>
+#include <type_traits>
 
 #include "search.cuh"
 #include "btree.cuh"
@@ -22,9 +23,10 @@ struct btree_index {
 
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
-    using btree_t = index_structures::btree<key_t, value_t, invalid_tid>;
+    using btree_t = index_structures::btree<key_t, value_t, HostAllocator, invalid_tid>;
 
     btree_t h_tree_;
+    device_array_wrapper<typename btree_t::page> h_guard;
 
     struct device_index_t {
         const typename btree_t::NodeBase* d_tree_;
@@ -41,13 +43,16 @@ struct btree_index {
 
     template<class Vector>
     __host__ void construct(const Vector& h_column, const key_t* d_column) {
-        h_tree_.construct(h_column, 0.7); // TODO use HostAllocator
-        device_index.d_tree_ = h_tree_.copy_btree_to_gpu(h_tree_.root); // TODO use DeviceAllocator
-/*
-        if (prefetch_index) {
-            btree::prefetchTree(tree, 0);
+        h_tree_.construct(h_column, 0.7);
+
+        if /*constexpr*/ (std::is_same<DeviceAllocator<int>, HostAllocator<int>>::value) {
+            printf("no migration necessary\n");
+            device_index.d_tree_ = h_tree_.root;
+        } else {
+            printf("migrating btree...\n");
+            DeviceAllocator<key_t> device_allocator;
+            device_index.d_tree_ = h_tree_.migrate(device_allocator, h_guard);
         }
-        tree_ = tree;*/
     }
 
     template<class Allocator>
@@ -80,6 +85,8 @@ struct radix_spline_index {
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
+            return lookup(key);
+
             assert(false); // TODO implement
             return value_t();
         }

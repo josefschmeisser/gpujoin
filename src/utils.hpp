@@ -91,3 +91,11 @@ void simple_sample(InputIt first, InputIt last, OutputIt out, size_t n, URBG&& r
         --n;
     }
 }
+
+//template<template<class T> class Allocator>
+template<class T>
+struct target_memcpy {
+    void* operator()(void* dest, void* src, size_t n) {
+        return memcpy(dest, src, n);
+    }
+};
