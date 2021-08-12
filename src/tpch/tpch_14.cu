@@ -220,6 +220,103 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
     }
 }
 
+__device__ __forceinline__ unsigned testfun() { return 0; }
+
+template<
+    int   BLOCK_THREADS,
+    class IndexStructureType >
+__global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    const unsigned my_warp = threadIdx.x / 32;
+    const unsigned my_lane = lane_id();
+    const uint32_t right_mask = __funnelshift_l(0xffffffff, 0, my_lane);
+
+    __shared__ uint32_t l_partkey_buffer[BLOCK_THREADS];
+    __shared__ uint32_t lineitem_tid_buffer[BLOCK_THREADS];
+
+    //__shared__ uint32_t buffer_idx;
+    unsigned buffer_cnt = 0; // number of buffered items in this warp
+    const unsigned buffer_start = 32*my_warp;
+
+    // attributes
+    uint32_t l_shipdate;
+    uint32_t l_partkey;
+
+    unsigned lineitem_tid;
+
+    int i = index;
+    uint32_t unfinished_lanes = __ballot_sync(FULL_MASK, i < lineitem_size);
+    while (unfinished_lanes) {
+        bool active = i < lineitem_size;
+        if (active) {
+            l_shipdate = lineitem->l_shipdate[i];
+            l_partkey = lineitem->l_partkey[i];
+            lineitem_tid = i;
+        }
+
+        active = (lineitem->l_shipdate[i] >= lower_shipdate && lineitem->l_shipdate[i] < upper_shipdate);
+
+        auto active_cnt = __popc(__ballot_sync(FULL_MASK, active));
+
+        while (buffer_cnt + active_cnt > 25) {
+
+            if (active_cnt < 25) {
+                // refill
+                const unsigned offset = __popc((~active) & right_mask);
+
+                const unsigned refill_cnt = min(buffer_cnt, 32 - active_cnt);
+
+                if (!active && offset < buffer_cnt) {
+                    const unsigned buffer_idx = buffer_start + buffer_cnt - offset - 1;
+                    l_partkey = l_partkey_buffer[buffer_idx];
+                    lineitem_tid = lineitem_tid_buffer[buffer_idx];
+                }
+
+                buffer_cnt -= refill_cnt;
+            }
+
+            // next operator
+            payload_t payload = index_structure.cooperative_lookup(active, lineitem->l_partkey[i]);
+
+            const int match = payload != invalid_tid;
+            const uint32_t mask = __ballot_sync(FULL_MASK, match);
+            const unsigned offset = __popc(mask & right_mask);
+
+            unsigned base = 0;
+            if (my_lane == 0) {
+                base = atomicAdd(&output_index, __popc(mask));
+            }
+            base = __shfl_sync(FULL_MASK, base, 0);
+
+            if (match) {
+                auto& join_entry = join_entries[base + offset];
+                join_entry.lineitem_tid = i;
+                join_entry.part_tid = payload;
+            }
+
+            active = false;
+            active_cnt = 0;
+        }
+
+        if (active_cnt > 0) {
+            // fill buffer
+            const unsigned offset = __popc((~active) & right_mask);
+            if (active) {
+                const unsigned buffer_idx = buffer_start + buffer_cnt - offset - 1;
+                l_partkey_buffer[buffer_idx] = l_partkey;
+                lineitem_tid_buffer[buffer_idx] = lineitem_tid;
+            }
+
+            buffer_cnt += active_cnt;
+        }
+
+        i += stride;
+        unfinished_lanes = __ballot_sync(FULL_MASK, i < lineitem_size);
+    }
+}
+
 template<
     int   BLOCK_THREADS,
     int   ITEMS_PER_THREAD,
@@ -698,9 +795,10 @@ uint32_t max_partkey = 0;
                         */
 //                printf("raw: %p tid: %u key: %u\n", (void*)join_pair.raw, (unsigned)(join_pair.raw & 0xffffffff), (unsigned)(join_pair.raw >> 32));
 //                __threadfence();
+/*
                 assert((join_pair.raw & 0xffffffff) == l_partkey); // TODO
                 assert((join_pair.raw >> 32) == tid); // TODO
-
+*/
 
 #if 0
                 // update moving percentile
@@ -824,6 +922,9 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
 
         }
+#else
+        // discard elements
+        if (lane_id == 0) buffer_idx = 0;
 #endif
 
         // by atomically decrementing the counter we can eliminate the need for an additional synchronization barrier
@@ -1068,7 +1169,9 @@ struct helper {
         int num_blocks = num_sms*4; // TODO
 
         const auto start1 = std::chrono::high_resolution_clock::now();
-        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        //ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
