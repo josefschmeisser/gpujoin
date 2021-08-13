@@ -21,9 +21,9 @@ set(CUB_INCLUDE_DIR ${SOURCE_DIR})
 file(MAKE_DIRECTORY ${CUB_INCLUDE_DIR}) # https://gitlab.kitware.com/cmake/cmake/-/issues/15052
 
 # An interface library has no source files, however, we can use it
-# to propagte includes dir via INTERFACE_INCLUDE_DIRECTORIES to targets.
+# to propagte include directories via INTERFACE_INCLUDE_DIRECTORIES to targets.
 # By adding such a library through target_link_libraries() to a target,
-# the library's interface include directories will be propagated to target.
+# the library's interface include directories will be propagated to the target.
 add_library(cub INTERFACE)
 set_target_properties(cub PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CUB_INCLUDE_DIR})
 
