@@ -246,53 +246,59 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
 
     unsigned lineitem_tid;
 
-    int i = index;
-    uint32_t unfinished_lanes = __ballot_sync(FULL_MASK, i < lineitem_size);
-    while (unfinished_lanes) {
-        bool active = i < lineitem_size;
+    uint32_t unfinished_lanes = __ballot_sync(FULL_MASK, index < lineitem_size);
+    while (unfinished_lanes || buffer_cnt > 0) {
+        bool active = index < lineitem_size;
         if (active) {
-            l_shipdate = lineitem->l_shipdate[i];
-            l_partkey = lineitem->l_partkey[i];
-            lineitem_tid = i;
+            l_shipdate = lineitem->l_shipdate[index];
+            l_partkey = lineitem->l_partkey[index];
+            lineitem_tid = index;
         }
 
-        active = (lineitem->l_shipdate[i] >= lower_shipdate && lineitem->l_shipdate[i] < upper_shipdate);
+        if (active) {
+            active = (l_shipdate >= lower_shipdate && l_shipdate < upper_shipdate);
+        }
 
-        auto active_cnt = __popc(__ballot_sync(FULL_MASK, active));
+        const auto active_mask = __ballot_sync(FULL_MASK, active);
+        auto active_cnt = __popc(active_mask);
+//if (my_lane == 0) printf("warp: %u active_cnt: %u\n", my_warp, active_cnt);
+        const unsigned threshold_cnt = (unfinished_lanes == 0) ? 0 : 25;
+        while (buffer_cnt + active_cnt > threshold_cnt) {
 
-        while (buffer_cnt + active_cnt > 25) {
-
-            if (active_cnt < 25) {
+            if (active_cnt < 25 && buffer_cnt > 0) {
                 // refill
-                const unsigned offset = __popc((~active) & right_mask);
+                const unsigned offset = __popc((~active_mask) & right_mask);
 
                 const unsigned refill_cnt = min(buffer_cnt, 32 - active_cnt);
 
                 if (!active && offset < buffer_cnt) {
                     const unsigned buffer_idx = buffer_start + buffer_cnt - offset - 1;
+assert(buffer_idx < BLOCK_THREADS);
                     l_partkey = l_partkey_buffer[buffer_idx];
                     lineitem_tid = lineitem_tid_buffer[buffer_idx];
+                    active = true;
                 }
 
                 buffer_cnt -= refill_cnt;
             }
 
             // next operator
-            payload_t payload = index_structure.cooperative_lookup(active, lineitem->l_partkey[i]);
+            payload_t payload = index_structure.cooperative_lookup(active, l_partkey);
 
             const int match = payload != invalid_tid;
-            const uint32_t mask = __ballot_sync(FULL_MASK, match);
+            const uint32_t mask = __ballot_sync(FULL_MASK, active && match);
             const unsigned offset = __popc(mask & right_mask);
 
             unsigned base = 0;
-            if (my_lane == 0) {
+            if (my_lane == 0 && mask) {
+printf("output_index: %u\n", output_index);
                 base = atomicAdd(&output_index, __popc(mask));
             }
             base = __shfl_sync(FULL_MASK, base, 0);
 
-            if (match) {
+            if (active && match) {
                 auto& join_entry = join_entries[base + offset];
-                join_entry.lineitem_tid = i;
+                join_entry.lineitem_tid = lineitem_tid;
                 join_entry.part_tid = payload;
             }
 
@@ -301,19 +307,24 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
         }
 
         if (active_cnt > 0) {
+//if (my_lane == 0) printf("warp: %u buffering: %u\n", my_warp, active_cnt);
             // fill buffer
-            const unsigned offset = __popc((~active) & right_mask);
+            const unsigned offset = __popc(active_mask & right_mask);
+if (my_lane == 31) printf("warp: %u buffer_cnt: %u offset: %u warp buffer size: %u\n", my_warp, buffer_cnt, offset, buffer_cnt + offset);
             if (active) {
-                const unsigned buffer_idx = buffer_start + buffer_cnt - offset - 1;
+                const unsigned buffer_idx = buffer_start + buffer_cnt + offset;
+assert(buffer_idx < BLOCK_THREADS);
                 l_partkey_buffer[buffer_idx] = l_partkey;
                 lineitem_tid_buffer[buffer_idx] = lineitem_tid;
             }
 
             buffer_cnt += active_cnt;
+if (my_lane == 0) printf("warp: %u buffered: %u\n", my_warp, buffer_cnt);
         }
 
-        i += stride;
-        unfinished_lanes = __ballot_sync(FULL_MASK, i < lineitem_size);
+        index += stride;
+        unfinished_lanes = __ballot_sync(FULL_MASK, index < lineitem_size);
+//if (my_lane == 0) printf("warp: %u index: %u\n", my_warp, index);
     }
 }
 
@@ -1166,7 +1177,7 @@ struct helper {
 
         int num_sms;
         cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-        int num_blocks = num_sms*4; // TODO
+        int num_blocks = 1;// num_sms*4; // TODO
 
         const auto start1 = std::chrono::high_resolution_clock::now();
         //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
