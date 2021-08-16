@@ -10,7 +10,7 @@ struct limited_vector {
     using value_type = T;
 
     limited_vector()
-        : limit_(0), size_(0) {}
+        : vec_(nullptr), limit_(0), size_(0) {}
 
     limited_vector(size_t limit)
         : limit_(limit), size_(0)
@@ -21,7 +21,9 @@ struct limited_vector {
 
     ~limited_vector() {
         static Allocator allocator;
-        allocator.deallocate(vec_, limit_);
+        if (vec_) {
+            allocator.deallocate(vec_, limit_);
+        }
     }
 
     void swap(my_type& other) noexcept {
