@@ -261,7 +261,7 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
 
         const auto active_mask = __ballot_sync(FULL_MASK, active);
         auto active_cnt = __popc(active_mask);
-//if (my_lane == 0) printf("warp: %u active_cnt: %u\n", my_warp, active_cnt);
+
         const unsigned threshold_cnt = (unfinished_lanes == 0) ? 0 : 25;
         while (buffer_cnt + active_cnt > threshold_cnt) {
 
@@ -273,7 +273,6 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
 
                 if (!active && offset < buffer_cnt) {
                     const unsigned buffer_idx = buffer_start + buffer_cnt - offset - 1;
-assert(buffer_idx < BLOCK_THREADS);
                     l_partkey = l_partkey_buffer[buffer_idx];
                     lineitem_tid = lineitem_tid_buffer[buffer_idx];
                     active = true;
@@ -291,7 +290,6 @@ assert(buffer_idx < BLOCK_THREADS);
 
             unsigned base = 0;
             if (my_lane == 0 && mask) {
-printf("output_index: %u\n", output_index);
                 base = atomicAdd(&output_index, __popc(mask));
             }
             base = __shfl_sync(FULL_MASK, base, 0);
@@ -307,25 +305,20 @@ printf("output_index: %u\n", output_index);
         }
 
         if (active_cnt > 0) {
-//if (my_lane == 0) printf("warp: %u buffering: %u\n", my_warp, active_cnt);
             // fill buffer
             const unsigned offset = __popc(active_mask & right_mask);
-if (my_lane == 31) printf("warp: %u buffer_cnt: %u offset: %u warp buffer size: %u\n", my_warp, buffer_cnt, offset, buffer_cnt + offset);
             if (active) {
                 const unsigned buffer_idx = buffer_start + buffer_cnt + offset;
-assert(buffer_idx < BLOCK_THREADS);
                 l_partkey_buffer[buffer_idx] = l_partkey;
                 lineitem_tid_buffer[buffer_idx] = lineitem_tid;
             }
             __syncwarp();
 
             buffer_cnt += active_cnt;
-if (my_lane == 0) printf("warp: %u buffered: %u\n", my_warp, buffer_cnt);
         }
 
         index += stride;
         unfinished_lanes = __ballot_sync(FULL_MASK, index < lineitem_size);
-//if (my_lane == 0) printf("warp: %u index: %u\n", my_warp, index);
     }
 }
 
@@ -531,8 +524,7 @@ items_t& test = (items_t&)arr;
         for (unsigned i = 0; active_lanes != 0; ++i) {
             bool active = i < local_idx;
             auto& p = join_pairs[i];
-//            const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
-            const auto tid = index_structure(p.l_partkey);
+            const auto tid = index_structure.cooperative_lookup(active, p.l_partkey);
 
             if (active) {
                 assert(tid != invalid_tid);
@@ -1182,8 +1174,9 @@ struct helper {
 
         const auto start1 = std::chrono::high_resolution_clock::now();
         //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
-        ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        //ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
