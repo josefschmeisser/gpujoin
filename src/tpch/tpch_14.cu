@@ -317,6 +317,7 @@ assert(buffer_idx < BLOCK_THREADS);
                 l_partkey_buffer[buffer_idx] = l_partkey;
                 lineitem_tid_buffer[buffer_idx] = lineitem_tid;
             }
+            __syncwarp();
 
             buffer_cnt += active_cnt;
 if (my_lane == 0) printf("warp: %u buffered: %u\n", my_warp, buffer_cnt);
@@ -1177,7 +1178,7 @@ struct helper {
 
         int num_sms;
         cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-        int num_blocks = 1;// num_sms*4; // TODO
+        int num_blocks = num_sms*4; // TODO
 
         const auto start1 = std::chrono::high_resolution_clock::now();
         //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
