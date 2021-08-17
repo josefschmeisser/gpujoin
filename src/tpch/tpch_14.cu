@@ -371,7 +371,7 @@ __global__ void ij_lookup_kernel_2(
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
-    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim - 1) / gridDim.x);
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim.x - 1) / gridDim.x);
     unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
     const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
     tid += threadIdx.x; // each threads starts at it's correponding offset
@@ -583,7 +583,7 @@ __global__ void ij_lookup_kernel_3(
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
-    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim - 1) / gridDim.x);
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim.x - 1) / gridDim.x);
     unsigned tid_begin = blockIdx.x * tile_size; // first tid where scanning starts at each new iteration
     const unsigned tid_limit = ; // TODO
 //if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
@@ -737,7 +737,7 @@ uint32_t max_partkey = 0;
     const int warp_id = threadIdx.x / 32;
     const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, lane_id);
 
-    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim - 1) / gridDim.x);
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim.x - 1) / gridDim.x);
     unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
     const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
     tid += threadIdx.x; // each thread starts at it's correponding offset
