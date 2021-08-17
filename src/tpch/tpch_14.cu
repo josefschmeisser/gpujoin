@@ -370,7 +370,8 @@ __global__ void ij_lookup_kernel_2(
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
-    const unsigned tile_size = round_up_pow2((lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
+
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim - 1) / gridDim.x);
     unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
     const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
     tid += threadIdx.x; // each threads starts at it's correponding offset
@@ -582,8 +583,7 @@ __global__ void ij_lookup_kernel_3(
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
-//    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
-    const unsigned tile_size = min(lineitem_size, (lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim - 1) / gridDim.x);
     unsigned tid_begin = blockIdx.x * tile_size; // first tid where scanning starts at each new iteration
     const unsigned tid_limit = ; // TODO
 //if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
@@ -737,12 +737,10 @@ uint32_t max_partkey = 0;
     const int warp_id = threadIdx.x / 32;
     const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, lane_id);
 
-//    const unsigned tile_size = round_up_pow2((lineitem_size + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
-  //  const unsigned tile_size = (lineitem_size + BLOCK_THREADS - 1) / gridDim.x; // TODO cache-line allignment should be sufficient
-    const unsigned tile_size = min(lineitem_size, (lineitem_size + BLOCK_THREADS - 1) / gridDim.x);
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim - 1) / gridDim.x);
     unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
     const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
-    tid += threadIdx.x; // each threads starts at it's correponding offset
+    tid += threadIdx.x; // each thread starts at it's correponding offset
 
 //if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
 
@@ -757,7 +755,7 @@ uint32_t max_partkey = 0;
     uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
 
     while (exhausted_warps < WARPS_PER_BLOCK || buffer_idx > 0) {
-        uint32_t warp_items = 0; // count of items stored into the buffer by this warp (has to be reset after each iteration)
+        uint32_t warp_items = 0; // count of items stored in the buffer by this warp (has to be reset after each iteration)
 
         while (unexhausted_lanes && warp_items < ITEMS_PER_WARP) {
             int active = tid < tid_limit;
@@ -785,7 +783,7 @@ uint32_t max_partkey = 0;
  //atomicAdd(&debug_cnt, item_cnt);
             }
             dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0); // propagate the first buffer target index
-            dest_idx += __popc(active_mask & right_mask); // add each's participating thread's offset
+            dest_idx += __popc(active_mask & right_mask); // add each participating thread's offset
 
             // matrialize attributes
             if (active) {
@@ -851,9 +849,9 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
 //if (lane_id == 0) printf("moving_percentile: %f avg: %f max_partkey: %u diff %f\n", moving_percentile, moving_avg, max_partkey, static_cast<float>(max_partkey)-moving_percentile);
 
-#if 0
+#if 1
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
-//if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
+if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
             const unsigned first_offset = min(0u, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
             uint64_t* thread_data_raw = reinterpret_cast<uint64_t*>(&buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
@@ -897,7 +895,7 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
                 const auto& join_pair = buffer[first_pos + acquired_cnt - 1 - lane_id]; // TODO check
                 assoc_tid = join_pair.lineitem_tid;
                 element = join_pair.l_partkey;
-//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
             payload_t tid_b = index_structure.cooperative_lookup(active, element);
@@ -1174,8 +1172,8 @@ struct helper {
 
         const auto start1 = std::chrono::high_resolution_clock::now();
         //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
-        ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
-        //ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        //ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
