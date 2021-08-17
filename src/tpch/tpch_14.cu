@@ -851,7 +851,7 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
 #if 1
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
-if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
+//if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
             const unsigned first_offset = min(0u, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
             uint64_t* thread_data_raw = reinterpret_cast<uint64_t*>(&buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
@@ -895,7 +895,7 @@ if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
                 const auto& join_pair = buffer[first_pos + acquired_cnt - 1 - lane_id]; // TODO check
                 assoc_tid = join_pair.lineitem_tid;
                 element = join_pair.l_partkey;
-printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
             payload_t tid_b = index_structure.cooperative_lookup(active, element);
@@ -929,13 +929,15 @@ printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid,
         if (lane_id == 0) buffer_idx = 0;
 #endif
 
-        // by atomically decrementing the counter we can eliminate the need for an additional synchronization barrier
-        if (lane_id == 0 && warp_items >= ITEMS_PER_WARP) {
-            atomicDec(&fully_occupied_warps, 0u);
+        // prepare next iteration
+        if (lane_id == 0) {
+            fully_occupied_warps = 0;
         }
 
         // reset moving percentile
         moving_percentile = -1.;
+
+        __syncthreads();
     }
 }
 
