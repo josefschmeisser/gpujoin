@@ -38,3 +38,9 @@ private:
     T* arr_;
     const size_t size_;
 };
+
+// for pre-c++17 compilers
+template<class T>
+auto make_vector_view(T* arr, size_t size) {
+    return vector_view<T>(arr, size);
+}
