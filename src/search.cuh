@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cuda_utils.cuh"
+
 template<class T>
 __device__ unsigned branchy_binary_search(T x, const T* arr, const unsigned size) {
     unsigned lower = 0;
