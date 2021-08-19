@@ -4,15 +4,15 @@
 #include <stdexcept>
 #include <utility>
 
-template<class T, class Allocator>
+template<class T>
 struct vector_view {
-    using my_type = vector_view<T, Allocator>;
+    using my_type = vector_view<T>;
     using value_type = T;
 
     vector_view()
         : arr_(nullptr), size_(0) {}
 
-    vector_view(const T* arr, size_t size)
+    vector_view(T* arr, size_t size)
         : arr_(arr), size_(size)
     {}
 
@@ -35,6 +35,6 @@ struct vector_view {
     auto end() noexcept { return arr_ + size_; }
 
 private:
-    const T* arr_;
+    T* arr_;
     const size_t size_;
 };
