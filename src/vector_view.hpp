@@ -9,10 +9,10 @@ struct vector_view {
     using my_type = vector_view<T>;
     using value_type = T;
 
-    vector_view()
+    vector_view() noexcept
         : arr_(nullptr), size_(0) {}
 
-    vector_view(T* arr, size_t size)
+    vector_view(T* arr, size_t size) noexcept
         : arr_(arr), size_(size)
     {}
 
@@ -32,7 +32,11 @@ struct vector_view {
 
     auto begin() noexcept { return arr_; }
 
+    const auto begin() const noexcept { return arr_; }
+
     auto end() noexcept { return arr_ + size_; }
+
+    const auto end() const noexcept { return arr_ + size_; }
 
 private:
     T* arr_;
