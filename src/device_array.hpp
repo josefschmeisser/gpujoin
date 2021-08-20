@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <memory>
@@ -143,4 +144,12 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
 template<class T, class OutputAllocator>
 auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAllocator& allocator) {
     return device_array_wrapper<T>(vec.data(), vec.size());
+}
+
+template<class T, template<class U> class OutputAllocator>
+auto create_device_array_from(const T* arr, size_t size) {
+    static OutputAllocator<T> allocator;
+    T* ptr = allocator.allocate(size);
+    target_memcpy<OutputAllocator<T>>()(ptr, arr, size*sizeof(T));
+    return device_array_wrapper<T>(ptr, size, allocator);
 }
