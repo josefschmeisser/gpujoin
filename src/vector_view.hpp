@@ -18,6 +18,10 @@ struct vector_view {
 
     ~vector_view() = default;
 
+    T& front() noexcept { return arr_[0]; }
+
+    const T& front() const noexcept { return arr_[0]; }
+
     T& back() noexcept { return arr_[size_ - 1]; }
 
     const T& back() const noexcept { return arr_[size_ - 1]; }
