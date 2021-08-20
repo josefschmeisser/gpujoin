@@ -71,7 +71,7 @@ struct cuda_allocator {
 
 template<class T>
 struct target_memcpy<cuda_allocator<T, false>> {
-    void* operator()(void* dest, void* src, size_t n) {
+    void* operator()(void* dest, const void* src, size_t n) {
         const auto ret = cudaMemcpy(dest, src, n, cudaMemcpyHostToDevice);
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
         return dest;
