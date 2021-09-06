@@ -9,7 +9,7 @@ struct limited_vector {
     using my_type = limited_vector<T, Allocator>;
     using value_type = T;
 
-    limited_vector()
+    limited_vector() noexcept
         : vec_(nullptr), limit_(0), size_(0) {}
 
     limited_vector(size_t limit)

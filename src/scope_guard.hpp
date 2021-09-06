@@ -11,24 +11,24 @@ private:
 
 public:
     template<typename CloserResult>
-    scope_guard(const T guardee, std::function<CloserResult(T)>&& closer) : guardee_(guardee), closer_(closer) {}
+    scope_guard(const T guardee, std::function<CloserResult(T)>&& closer) noexcept : guardee_(guardee), closer_(closer) {}
 
     ~scope_guard() {
         Closer(guardee);
     }
 
-    T get() const {
+    T get() const noexcept {
         return guardee_;
     }
 
     template<typename CloserResult>
-    T release_impl(std::function<CloserResult(T)>&) {
+    T release_impl(std::function<CloserResult(T)>&) noexcept {
         // assign a no-op function
         closer_ = [](T) { return CloserResult(); };
         return guardee_;
     }
 
-    T release() {
+    T release() noexcept {
         return release_impl(closer_);
     }
 };
