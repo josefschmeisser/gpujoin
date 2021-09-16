@@ -853,11 +853,10 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
-            const unsigned first_offset = min(0u, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
+            const unsigned first_offset = max(0, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
             uint64_t* thread_data_raw = reinterpret_cast<uint64_t*>(&buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
             key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
 
-            //BlockRadixSortT(temp_storage.sort).Sort(thread_data, 4, 22); // TODO
             BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_data, 4, 22); // TODO
              __syncthreads();
         }
