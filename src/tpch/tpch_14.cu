@@ -946,6 +946,219 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
 
 
+template<
+    unsigned BLOCK_THREADS,
+    unsigned ITEMS_PER_THREAD,
+    class    IndexStructureType >
+__launch_bounds__ (BLOCK_THREADS)
+__global__ void ij_lookup_kernel_5(
+    const lineitem_table_plain_t* __restrict__ lineitem,
+    const unsigned lineitem_size,
+    const IndexStructureType index_structure,
+    JoinEntry* __restrict__ join_entries)
+{
+    enum {
+        ITEMS_PER_WARP = ITEMS_PER_THREAD * 32, // soft upper limit
+        ITEMS_PER_BLOCK = BLOCK_THREADS*ITEMS_PER_THREAD,
+        WARPS_PER_BLOCK = BLOCK_THREADS / 32,
+        // the last summand ensures that each thread can write one more element during the last scan iteration
+        BUFFER_SIZE = BLOCK_THREADS*(ITEMS_PER_THREAD + 1)
+    };
+
+    // shared memory entry type
+    union join_pair_t {
+        struct { // TODO high low
+            uint32_t l_partkey;
+            uint32_t lineitem_tid;
+        };
+        uint64_t raw;
+    };
+
+    using BlockRadixSortT = cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD>;
+    using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
+
+    __shared__ join_pair_t buffer[BUFFER_SIZE];
+    __shared__ int buffer_idx;
+
+    __shared__ uint32_t fully_occupied_warps;
+    __shared__ uint32_t exhausted_warps;
+
+    __shared__ union {
+        typename BlockRadixSortT::TempStorage temp_storage;
+    } temp_union;
+
+uint32_t max_partkey = 0;
+
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
+    const int max_reuse = warp_id*ITEMS_PER_WARP;
+    const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, lane_id);
+
+    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim.x - 1) / gridDim.x);
+    unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
+    const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
+    tid += threadIdx.x; // each thread starts at it's correponding offset
+
+//if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
+
+    // initialize shared variables
+    if (warp_id == 0 && lane_id == 0) {
+        buffer_idx = 0;
+        fully_occupied_warps = 0;
+        exhausted_warps = 0;
+    }
+    __syncthreads(); // ensure that all shared variables are initialized
+
+    uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
+
+    while (exhausted_warps < WARPS_PER_BLOCK || buffer_idx > 0) {
+        // count of items stored in the buffer by this warp
+        int warp_items = min(ITEMS_PER_WARP, max(0, buffer_idx - max_reuse));
+//if (lane_id == 0) printf("warp: %d reuse: %u\n", warp_id, warp_items);
+
+        while (unexhausted_lanes && warp_items < ITEMS_PER_WARP) {
+            int active = tid < tid_limit;
+
+            // TODO vectorize loads
+
+            // filter predicate
+            if (active) {
+                active = lineitem->l_shipdate[tid] >= lower_shipdate && lineitem->l_shipdate[tid] < upper_shipdate;
+            }
+
+            // fetch attributes
+            uint32_t l_partkey;
+            if (active) {
+                l_partkey = lineitem->l_partkey[tid];
+            }
+
+            // negotiate buffer target positions among all threads in this warp
+            const uint32_t active_mask = __ballot_sync(FULL_MASK, active);
+            const auto item_cnt = __popc(active_mask);
+            warp_items += item_cnt;
+            uint32_t dest_idx = 0;
+            if (lane_id == 0) {
+                dest_idx = atomicAdd(&buffer_idx, item_cnt);
+ //atomicAdd(&debug_cnt, item_cnt);
+            }
+            dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0); // propagate the first buffer target index
+            dest_idx += __popc(active_mask & right_mask); // add each participating thread's offset
+
+            // matrialize attributes
+            if (active) {
+                auto& join_pair = buffer[dest_idx];
+                join_pair.l_partkey = l_partkey;
+                join_pair.lineitem_tid = tid;
+//                printf("tid: %u\n", tid);
+                /*
+                printf("raw: %p rtid: %u rkey: %u tid1: %p key1: %p tid2: %u key2: %u\n", tid, l_partkey, (void*)join_pair.raw, (void*)(join_pair.raw & 0xffffffff),
+                        (void*)(join_pair.raw >> 32), (unsigned)(join_pair.raw & 0xffffffff), (unsigned)(join_pair.raw >> 32));
+                        */
+//                printf("raw: %p tid: %u key: %u\n", (void*)join_pair.raw, (unsigned)(join_pair.raw & 0xffffffff), (unsigned)(join_pair.raw >> 32));
+//                __threadfence();
+/*
+                assert((join_pair.raw & 0xffffffff) == l_partkey); // TODO
+                assert((join_pair.raw >> 32) == tid); // TODO
+*/
+
+                max_partkey = (l_partkey > max_partkey) ? l_partkey : max_partkey;
+            }
+
+            unexhausted_lanes = __ballot_sync(FULL_MASK, tid < tid_limit);
+            if (unexhausted_lanes == 0 && lane_id == 0) {
+                atomicInc(&exhausted_warps, UINT_MAX);
+            }
+
+            tid += BLOCK_THREADS; // each tile is organized as a consecutive succession of elements belonging to the current thread block
+        }
+
+        if (lane_id == 0 && warp_items >= ITEMS_PER_WARP) {
+            atomicInc(&fully_occupied_warps, UINT_MAX);
+        }
+
+        __syncthreads(); // wait until all threads have gathered enough elements
+
+#if 1
+        if (fully_occupied_warps == WARPS_PER_BLOCK) {
+//if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
+
+            const unsigned first_offset = max(0, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
+
+//if (warp_id == 0 && lane_id == 0) printf("=== first_offset: %u\n", first_offset);
+            uint64_t* thread_data_raw = reinterpret_cast<uint64_t*>(&buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
+            key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
+
+            BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_data, 4, 22);
+             __syncthreads();
+        }
+#endif
+
+#if 1
+        // empty buffer
+        for (unsigned i = 0u; i < ITEMS_PER_THREAD; ++i) {
+            unsigned old;
+            if (lane_id == 0) {
+                // T atomic_sub_safe(T* address, T val)
+                old = atomic_sub_safe(&buffer_idx, 32);
+            }
+            old = __shfl_sync(FULL_MASK, old, 0);
+            const auto acquired_cnt = min(old, 32);
+            const auto first_pos = old - acquired_cnt;
+//if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+//if (lane_id == 0) atomicAdd(&debug_cnt, acquired_cnt);
+
+            if (acquired_cnt == 0u) break;
+
+            bool active = lane_id < acquired_cnt;
+
+            uint32_t assoc_tid = 0u;
+            key_t element;
+            if (active) {
+                const auto& join_pair = buffer[first_pos + acquired_cnt - 1 - lane_id]; // TODO check
+                assoc_tid = join_pair.lineitem_tid;
+                element = join_pair.l_partkey;
+//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+            }
+
+            payload_t tid_b = index_structure.cooperative_lookup(active, element);
+
+            active = active && (tid_b != invalid_tid);
+
+            // negotiate output buffer target positions
+            const uint32_t active_mask = __ballot_sync(FULL_MASK, active);
+            const auto item_cnt = __popc(active_mask);
+//assert(item_cnt == acquired_cnt);
+            uint32_t dest_idx = 0;
+            if (lane_id == 0) {
+                dest_idx = atomicAdd(&output_index, item_cnt);
+            }
+            dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0); // propagate the first buffer target index
+            dest_idx += __popc(active_mask & right_mask); // add each's participating thread's offset
+
+            // write entry into ouput buffer
+            if (active) {
+//printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+                auto& join_entry = join_entries[dest_idx];
+                join_entry.lineitem_tid = assoc_tid;
+                join_entry.part_tid = tid_b;
+            }
+
+//printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
+
+        }
+#else
+        // discard elements
+        if (lane_id == 0) buffer_idx = 0;
+#endif
+
+        // prepare next iteration
+        if (lane_id == 0) {
+            fully_occupied_warps = 0;
+        }
+
+        __syncthreads();
+    }
+}
 
 
 
@@ -1174,8 +1387,9 @@ struct helper {
         const auto start1 = std::chrono::high_resolution_clock::now();
         //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
-        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        //ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        ij_lookup_kernel_5<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
