@@ -234,7 +234,7 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
     const uint32_t right_mask = __funnelshift_l(0xffffffff, 0, my_lane);
 
     __shared__ uint32_t l_partkey_buffer[BLOCK_THREADS];
-    __shared__ uint32_t lineitem_tid_buffer[BLOCK_THREADS];
+    __shared__ uint32_t lineitem_buffer_pos[BLOCK_THREADS];
 
     //__shared__ uint32_t buffer_idx;
     unsigned buffer_cnt = 0; // number of buffered items in this warp
@@ -274,7 +274,7 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
                 if (!active && offset < buffer_cnt) {
                     const unsigned buffer_idx = buffer_start + buffer_cnt - offset - 1;
                     l_partkey = l_partkey_buffer[buffer_idx];
-                    lineitem_tid = lineitem_tid_buffer[buffer_idx];
+                    lineitem_tid = lineitem_buffer_pos[buffer_idx];
                     active = true;
                 }
 
@@ -310,7 +310,7 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
             if (active) {
                 const unsigned buffer_idx = buffer_start + buffer_cnt + offset;
                 l_partkey_buffer[buffer_idx] = l_partkey;
-                lineitem_tid_buffer[buffer_idx] = lineitem_tid;
+                lineitem_buffer_pos[buffer_idx] = lineitem_tid;
             }
             __syncwarp();
 
@@ -343,7 +343,7 @@ __global__ void ij_lookup_kernel_2(
     typedef BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
 
     __shared__ uint32_t l_partkey_buffer[BUFFER_SIZE];
-    __shared__ uint32_t lineitem_tid_buffer[BUFFER_SIZE];
+    __shared__ uint32_t lineitem_buffer_pos[BUFFER_SIZE];
     __shared__ uint32_t buffer_idx;
 
     __shared__ uint32_t fully_occupied_warps;
@@ -419,7 +419,7 @@ __global__ void ij_lookup_kernel_2(
             // matrialize attributes
             if (active && local_idx >= ITEMS_PER_THREAD) {
                 // buffer items
-                lineitem_tid_buffer[dest_idx] = tid;
+                lineitem_buffer_pos[dest_idx] = tid;
                 l_partkey_buffer[dest_idx] = l_partkey;
             } else if (active) {
                 // store items in registers
@@ -479,7 +479,7 @@ __global__ void ij_lookup_kernel_2(
             const auto limit = min(prefix_sum + required, refill_cnt);
             for (; prefix_sum < limit; ++prefix_sum) {
                 auto& p = join_pairs[local_idx++];
-                p.lineitem_tid = lineitem_tid_buffer[refill_idx_start + prefix_sum];
+                p.lineitem_tid = lineitem_buffer_pos[refill_idx_start + prefix_sum];
                 p.l_partkey = l_partkey_buffer[refill_idx_start + prefix_sum];
             }
 
@@ -945,17 +945,20 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
 
 
-
 template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
     class    IndexStructureType >
 __launch_bounds__ (BLOCK_THREADS)
-__global__ void ij_lookup_kernel_5(
+__global__ void ij_full_kernel_2(
     const lineitem_table_plain_t* __restrict__ lineitem,
     const unsigned lineitem_size,
+    const part_table_plain_t* __restrict__ part,
+    const unsigned part_size,
     const IndexStructureType index_structure,
-    JoinEntry* __restrict__ join_entries)
+    int64_t* __restrict__ l_extendedprice_buffer,
+    int64_t* __restrict__ l_discount_buffer
+    )
 {
     enum {
         ITEMS_PER_WARP = ITEMS_PER_THREAD * 32, // soft upper limit
@@ -965,19 +968,15 @@ __global__ void ij_lookup_kernel_5(
         BUFFER_SIZE = BLOCK_THREADS*(ITEMS_PER_THREAD + 1)
     };
 
-    // shared memory entry type
-    union join_pair_t {
-        struct { // TODO high low
-            uint32_t l_partkey;
-            uint32_t lineitem_tid;
-        };
-        uint64_t raw;
-    };
+    using BlockRadixSortT = cub::BlockRadixSort<uint32_t, BLOCK_THREADS, ITEMS_PER_THREAD, uint32_t>;
+    using key_array_t = uint32_t[ITEMS_PER_THREAD];
+    using value_array_t = uint32_t[ITEMS_PER_THREAD];
 
-    using BlockRadixSortT = cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD>;
-    using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
+    l_extendedprice_buffer += blockIdx.x*BUFFER_SIZE;
+    l_discount_buffer += blockIdx.x*BUFFER_SIZE;
 
-    __shared__ join_pair_t buffer[BUFFER_SIZE];
+    __shared__ uint32_t l_partkey_buffer[BUFFER_SIZE];
+    __shared__ uint32_t lineitem_buffer_pos[BUFFER_SIZE];
     __shared__ int buffer_idx;
 
     __shared__ uint32_t fully_occupied_warps;
@@ -1001,6 +1000,14 @@ uint32_t max_partkey = 0;
 
 //if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
 
+    uint32_t l_shipdate;
+    uint32_t l_partkey;
+    int64_t l_extendedprice;
+    int64_t l_discount;
+
+    int64_t sum1 = 0;
+    int64_t sum2 = 0;
+
     // initialize shared variables
     if (warp_id == 0 && lane_id == 0) {
         buffer_idx = 0;
@@ -1019,18 +1026,14 @@ uint32_t max_partkey = 0;
         while (unexhausted_lanes && warp_items < ITEMS_PER_WARP) {
             int active = tid < tid_limit;
 
-            // TODO vectorize loads
+            // fetch attributes
+            l_shipdate = lineitem->l_shipdate[tid];
+            l_partkey = lineitem->l_partkey[tid];
+            l_extendedprice = lineitem->l_extendedprice[tid];
+            l_discount = lineitem->l_discount[tid];
 
             // filter predicate
-            if (active) {
-                active = lineitem->l_shipdate[tid] >= lower_shipdate && lineitem->l_shipdate[tid] < upper_shipdate;
-            }
-
-            // fetch attributes
-            uint32_t l_partkey;
-            if (active) {
-                l_partkey = lineitem->l_partkey[tid];
-            }
+            active = active && l_shipdate >= lower_shipdate && l_shipdate < upper_shipdate;
 
             // negotiate buffer target positions among all threads in this warp
             const uint32_t active_mask = __ballot_sync(FULL_MASK, active);
@@ -1046,21 +1049,10 @@ uint32_t max_partkey = 0;
 
             // matrialize attributes
             if (active) {
-                auto& join_pair = buffer[dest_idx];
-                join_pair.l_partkey = l_partkey;
-                join_pair.lineitem_tid = tid;
-//                printf("tid: %u\n", tid);
-                /*
-                printf("raw: %p rtid: %u rkey: %u tid1: %p key1: %p tid2: %u key2: %u\n", tid, l_partkey, (void*)join_pair.raw, (void*)(join_pair.raw & 0xffffffff),
-                        (void*)(join_pair.raw >> 32), (unsigned)(join_pair.raw & 0xffffffff), (unsigned)(join_pair.raw >> 32));
-                        */
-//                printf("raw: %p tid: %u key: %u\n", (void*)join_pair.raw, (unsigned)(join_pair.raw & 0xffffffff), (unsigned)(join_pair.raw >> 32));
-//                __threadfence();
-/*
-                assert((join_pair.raw & 0xffffffff) == l_partkey); // TODO
-                assert((join_pair.raw >> 32) == tid); // TODO
-*/
-
+                lineitem_buffer_pos[dest_idx] = dest_idx;
+                l_partkey_buffer[dest_idx] = l_partkey;
+                l_discount_buffer[dest_idx] = l_discount;
+                l_extendedprice_buffer[dest_idx] = l_extendedprice;
                 max_partkey = (l_partkey > max_partkey) ? l_partkey : max_partkey;
             }
 
@@ -1085,10 +1077,12 @@ uint32_t max_partkey = 0;
             const unsigned first_offset = max(0, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
 
 //if (warp_id == 0 && lane_id == 0) printf("=== first_offset: %u\n", first_offset);
-            uint64_t* thread_data_raw = reinterpret_cast<uint64_t*>(&buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
-            key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
+            uint32_t* thread_keys_raw = reinterpret_cast<uint32_t*>(&l_partkey_buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
+            uint32_t* thread_values_raw = reinterpret_cast<uint32_t*>(&lineitem_buffer_pos[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
+            key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
+            value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
 
-            BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_data, 4, 22);
+            BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_keys, thread_values, 4, 22);
              __syncthreads();
         }
 #endif
@@ -1111,36 +1105,28 @@ uint32_t max_partkey = 0;
 
             bool active = lane_id < acquired_cnt;
 
-            uint32_t assoc_tid = 0u;
-            key_t element;
+            uint32_t assoc_pos = 0u;
+            key_t l_partkey;
             if (active) {
-                const auto& join_pair = buffer[first_pos + acquired_cnt - 1 - lane_id]; // TODO check
-                assoc_tid = join_pair.lineitem_tid;
-                element = join_pair.l_partkey;
-//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+                //const auto& join_pair = buffer[first_pos + acquired_cnt - 1 - lane_id]; // TODO check
+                assoc_pos = lineitem_buffer_pos[first_pos + acquired_cnt - 1 - lane_id];
+                l_partkey = l_partkey_buffer[first_pos + acquired_cnt - 1 - lane_id];
+//printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_pos, l_partkey);
             }
 
-            payload_t tid_b = index_structure.cooperative_lookup(active, element);
+            payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
 
             active = active && (tid_b != invalid_tid);
 
-            // negotiate output buffer target positions
-            const uint32_t active_mask = __ballot_sync(FULL_MASK, active);
-            const auto item_cnt = __popc(active_mask);
-//assert(item_cnt == acquired_cnt);
-            uint32_t dest_idx = 0;
-            if (lane_id == 0) {
-                dest_idx = atomicAdd(&output_index, item_cnt);
-            }
-            dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0); // propagate the first buffer target index
-            dest_idx += __popc(active_mask & right_mask); // add each's participating thread's offset
-
-            // write entry into ouput buffer
+// TODO
             if (active) {
-//printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
-                auto& join_entry = join_entries[dest_idx];
-                join_entry.lineitem_tid = assoc_tid;
-                join_entry.part_tid = tid_b;
+                const auto summand = l_extendedprice_buffer[assoc_pos] * (100 - l_discount_buffer[assoc_pos]);
+                sum2 += summand;
+
+                const char* type = reinterpret_cast<const char*>(&part->p_type[tid_b]); // FIXME relies on undefined behavior
+                if (my_strcmp(type, "PROMO", 5) == 0) {
+                    sum1 += summand;
+                }
             }
 
 //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
@@ -1157,6 +1143,18 @@ uint32_t max_partkey = 0;
         }
 
         __syncthreads();
+    }
+
+    // finalize
+    // reduce both sums
+    #pragma unroll
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
+        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
+    }
+    if (lane_id == 0) {
+        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
+        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
 }
 
@@ -1266,6 +1264,37 @@ struct helper {
 
         int num_blocks = (lineitem_size + block_size - 1) / block_size;
         ij_full_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, part_device, index_structure.device_index);
+        cudaDeviceSynchronize();
+
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
+        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        std::cout << "kernel time: " << kernelTime << " ms\n";
+    }
+
+    void run_ij_buffer() {
+        using namespace std;
+
+        decltype(output_index) matches1 = 0;
+
+        enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
+
+        JoinEntry* join_entries1;
+        cudaMalloc(&join_entries1, sizeof(JoinEntry)*lineitem_size);
+
+        int num_sms;
+        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
+        int num_blocks = num_sms*4; // TODO
+
+
+        int buffer_size = num_blocks*BLOCK_THREADS*(ITEMS_PER_THREAD + 1);
+        int64_t* l_extendedprice_buffer;
+        int64_t* l_discount_buffer;
+        cudaMalloc(&l_extendedprice_buffer, sizeof(decltype(*l_extendedprice_buffer))*buffer_size);
+        cudaMalloc(&l_discount_buffer, sizeof(decltype(*l_discount_buffer))*buffer_size);
+
+        const auto kernelStart = std::chrono::high_resolution_clock::now();
+
+        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, part_device, part_size, index_structure.device_index, l_extendedprice_buffer, l_discount_buffer);
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
@@ -1389,7 +1418,6 @@ struct helper {
         //ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
-        ij_lookup_kernel_5<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
         std::cout << "kernel time: " << d1 << " ms\n";
@@ -1420,7 +1448,8 @@ void load_and_run_ij(const std::string& path, bool as_full_pipline_breaker) {
         printf("full pipline breaker\n");
         h.run_two_phase_ij_buffer();
     } else {
-        h.run_ij();
+        //h.run_ij();
+        h.run_ij_buffer();
     }
 }
 
