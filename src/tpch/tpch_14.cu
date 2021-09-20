@@ -714,7 +714,7 @@ __global__ void ij_lookup_kernel_3(
     using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
 
     __shared__ join_pair_t buffer[BUFFER_SIZE];
-    __shared__ uint32_t buffer_idx;
+    __shared__ int buffer_idx;
 
     __shared__ uint32_t fully_occupied_warps;
     __shared__ uint32_t exhausted_warps;
@@ -735,6 +735,7 @@ uint32_t max_partkey = 0;
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
+    const int max_reuse = warp_id*ITEMS_PER_WARP;
     const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, lane_id);
 
     const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim.x - 1) / gridDim.x);
@@ -755,7 +756,8 @@ uint32_t max_partkey = 0;
     uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
 
     while (exhausted_warps < WARPS_PER_BLOCK || buffer_idx > 0) {
-        uint32_t warp_items = 0; // count of items stored in the buffer by this warp (has to be reset after each iteration)
+        // number of items stored in the buffer by this warp
+        int warp_items = min(ITEMS_PER_WARP, max(0, buffer_idx - max_reuse));
 
         while (unexhausted_lanes && warp_items < ITEMS_PER_WARP) {
             int active = tid < tid_limit;
@@ -870,10 +872,10 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
             if (lane_id == 0) {
 //                old = atomic_add_sat(&buffer_pos, 32u, valid_items);
                 // T atomic_sub_safe(T* address, T val)
-                old = atomic_sub_safe(&buffer_idx, 32u);
+                old = atomic_sub_safe(&buffer_idx, 32);
             }
             old = __shfl_sync(FULL_MASK, old, 0);
-            const auto acquired_cnt = min(old, 32u);
+            const auto acquired_cnt = min(old, 32);
             const auto first_pos = old - acquired_cnt;
 //if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
 //if (lane_id == 0) atomicAdd(&debug_cnt, acquired_cnt);
@@ -1019,7 +1021,7 @@ uint32_t max_partkey = 0;
     uint32_t unexhausted_lanes = FULL_MASK; // lanes which can still fetch new tuples
 
     while (exhausted_warps < WARPS_PER_BLOCK || buffer_idx > 0) {
-        // count of items stored in the buffer by this warp
+        // number of items stored in the buffer by this warp
         int warp_items = min(ITEMS_PER_WARP, max(0, buffer_idx - max_reuse));
 //if (lane_id == 0) printf("warp: %d reuse: %u\n", warp_id, warp_items);
 
@@ -1416,7 +1418,7 @@ struct helper {
         const auto start1 = std::chrono::high_resolution_clock::now();
         //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
-        //ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+        ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         //ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
         cudaDeviceSynchronize();
         const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
