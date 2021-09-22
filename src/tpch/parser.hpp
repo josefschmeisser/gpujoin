@@ -565,7 +565,7 @@ auto parse(const std::string& file) {
 template<class Tuple, std::size_t... I>
 void do_sort_impl(Tuple&& tuple, std::index_sequence<I...>) {
     auto& key_vec = *std::get<0>(tuple);
-    auto permutation = compute_permutation(key_vec, std::less<>{});
+    auto permutation = compute_permutation(key_vec.begin(), key_vec.end(), std::less<>{});
     apply_permutation(permutation, (*std::get<I>(tuple))...);
 }
 

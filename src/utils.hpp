@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iterator>
 #include <numeric>
 #include <vector>
 #include <unordered_set>
@@ -41,19 +42,19 @@ struct vector_to_numa_node_array {
     }
 };
 
-template<class T, class P>
-std::vector<size_t> compute_permutation(const std::vector<T>& input, P p) {
-    std::vector<size_t> permutation(input.size());
+template<class RandomIt, class P>
+std::vector<size_t> compute_permutation(RandomIt first, RandomIt last, P p) {
+    std::vector<size_t> permutation(std::distance(first, last));
     std::iota(permutation.begin(), permutation.end(), 0);
     std::sort(permutation.begin(), permutation.end(), [&](const auto a, const auto b) {
-        return p(input[a], input[b]);
+        return p(*(first + a), *(first + b));
     });
     return permutation;
 }
 
 // applies a given permuation by swapping all elements along each permuation cycle
-template<typename... Ts>
-void apply_permutation(std::vector<size_t>& permutation, std::vector<Ts>&... vectors) {
+template<class PermutationVector, class... InputVectors>
+void apply_permutation(PermutationVector& permutation, InputVectors&... vectors) {
     for (size_t i = 0; i < permutation.size(); ++i) {
         auto current = i;
         while (i != permutation[current]) {

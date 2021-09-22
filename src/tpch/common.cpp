@@ -352,12 +352,12 @@ void prepareDeviceResident(lineitem_table_t& src, lineitem_table_plain_t& dst) {
 #endif
 
 void sort_relation(part_table_t& part) {
-    auto permutation = compute_permutation(part.p_partkey, std::less<>{});
+    auto permutation = compute_permutation(part.p_partkey.begin(), part.p_partkey.end(), std::less<>{});
     apply_permutation(permutation, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment);
 }
 
 void sort_relation(lineitem_table_t& lineitem) {
-    auto permutation = compute_permutation(lineitem.l_orderkey, std::less<>{});
+    auto permutation = compute_permutation(lineitem.l_orderkey.begin(), lineitem.l_orderkey.end(), std::less<>{});
     apply_permutation(
         permutation,
         lineitem.l_orderkey,
