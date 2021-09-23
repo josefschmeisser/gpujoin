@@ -37,7 +37,7 @@ template<class T> using host_allocator = std::allocator<T>;
 //template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 0>;
 
 // device allocators
-template<class T> using device_index_allocator = cuda_allocator<T>;
+template<class T> using device_index_allocator = cuda_allocator<T, true>;
 template<class T> using device_table_allocator = cuda_allocator<T, true>;
 //template<class T> using device_index_allocator = mmap_allocator<T, huge_2mb, 0>;
 //template<class T> using device_table_allocator = mmap_allocator<T, huge_2mb, 0>;
@@ -950,7 +950,7 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
 
 
-
+__managed__ unsigned long long lookup_cycles = 0;
 
 template<
     unsigned BLOCK_THREADS,
@@ -1077,7 +1077,7 @@ uint32_t max_partkey = 0;
 
         __syncthreads(); // wait until all threads have gathered enough elements
 
-#if 1
+#if 0
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
@@ -1121,7 +1121,13 @@ uint32_t max_partkey = 0;
 //printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_pos, l_partkey);
             }
 
+            const auto t1 = clock64();
             payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
+            __syncwarp();
+            const auto t2 = clock64();
+            if (lane_id == 0) {
+                atomicAdd(&lookup_cycles, (unsigned long long)t2-t1);
+            }
 
             active = active && (tid_b != invalid_tid);
 
@@ -1473,6 +1479,7 @@ int main(int argc, char** argv) {
 
     helper<int> h;
     h.load_database(argv[1]);
+    //std::getc(stdin);
     h.run_hj();
 #else
     if (argc < 3) {
@@ -1525,6 +1532,9 @@ int main(int argc, char** argv) {
 */
     const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
+
+    printf("lookup_cycles: %lu\n", lookup_cycles);
+    cudaDeviceReset();
 
     return 0;
 }
