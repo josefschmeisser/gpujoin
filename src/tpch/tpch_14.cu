@@ -1034,13 +1034,19 @@ uint32_t max_partkey = 0;
             int active = tid < tid_limit;
 
             // fetch attributes
-            l_shipdate = lineitem->l_shipdate[tid];
-            l_partkey = lineitem->l_partkey[tid];
-            l_extendedprice = lineitem->l_extendedprice[tid];
-            l_discount = lineitem->l_discount[tid];
+            if (active) {
+                l_shipdate = lineitem->l_shipdate[tid];
+            }
 
             // filter predicate
             active = active && l_shipdate >= lower_shipdate && l_shipdate < upper_shipdate;
+
+            // fetch remaining attributes
+            if (active) {
+                l_partkey = lineitem->l_partkey[tid];
+                l_extendedprice = lineitem->l_extendedprice[tid];
+                l_discount = lineitem->l_discount[tid];
+            }
 
             // negotiate buffer target positions among all threads in this warp
             const uint32_t active_mask = __ballot_sync(FULL_MASK, active);
