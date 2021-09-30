@@ -23,6 +23,8 @@
 #include "indexes.cuh"
 #include "device_array.hpp"
 
+#define MEASURE_CYCLES
+
 using namespace cub;
 
 //using vector_copy_policy = vector_to_managed_array; // TODO remove
@@ -37,8 +39,8 @@ template<class T> using host_allocator = std::allocator<T>;
 //template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 0>;
 
 // device allocators
-template<class T> using device_index_allocator = cuda_allocator<T, true>;
-template<class T> using device_table_allocator = cuda_allocator<T, true>;
+template<class T> using device_index_allocator = cuda_allocator<T, false>;
+template<class T> using device_table_allocator = cuda_allocator<T, false>;
 //template<class T> using device_index_allocator = mmap_allocator<T, huge_2mb, 0>;
 //template<class T> using device_table_allocator = mmap_allocator<T, huge_2mb, 0>;
 
@@ -1083,7 +1085,7 @@ uint32_t max_partkey = 0;
 
         __syncthreads(); // wait until all threads have gathered enough elements
 
-#if 0
+#if 1
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
@@ -1121,23 +1123,25 @@ uint32_t max_partkey = 0;
             uint32_t assoc_pos = 0u;
             key_t l_partkey;
             if (active) {
-                //const auto& join_pair = buffer[first_pos + acquired_cnt - 1 - lane_id]; // TODO check
                 assoc_pos = lineitem_buffer_pos[first_pos + acquired_cnt - 1 - lane_id];
                 l_partkey = l_partkey_buffer[first_pos + acquired_cnt - 1 - lane_id];
 //printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_pos, l_partkey);
             }
 
+#ifdef MEASURE_CYCLES
             const auto t1 = clock64();
+#endif
             payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
+#ifdef MEASURE_CYCLES
             __syncwarp();
             const auto t2 = clock64();
             if (lane_id == 0) {
                 atomicAdd(&lookup_cycles, (unsigned long long)t2-t1);
             }
+#endif
 
             active = active && (tid_b != invalid_tid);
 
-// TODO
             if (active) {
                 const auto summand = l_extendedprice_buffer[assoc_pos] * (100 - l_discount_buffer[assoc_pos]);
                 sum2 += summand;
