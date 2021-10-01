@@ -85,10 +85,14 @@ struct radix_spline_index {
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            return lookup(key);
-
+            if (active) {
+                return lookup(key);
+            } else {
+                return value_t();
+            }
+/*
             assert(false); // TODO implement
-            return value_t();
+            return value_t();*/
         }
     } device_index;
 
@@ -167,9 +171,14 @@ struct lower_bound_index {
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
             // TODO implement cooperative binary search
-            //auto pos = branchy_binary_search(key, d_column, d_size);
-            auto pos = branch_free_binary_search(key, d_column, d_size);
-            return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
+
+            if (active) {
+                //auto pos = branchy_binary_search(key, d_column, d_size);
+                auto pos = branch_free_binary_search(key, d_column, d_size);
+                return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
+            } else {
+                return value_t();
+            }
         }
     } device_index;
 
