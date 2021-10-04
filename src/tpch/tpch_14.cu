@@ -24,6 +24,7 @@
 #include "device_array.hpp"
 
 #define MEASURE_CYCLES
+#define SKIP_SORT
 
 using namespace cub;
 
@@ -39,8 +40,8 @@ template<class T> using host_allocator = std::allocator<T>;
 //template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 0>;
 
 // device allocators
-template<class T> using device_index_allocator = cuda_allocator<T, false>;
-template<class T> using device_table_allocator = cuda_allocator<T, false>;
+template<class T> using device_index_allocator = cuda_allocator<T, true>;
+template<class T> using device_table_allocator = cuda_allocator<T, true>;
 //template<class T> using device_index_allocator = mmap_allocator<T, huge_2mb, 0>;
 //template<class T> using device_table_allocator = mmap_allocator<T, huge_2mb, 0>;
 
@@ -953,6 +954,9 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
 
 __managed__ unsigned long long lookup_cycles = 0;
+__managed__ unsigned long long scan_cycles = 0;
+__managed__ unsigned long long sync_cycles = 0;
+__managed__ unsigned long long sort_cycles = 0;
 
 template<
     unsigned BLOCK_THREADS,
@@ -1032,6 +1036,9 @@ uint32_t max_partkey = 0;
         int warp_items = min(ITEMS_PER_WARP, max(0, buffer_idx - max_reuse));
 //if (lane_id == 0) printf("warp: %d reuse: %u\n", warp_id, warp_items);
 
+#ifdef MEASURE_CYCLES
+        const auto scan_t1 = clock64();
+#endif
         while (unexhausted_lanes && warp_items < ITEMS_PER_WARP) {
             int active = tid < tid_limit;
 
@@ -1082,10 +1089,31 @@ uint32_t max_partkey = 0;
         if (lane_id == 0 && warp_items >= ITEMS_PER_WARP) {
             atomicInc(&fully_occupied_warps, UINT_MAX);
         }
+#ifdef MEASURE_CYCLES
+        __syncwarp();
+        const auto scan_t2 = clock64();
+        if (lane_id == 0) {
+            atomicAdd(&scan_cycles, (unsigned long long)scan_t2 - scan_t1);
+        }
+#endif
 
+#ifdef MEASURE_CYCLES
+        const auto sync_t1 = clock64();
+#endif
         __syncthreads(); // wait until all threads have gathered enough elements
+#ifdef MEASURE_CYCLES
+        __syncwarp();
+        const auto sync_t2 = clock64();
+        if (lane_id == 0) {
+            atomicAdd(&sync_cycles, (unsigned long long)sync_t2 - sync_t1);
+        }
+#endif
 
-#if 1
+
+#ifndef SKIP_SORT
+#ifdef MEASURE_CYCLES
+        const auto sort_t1 = clock64();
+#endif
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
@@ -1100,6 +1128,13 @@ uint32_t max_partkey = 0;
             BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_keys, thread_values, 4, 22);
              __syncthreads();
         }
+#ifdef MEASURE_CYCLES
+        __syncwarp();
+        const auto sort_t2 = clock64();
+        if (lane_id == 0) {
+            atomicAdd(&sort_cycles, (unsigned long long)sort_t2 - sort_t1);
+        }
+#endif
 #endif
 
 #if 1
@@ -1129,14 +1164,14 @@ uint32_t max_partkey = 0;
             }
 
 #ifdef MEASURE_CYCLES
-            const auto t1 = clock64();
+            const auto lookup_t1 = clock64();
 #endif
             payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
 #ifdef MEASURE_CYCLES
             __syncwarp();
-            const auto t2 = clock64();
+            const auto lookup_t2 = clock64();
             if (lane_id == 0) {
-                atomicAdd(&lookup_cycles, (unsigned long long)t2-t1);
+                atomicAdd(&lookup_cycles, (unsigned long long)lookup_t2 - lookup_t1);
             }
 #endif
 
@@ -1543,7 +1578,7 @@ int main(int argc, char** argv) {
     const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
-    printf("lookup_cycles: %lu\n", lookup_cycles);
+    printf("lookup_cycles: %lu; scan_cycles: %lu; sync_cycles: %lu; sort_cycles: %lu\n", lookup_cycles, scan_cycles, sync_cycles, sort_cycles);
     cudaDeviceReset();
 
     return 0;
