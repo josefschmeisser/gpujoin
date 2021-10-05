@@ -7,6 +7,7 @@
 #include <device_atomic_functions.h>
 #include <driver_types.h>
 #include <iostream>
+#include <iomanip>
 #include <limits>
 #include <cassert>
 #include <cstring>
@@ -382,7 +383,7 @@ __global__ void ij_lookup_kernel_2(
     const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim.x - 1) / gridDim.x);
     unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
     const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
-    tid += threadIdx.x; // each threads starts at it's correponding offset
+    tid += threadIdx.x; // each thread starts at it's correponding offset
 
     // initialize shared variables
     if (warp_id == 0 && lane_id == 0) {
@@ -1534,6 +1535,12 @@ int main(int argc, char** argv) {
     enum IndexType : unsigned { btree, harmonia, radixspline, lowerbound, nop } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
     bool full_pipline_breaker = (argc < 4) ? false : std::stoi(argv[3]) != 0;
 
+#ifdef SKIP_SORT
+    std::cout << "skip sort step: yes" << std::endl;
+#else
+    std::cout << "skip sort step: no" << std::endl;
+#endif
+
     switch (index_type) {
         case IndexType::btree: {
             printf("using btree\n");
@@ -1578,7 +1585,13 @@ int main(int argc, char** argv) {
     const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
-    printf("lookup_cycles: %lu; scan_cycles: %lu; sync_cycles: %lu; sort_cycles: %lu\n", lookup_cycles, scan_cycles, sync_cycles, sort_cycles);
+    std::cout << std::setprecision(2) << std::scientific
+        << "scan_cycles: " << (double)scan_cycles
+        << "; sync_cycles: " << (double)sync_cycles
+        << "; sort_cycles: " << (double)sort_cycles
+        << "; lookup_cycles: " << (double)lookup_cycles 
+        << std::endl; 
+
     cudaDeviceReset();
 
     return 0;
