@@ -37,12 +37,12 @@ using payload_t = uint32_t;
 // host allocator
 //template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 1>;
 template<class T> using host_allocator = std::allocator<T>;
-//template<class T> using host_allocator = cuda_allocator<T, true>;
+//template<class T> using host_allocator = cuda_allocator<T, cuda_allocation_type::zero_copy>;
 //template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 0>;
 
 // device allocators
-template<class T> using device_index_allocator = cuda_allocator<T, true>;
-template<class T> using device_table_allocator = cuda_allocator<T, true>;
+template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::zero_copy>;
+template<class T> using device_table_allocator = cuda_allocator<T, cuda_allocation_type::zero_copy>;
 //template<class T> using device_index_allocator = mmap_allocator<T, huge_2mb, 0>;
 //template<class T> using device_table_allocator = mmap_allocator<T, huge_2mb, 0>;
 
