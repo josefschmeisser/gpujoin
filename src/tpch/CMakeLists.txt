@@ -16,6 +16,15 @@ target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 # index join executable
 add_executable(cuda_tpch_14 tpch_14.cu)
 target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
+# additional nvcc flags
+if(true)
+    # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
+    # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
+    target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                        #--generate-line-info
+                        -lineinfo
+                        >)
+endif()
 
 # hash join executable
 add_executable(cuda_hj_tpch_14 tpch_14.cu)
