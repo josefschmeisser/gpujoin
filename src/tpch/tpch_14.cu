@@ -25,7 +25,7 @@
 #include "device_array.hpp"
 
 #define MEASURE_CYCLES
-#define SKIP_SORT
+//#define SKIP_SORT
 
 using namespace cub;
 
@@ -1038,7 +1038,7 @@ uint32_t max_partkey = 0;
 //if (lane_id == 0) printf("warp: %d reuse: %u\n", warp_id, warp_items);
 
 #ifdef MEASURE_CYCLES
-        const auto scan_t1 = clock64();
+        const auto t1 = clock64();
 #endif
         while (unexhausted_lanes && warp_items < ITEMS_PER_WARP) {
             int active = tid < tid_limit;
@@ -1094,27 +1094,31 @@ uint32_t max_partkey = 0;
         __syncwarp();
         const auto scan_t2 = clock64();
         if (lane_id == 0) {
-            atomicAdd(&scan_cycles, (unsigned long long)scan_t2 - scan_t1);
+            atomicAdd(&scan_cycles, (unsigned long long)scan_t2 - t1);
         }
 #endif
-
+/*
 #ifdef MEASURE_CYCLES
         const auto sync_t1 = clock64();
 #endif
+*/
         __syncthreads(); // wait until all threads have gathered enough elements
 #ifdef MEASURE_CYCLES
         __syncwarp();
         const auto sync_t2 = clock64();
         if (lane_id == 0) {
-            atomicAdd(&sync_cycles, (unsigned long long)sync_t2 - sync_t1);
+//            atomicAdd(&sync_cycles, (unsigned long long)sync_t2 - sync_t1);
+            atomicAdd(&sync_cycles, (unsigned long long)sync_t2 - scan_t2);
         }
 #endif
 
 
 #ifndef SKIP_SORT
+/*
 #ifdef MEASURE_CYCLES
         const auto sort_t1 = clock64();
 #endif
+*/
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
@@ -1129,13 +1133,14 @@ uint32_t max_partkey = 0;
             BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_keys, thread_values, 4, 22);
              __syncthreads();
         }
+#endif
 #ifdef MEASURE_CYCLES
         __syncwarp();
         const auto sort_t2 = clock64();
         if (lane_id == 0) {
-            atomicAdd(&sort_cycles, (unsigned long long)sort_t2 - sort_t1);
+//            atomicAdd(&sort_cycles, (unsigned long long)sort_t2 - sort_t1);
+            atomicAdd(&sort_cycles, (unsigned long long)sort_t2 - sync_t2);
         }
-#endif
 #endif
 
 #if 1
@@ -1163,16 +1168,18 @@ uint32_t max_partkey = 0;
                 l_partkey = l_partkey_buffer[first_pos + acquired_cnt - 1 - lane_id];
 //printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_pos, l_partkey);
             }
-
+/*
 #ifdef MEASURE_CYCLES
             const auto lookup_t1 = clock64();
 #endif
+*/
             payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
 #ifdef MEASURE_CYCLES
             __syncwarp();
             const auto lookup_t2 = clock64();
             if (lane_id == 0) {
-                atomicAdd(&lookup_cycles, (unsigned long long)lookup_t2 - lookup_t1);
+//                atomicAdd(&lookup_cycles, (unsigned long long)lookup_t2 - lookup_t1);
+                atomicAdd(&lookup_cycles, (unsigned long long)lookup_t2 - sort_t2);
             }
 #endif
 
