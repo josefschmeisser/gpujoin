@@ -32,9 +32,9 @@ static const int blockSize = 64;
 static const unsigned maxRepetitions = 10;
 static const unsigned activeLanes = 32;
 static const unsigned defaultNumLookups = 1e8;
-static unsigned defaultNumElements = 1e7;
+static unsigned defaultNumElements = 1e5;
 static const unsigned max_bits = 26;
-static const bool partitial_sorting = false;
+static const bool partitial_sorting = true;
 
 using index_key_t = uint32_t;
 using value_t = uint32_t;
@@ -46,8 +46,10 @@ template<class T> using host_allocator_t = std::allocator<T>;
 //template<class T> using host_allocator_t = cuda_allocator<T, true>;
 
 // device allocators
-template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::device>;
-using indexed_allocator_t = cuda_allocator<index_key_t>;
+//template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::device>;
+template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::zero_copy>;
+//using indexed_allocator_t = cuda_allocator<index_key_t>;
+using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
 using lookup_keys_allocator_t = cuda_allocator<index_key_t>;
 
 //using index_type = lower_bound_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
@@ -91,7 +93,8 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
     typedef cub::BlockLoad<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
 
-    typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+    //typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+    using BlockRadixSortT = cub::BlockRadixSort<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, uint32_t>;
 
     __shared__ union TempStorage {
         // Allocate shared memory for BlockLoad
@@ -100,8 +103,9 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
         typename BlockRadixSortT::TempStorage sort;
     } temp_storage;
 
-    __shared__ uint64_t buffer[ITEMS_PER_ITERATION];
-    __shared__ uint32_t buffer_pos;
+    __shared__ index_key_t buffer[ITEMS_PER_ITERATION];
+    __shared__ uint32_t in_buffer_pos[ITEMS_PER_ITERATION];
+    __shared__ uint32_t buffer_idx;
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
@@ -109,7 +113,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 /*
     // initialize shared memory variables
     if (warp_id == 0 && lane_id == 0) {
-        buffer_pos = 0;
+        buffer_idx = 0;
     }
     __syncthreads(); // ensure that all shared variables are initialized
 */
@@ -123,12 +127,12 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
     const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
 
-
+/*
     using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
     uint64_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
     key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
-
-    index_key_t input_thread_data[ITEMS_PER_THREAD];
+*/
+    index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO omit this
 
 
     for (int i = 0; i < iteration_count; ++i) {
@@ -145,13 +149,16 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
         // reset shared memory variables
         if (lane_id == 0) {
-            buffer_pos = 0;
+            buffer_idx = 0;
         }
 
         #pragma unroll
         for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
-            uint64_t upper = tid + threadIdx.x*ITEMS_PER_THREAD + j;
-            buffer[threadIdx.x*ITEMS_PER_THREAD + j] = upper<<32 | static_cast<uint64_t>(input_thread_data[j]);
+            const unsigned pos = threadIdx.x*ITEMS_PER_THREAD + j;
+//            uint64_t upper = tid + threadIdx.x*ITEMS_PER_THREAD + j;
+//            buffer[threadIdx.x*ITEMS_PER_THREAD + j] = upper<<32 | static_cast<uint64_t>(input_thread_data[j]);
+buffer[pos] = input_thread_data[j];
+in_buffer_pos[pos] = tid + pos;
         }
 
 
@@ -160,19 +167,74 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 #if 0
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
+//index_key_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+//key_array_t& thread_data = reinterpret_cast<key_array_t&>(*thread_data_raw);
 //if (lane_id == 0) printf("warp: %d iteration: %d - sorting... ===\n", warp_id, i);
-            BlockRadixSortT(temp_storage.sort).Sort(thread_data, 4, max_bits); // TODO
+//            BlockRadixSortT(temp_storage.sort).Sort(thread_data, 4, max_bits); // TODO
+
+using key_array_t = index_key_t[ITEMS_PER_THREAD];
+using value_array_t = uint32_t[ITEMS_PER_THREAD];
+
+index_key_t* thread_keys_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+uint32_t* thread_values_raw = &in_buffer_pos[threadIdx.x*ITEMS_PER_THREAD];
+key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
+value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
+
+//BlockRadixSortT(temp_storage.sort).SortDescending(thread_keys, thread_values, 4, max_bits);
+BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, 4, max_bits);
+
              __syncthreads();
         }/* else {
 //if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
         }*/
 #endif
 
+
+#if 0
+        // empty buffer
+        for (unsigned i = 0u; i < ITEMS_PER_THREAD; ++i) {
+            unsigned old;
+            if (lane_id == 0) {
+                // T atomic_sub_safe(T* address, T val)
+                old = atomic_sub_safe(&buffer_idx, 32);
+            }
+            old = __shfl_sync(FULL_MASK, old, 0);
+            const auto acquired_cnt = min(old, 32);
+            const auto first_pos = old - acquired_cnt;
+if (lane_id == 0) printf("warp: %d iteration: %d - acquired_cnt: %u\n", warp_id, i, acquired_cnt);
+//if (lane_id == 0) atomicAdd(&debug_cnt, acquired_cnt);
+
+            if (acquired_cnt == 0u) break;
+
+            bool active = lane_id < acquired_cnt;
+
+            uint32_t assoc_tid = 0u;
+            index_key_t element;
+            if (active) {
+                element = buffer[first_pos + acquired_cnt - 1 - lane_id];
+                assoc_tid = in_buffer_pos[first_pos + acquired_cnt - 1 - lane_id];
+//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+            }
+
+            value_t tid_b = index_structure.cooperative_lookup(active, element);
+            if (active) {
+//printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+                tids[assoc_tid] = tid_b;
+            }
+
+//printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
+
+        }
+#endif
+
+
+
+
         // empty buffer
         unsigned old;
         do {
             if (lane_id == 0) {
-                old = atomic_add_sat(&buffer_pos, 32u, valid_items);
+                old = atomic_add_sat(&buffer_idx, 32u, valid_items);
             }
             old = __shfl_sync(FULL_MASK, old, 0);
             unsigned actual_count = min(valid_items - old, 32);
@@ -183,10 +245,10 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             bool active = lane_id < actual_count;
 
             uint32_t assoc_tid = 0;
-            index_key_t element = 0xffffffff;
+            index_key_t element;
             if (active) {
-                assoc_tid = buffer[old + lane_id] >> 32;
-                element = buffer[old + lane_id] & 0xffffffff;
+                assoc_tid = in_buffer_pos[old + lane_id];
+                element = buffer[old + lane_id];
 //printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
@@ -199,6 +261,8 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
 
         } while (true);//actual_count == 32);
+
+
 
 
         tid += valid_items;
@@ -227,7 +291,7 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
     } temp_storage;
 
     __shared__ uint64_t buffer[ITEMS_PER_ITERATION];
-    __shared__ uint32_t buffer_pos;
+    __shared__ uint32_t buffer_idx;
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
@@ -261,7 +325,7 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
 
         // reset shared memory variables
         if (lane_id == 0) {
-            buffer_pos = 0;
+            buffer_idx = 0;
         }
 
         #pragma unroll
@@ -288,7 +352,7 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
         unsigned old;
         do {
             if (lane_id == 0) {
-                old = atomic_add_sat(&buffer_pos, 32u, valid_items);
+                old = atomic_add_sat(&buffer_idx, 32u, valid_items);
             }
             old = __shfl_sync(FULL_MASK, old, 0);
             unsigned actual_count = min(valid_items - old, 32);
@@ -350,12 +414,6 @@ void generate_datasets(dataset_type dt, std::vector<index_key_t, host_allocator_
     std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distrib(rng)]; });
 
 std::sort(lookups.begin(), lookups.end());
-
-/*
-    std::cout << "keys: " << stringify(keys.begin(), keys.end()) << std::endl;
-    std::cout << "lookups: " << stringify(lookups.begin(), lookups.end()) << std::endl;
-
-    exit(0);*/
 }
 
 template<class IndexStructureType>
@@ -474,6 +532,7 @@ auto tt = create_device_array_from(v, a);
     for (unsigned i = 0; i < lookup_keys.size(); ++i) {
         if (lookup_keys[i] != indexed[h_tids[i]]) {
             printf("lookup_keys[%u]: %u indexed[h_tids[%u]]: %u\n", i, lookup_keys[i], i, indexed[h_tids[i]]);
+            fflush(stdout);
             throw;
         }
     }
