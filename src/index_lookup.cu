@@ -110,15 +110,6 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
-/*
-    // initialize shared memory variables
-    if (warp_id == 0 && lane_id == 0) {
-        buffer_idx = 0;
-    }
-    __syncthreads(); // ensure that all shared variables are initialized
-*/
-
-//    const unsigned tile_size = round_up_pow2((n + BLOCK_THREADS - 1) / gridDim.x); // TODO cache-line allignment should be sufficient
     const unsigned tile_size = min(n, (n + BLOCK_THREADS - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
     const unsigned tid_limit = min(tid + tile_size, n);
@@ -127,11 +118,6 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
     const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
 
-/*
-    using key_value_array_t = uint64_t[ITEMS_PER_THREAD];
-    uint64_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
-    key_value_array_t& thread_data = reinterpret_cast<key_value_array_t&>(*thread_data_raw);
-*/
     index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO omit this
 
 
@@ -140,7 +126,6 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
         unsigned valid_items = min(ITEMS_PER_ITERATION, n - tid);
 //if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
-
 
         // Load a segment of consecutive items that are blocked across threads
         BlockLoad(temp_storage.load).Load(keys + tid, input_thread_data, valid_items);
@@ -155,80 +140,30 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
         #pragma unroll
         for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
             const unsigned pos = threadIdx.x*ITEMS_PER_THREAD + j;
-//            uint64_t upper = tid + threadIdx.x*ITEMS_PER_THREAD + j;
-//            buffer[threadIdx.x*ITEMS_PER_THREAD + j] = upper<<32 | static_cast<uint64_t>(input_thread_data[j]);
-buffer[pos] = input_thread_data[j];
-in_buffer_pos[pos] = tid + pos;
+            buffer[pos] = input_thread_data[j];
+            in_buffer_pos[pos] = tid + pos;
         }
-
 
         __syncthreads();
 
-#if 0
+#if 1
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
-//index_key_t* thread_data_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
-//key_array_t& thread_data = reinterpret_cast<key_array_t&>(*thread_data_raw);
-//if (lane_id == 0) printf("warp: %d iteration: %d - sorting... ===\n", warp_id, i);
-//            BlockRadixSortT(temp_storage.sort).Sort(thread_data, 4, max_bits); // TODO
+            using key_array_t = index_key_t[ITEMS_PER_THREAD];
+            using value_array_t = uint32_t[ITEMS_PER_THREAD];
 
-using key_array_t = index_key_t[ITEMS_PER_THREAD];
-using value_array_t = uint32_t[ITEMS_PER_THREAD];
+            index_key_t* thread_keys_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+            uint32_t* thread_values_raw = &in_buffer_pos[threadIdx.x*ITEMS_PER_THREAD];
+            key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
+            value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
 
-index_key_t* thread_keys_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
-uint32_t* thread_values_raw = &in_buffer_pos[threadIdx.x*ITEMS_PER_THREAD];
-key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
-value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
-
-//BlockRadixSortT(temp_storage.sort).SortDescending(thread_keys, thread_values, 4, max_bits);
-BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, 4, max_bits);
+            BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, 4, max_bits);
 
              __syncthreads();
         }/* else {
 //if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
         }*/
 #endif
-
-
-#if 0
-        // empty buffer
-        for (unsigned i = 0u; i < ITEMS_PER_THREAD; ++i) {
-            unsigned old;
-            if (lane_id == 0) {
-                // T atomic_sub_safe(T* address, T val)
-                old = atomic_sub_safe(&buffer_idx, 32);
-            }
-            old = __shfl_sync(FULL_MASK, old, 0);
-            const auto acquired_cnt = min(old, 32);
-            const auto first_pos = old - acquired_cnt;
-if (lane_id == 0) printf("warp: %d iteration: %d - acquired_cnt: %u\n", warp_id, i, acquired_cnt);
-//if (lane_id == 0) atomicAdd(&debug_cnt, acquired_cnt);
-
-            if (acquired_cnt == 0u) break;
-
-            bool active = lane_id < acquired_cnt;
-
-            uint32_t assoc_tid = 0u;
-            index_key_t element;
-            if (active) {
-                element = buffer[first_pos + acquired_cnt - 1 - lane_id];
-                assoc_tid = in_buffer_pos[first_pos + acquired_cnt - 1 - lane_id];
-//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
-            }
-
-            value_t tid_b = index_structure.cooperative_lookup(active, element);
-            if (active) {
-//printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
-                tids[assoc_tid] = tid_b;
-            }
-
-//printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
-
-        }
-#endif
-
-
-
 
         // empty buffer
         unsigned old;
@@ -260,10 +195,7 @@ if (lane_id == 0) printf("warp: %d iteration: %d - acquired_cnt: %u\n", warp_id,
 
 //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
 
-        } while (true);//actual_count == 32);
-
-
-
+        } while (true);
 
         tid += valid_items;
     }
