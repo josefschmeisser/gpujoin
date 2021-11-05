@@ -78,6 +78,7 @@ __device__ int my_strcmp(const char *str_a, const char *str_b, unsigned len){
 __managed__ int64_t globalSum1 = 0;
 __managed__ int64_t globalSum2 = 0;
 
+__device__ uint64_t g_buffer_idx = 0;
 
 template<
     unsigned BLOCK_THREADS,
@@ -87,11 +88,9 @@ __launch_bounds__ (BLOCK_THREADS)
 __global__ void ij_join_scan_kernel(
     const lineitem_table_plain_t* __restrict__ lineitem,
     const unsigned lineitem_size,
-    const part_table_plain_t* __restrict__ part,
-    const unsigned part_size,
-    const IndexStructureType index_structure,
-    int64_t* __restrict__ l_extendedprice_buffer,
-    int64_t* __restrict__ l_discount_buffer
+    uint32_t* __restrict__ g_l_partkey_buffer,
+    int64_t* __restrict__ g_l_extendedprice_buffer,
+    int64_t* __restrict__ g_l_discount_buffer
     )
 {
     enum {
@@ -102,8 +101,9 @@ __global__ void ij_join_scan_kernel(
         BUFFER_SIZE = BLOCK_THREADS*(ITEMS_PER_THREAD + 1)
     };
 
-//    using BlockRadixSortT = cub::BlockRadixSort<uint32_t, BLOCK_THREADS, ITEMS_PER_THREAD, uint32_t>;
-    using BlockStoreT = cub::BlockStore<uint32_t, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_STORE_WARP_TRANSPOSE>;
+    using BlockStoreKeyT = cub::BlockStore<uint32_t, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_STORE_WARP_TRANSPOSE>;
+    using BlockStoreNumericT = cub::BlockStore<int64_t, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_STORE_WARP_TRANSPOSE>;
+
     using key_array_t = uint32_t[ITEMS_PER_THREAD];
     using value_array_t = uint32_t[ITEMS_PER_THREAD];
 
@@ -111,15 +111,18 @@ __global__ void ij_join_scan_kernel(
     l_discount_buffer += blockIdx.x*BUFFER_SIZE;
 
     __shared__ uint32_t l_partkey_buffer[BUFFER_SIZE];
-    __shared__ uint32_t lineitem_buffer_pos[BUFFER_SIZE];
+    __shared__ int64_t l_extendedprice_buffer[BUFFER_SIZE];
+    __shared__ int64_t l_discount_buffer[BUFFER_SIZE];
+
     __shared__ int buffer_idx;
+    __shared__ uint64_t block_target_idx;
 
     __shared__ uint32_t fully_occupied_warps;
     __shared__ uint32_t exhausted_warps;
 
     __shared__ union {
-//        typename BlockRadixSortT::TempStorage temp_storage;
-        typename BlockStoreT::TempStorage temp_storage;
+        typename BlockStoreKeyT::TempStorage temp_key_store;
+        typename BlockStoreKeyT::TempStorage temp_numeric_store;
     } temp_union;
 
     const int lane_id = threadIdx.x % 32;
@@ -147,6 +150,7 @@ __global__ void ij_join_scan_kernel(
         buffer_idx = 0;
         fully_occupied_warps = 0;
         exhausted_warps = 0;
+        block_target_idx = 0;
     }
     __syncthreads(); // ensure that all shared variables are initialized
 
@@ -189,11 +193,11 @@ __global__ void ij_join_scan_kernel(
 
             // matrialize attributes
             if (active) {
-                lineitem_buffer_pos[dest_idx] = dest_idx;
+ //               lineitem_buffer_pos[dest_idx] = dest_idx;
                 l_partkey_buffer[dest_idx] = l_partkey;
                 l_discount_buffer[dest_idx] = l_discount;
                 l_extendedprice_buffer[dest_idx] = l_extendedprice;
-                max_partkey = (l_partkey > max_partkey) ? l_partkey : max_partkey;
+ //               max_partkey = (l_partkey > max_partkey) ? l_partkey : max_partkey;
             }
 
             unexhausted_lanes = __ballot_sync(FULL_MASK, tid < tid_limit);
@@ -211,7 +215,21 @@ __global__ void ij_join_scan_kernel(
 */
         __syncthreads(); // wait until all threads have gathered enough elements
 
-        BlockStore(temp_storage).Store(d_data, thread_data, warp_items);
+        using key_array_t = uint32_t[ITEMS_PER_THREAD];
+        using numeric_array_t = int64_t[ITEMS_PER_THREAD];
+/*
+        uint32_t* thread_keys_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+        uint32_t* thread_values_raw = &in_buffer_pos[threadIdx.x*ITEMS_PER_THREAD];
+*/
+        key_array_t& l_partkey_thread_data = reinterpret_cast<key_array_t&>(l_partkey_buffer[threadIdx.x*ITEMS_PER_THREAD]);
+        numeric_array_t& l_extendedprice_thread_data = reinterpret_cast<numeric_array_t&>(l_extendedprice_buffer[threadIdx.x*ITEMS_PER_THREAD]);
+        numeric_array_t& l_discount_thread_data = reinterpret_cast<numeric_array_t&>(l_discount_buffer[threadIdx.x*ITEMS_PER_THREAD]);
+
+        BlockStore(temp_key_store).Store(d_data, l_partkey_thread_data, warp_items);
+        __syncthreads();
+        BlockStore(temp_numeric_store).Store(d_data, l_extended_price_thread_data, warp_items);
+        __syncthreads();
+        BlockStore(temp_numeric_store).Store(d_data, l_discount_thread_data, warp_items);
         __syncthreads();
     }
 }
