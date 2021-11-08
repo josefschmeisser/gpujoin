@@ -215,6 +215,8 @@ __global__ void ij_join_scan_kernel(
 */
         __syncthreads(); // wait until all threads have gathered enough elements
 
+
+
         using key_array_t = uint32_t[ITEMS_PER_THREAD];
         using numeric_array_t = int64_t[ITEMS_PER_THREAD];
 /*
@@ -235,72 +237,124 @@ __global__ void ij_join_scan_kernel(
 }
 
 
-
-#if 0 // TODO
 template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
     class    IndexStructureType >
 __launch_bounds__ (BLOCK_THREADS)
 __global__ void ij_join_finalization_kernel(
-    const lineitem_table_plain_t* __restrict__ lineitem,
-    const unsigned lineitem_size,
+    uint32_t* __restrict__ g_l_partkey_buffer,
+    int64_t* __restrict__ g_l_extendedprice_buffer,
+    int64_t* __restrict__ g_l_discount_buffer
+    const unsigned lineitem_buffer_size,
     const part_table_plain_t* __restrict__ part,
     const unsigned part_size,
-    const IndexStructureType index_structure,
-    int64_t* __restrict__ l_extendedprice_buffer,
-    int64_t* __restrict__ l_discount_buffer
+    const IndexStructureType index_structure
     )
 {
+    enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
-#ifndef SKIP_SORT
+    // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
+    typedef cub::BlockLoad<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
 
-        if (fully_occupied_warps == WARPS_PER_BLOCK) {
-//if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
+    //typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+    using BlockRadixSortT = cub::BlockRadixSort<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, uint32_t>;
 
-            const unsigned first_offset = max(0, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
+    __shared__ union TempStorage {
+        // Allocate shared memory for BlockLoad
+        typename BlockLoad::TempStorage load;
 
-//if (warp_id == 0 && lane_id == 0) printf("=== first_offset: %u\n", first_offset);
-            uint32_t* thread_keys_raw = reinterpret_cast<uint32_t*>(&l_partkey_buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
-            uint32_t* thread_values_raw = reinterpret_cast<uint32_t*>(&lineitem_buffer_pos[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
+        typename BlockRadixSortT::TempStorage sort;
+    } temp_storage;
+
+    __shared__ index_key_t buffer[ITEMS_PER_ITERATION];
+    __shared__ uint32_t in_buffer_pos[ITEMS_PER_ITERATION];
+    __shared__ uint32_t buffer_idx;
+
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
+
+    const unsigned tile_size = min(n, (n + BLOCK_THREADS - 1) / gridDim.x);
+    unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
+    const unsigned tid_limit = min(tid + tile_size, n);
+
+//if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+
+    const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
+
+    index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO omit this
+
+    int64_t sum1 = 0;
+    int64_t sum2 = 0;
+
+    for (int i = 0; i < iteration_count; ++i) {
+//if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
+
+        unsigned valid_items = min(ITEMS_PER_ITERATION, n - tid);
+//if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
+
+        // Load a segment of consecutive items that are blocked across threads
+        BlockLoad(temp_storage.load).Load(keys + tid, input_thread_data, valid_items);
+
+        __syncthreads();
+
+        // reset shared memory variables
+        if (lane_id == 0) {
+            buffer_idx = 0;
+        }
+
+        #pragma unroll
+        for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
+            const unsigned pos = tid + threadIdx.x*ITEMS_PER_THREAD + j;
+            buffer[pos] = g_l_partkey_buffer[pos];
+            in_buffer_pos[pos] = pos;
+        }
+
+        __syncthreads();
+
+#if 1
+        // we only perform the sort step when the buffer is completely filled
+        if (valid_items == ITEMS_PER_ITERATION) {
+            using key_array_t = index_key_t[ITEMS_PER_THREAD];
+            using value_array_t = uint32_t[ITEMS_PER_THREAD];
+
+            index_key_t* thread_keys_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+            uint32_t* thread_values_raw = &in_buffer_pos[threadIdx.x*ITEMS_PER_THREAD];
             key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
             value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
 
-            BlockRadixSortT(temp_union.temp_storage).SortDescending(thread_keys, thread_values, 4, 22);
+            BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, 4, max_bits);
+
              __syncthreads();
         }
 #endif
 
-#if 1
         // empty buffer
-        for (unsigned i = 0u; i < ITEMS_PER_THREAD; ++i) {
-            unsigned old;
+        unsigned old;
+        do {
             if (lane_id == 0) {
-                // T atomic_sub_safe(T* address, T val)
-                old = atomic_sub_safe(&buffer_idx, 32);
+                old = atomic_add_sat(&buffer_idx, 32u, valid_items);
             }
             old = __shfl_sync(FULL_MASK, old, 0);
-            const auto acquired_cnt = min(old, 32);
-            const auto first_pos = old - acquired_cnt;
+            unsigned actual_count = min(valid_items - old, 32);
 //if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
-//if (lane_id == 0) atomicAdd(&debug_cnt, acquired_cnt);
 
-            if (acquired_cnt == 0u) break;
+            if (actual_count == 0) break;
 
-            bool active = lane_id < acquired_cnt;
+            bool active = lane_id < actual_count;
 
-            uint32_t assoc_pos = 0u;
+            uint32_t assoc_tid = 0;
             key_t l_partkey;
             if (active) {
-                assoc_pos = lineitem_buffer_pos[first_pos + acquired_cnt - 1 - lane_id];
-                l_partkey = l_partkey_buffer[first_pos + acquired_cnt - 1 - lane_id];
-printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_pos, l_partkey);
+                assoc_tid = in_buffer_pos[old + lane_id];
+                l_partkey = buffer[old + lane_id];
+//printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_tid, l_partkey);
             }
 
-            payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
-
+            value_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
             active = active && (tid_b != invalid_tid);
 
+            // evaluate predicate
             if (active) {
                 const auto summand = l_extendedprice_buffer[assoc_pos] * (100 - l_discount_buffer[assoc_pos]);
                 sum2 += summand;
@@ -310,24 +364,11 @@ printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_po
                     sum1 += summand;
                 }
             }
+        } while (true);
 
-//printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
-
-        }
-#else
-        // discard elements
-        if (lane_id == 0) buffer_idx = 0;
-#endif
-
-        // prepare next iteration
-        if (lane_id == 0) {
-            fully_occupied_warps = 0;
-        }
-
-        __syncthreads();
+        tid += valid_items;
     }
 
-    // finalize
     // reduce both sums
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
@@ -339,9 +380,6 @@ printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_po
         atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
 }
-
-
-
 
 
 template<class IndexType>
