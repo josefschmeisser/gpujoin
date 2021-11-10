@@ -258,7 +258,7 @@ __global__ void ij_join_finalization_kernel(
 {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
-    using index_key_t = u_int32_t;
+    using index_key_t = uint32_t;
 
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
     using BlockLoadT = cub::BlockLoad<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
@@ -278,7 +278,7 @@ __global__ void ij_join_finalization_kernel(
     __shared__ uint32_t buffer_idx;
 
     const int lane_id = threadIdx.x % 32;
-//    const int warp_id = threadIdx.x / 32;
+    const int warp_id = threadIdx.x / 32;
 
     const unsigned tile_size = min(lineitem_buffer_size, (lineitem_buffer_size + BLOCK_THREADS - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
@@ -294,7 +294,7 @@ __global__ void ij_join_finalization_kernel(
     int64_t sum2 = 0;
 
     for (int i = 0; i < iteration_count; ++i) {
-//if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
+if (lane_id == 0) printf("block: %d warp: %d iteration: %d first tid: %d\n", blockIdx.x, warp_id, i, tid);
 
         unsigned valid_items = min(ITEMS_PER_ITERATION, lineitem_buffer_size - tid);
 //if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
@@ -311,14 +311,14 @@ __global__ void ij_join_finalization_kernel(
 
         #pragma unroll
         for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
-            const unsigned pos = tid + threadIdx.x*ITEMS_PER_THREAD + j;
-            buffer[pos] = g_l_partkey_buffer[pos];
-            in_buffer_pos[pos] = pos;
+            const unsigned pos = threadIdx.x*ITEMS_PER_THREAD + j;
+            buffer[pos] = g_l_partkey_buffer[tid + pos];
+            in_buffer_pos[pos] = tid + pos;
         }
 
         __syncthreads();
 
-#if 1
+#if 0
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
             using key_array_t = index_key_t[ITEMS_PER_THREAD];
@@ -343,22 +343,26 @@ __global__ void ij_join_finalization_kernel(
             }
             old = __shfl_sync(FULL_MASK, old, 0);
             unsigned actual_count = min(valid_items - old, 32);
-//if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+//if (lane_id == 0) printf("warp: %d iteration: %d - old: %u actual_count: %u\n", warp_id, i, old, actual_count);
 
             if (actual_count == 0) break;
-
+#if 1
             bool active = lane_id < actual_count;
 
             uint32_t assoc_tid = 0;
-            key_t l_partkey;
+            index_key_t l_partkey;
             if (active) {
+//if (lane_id == 31) printf("warp: %d iteration: %d - access buffer pos: %u\n", warp_id, i, old + lane_id);
                 assoc_tid = in_buffer_pos[old + lane_id];
                 l_partkey = buffer[old + lane_id];
-//printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_tid, l_partkey);
+//printf("block: %d warp: %d lane: %d - tid: %u l_partkey: %u\n", blockIdx.x, warp_id, lane_id, assoc_tid, l_partkey);
             }
 
             payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
             active = active && (tid_b != invalid_tid);
+
+#if 1
+            sum2 += active;
 
             // evaluate predicate
             if (active) {
@@ -370,11 +374,14 @@ __global__ void ij_join_finalization_kernel(
                     sum1 += summand;
                 }
             }
+#endif
+#endif
         } while (true);
 
         tid += valid_items;
     }
 
+//printf("sum1: %lu sum2: %lu\n", sum1, sum2);
     // reduce both sums
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
@@ -456,6 +463,8 @@ struct helper {
             const auto d = chrono::duration_cast<chrono::milliseconds>(finish - start).count();
             std::cout << "transfer time: " << d << " ms\n";
         }
+
+        index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
     }
 
     void run_ij_buffer() {
@@ -465,17 +474,18 @@ struct helper {
 
         int num_sms;
         cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-        int num_blocks = num_sms*4; // TODO
+        int num_blocks = 1;// num_sms*4; // TODO
 
         auto left = left_pipeline(db);
+printf("count: %lu\n", left.size);
 
         uint32_t* d_l_partkey_buffer = left.l_partkey_buffer_guard.data();
-        int64_t* d_l_extendedprice_buffer = nullptr;
-        int64_t* l_discount_buffer = nullptr;
+        int64_t* d_l_extendedprice_buffer = left.l_extendedprice_buffer_guard.data();
+        int64_t* d_l_discount_buffer = left.l_discount_buffer_guard.data();
 
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 
-        ij_join_finalization_kernel<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(d_l_partkey_buffer, d_l_extendedprice_buffer, l_discount_buffer, left.size, part_device, part_size, index_structure.device_index);
+        ij_join_finalization_kernel<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(d_l_partkey_buffer, d_l_extendedprice_buffer, d_l_discount_buffer, left.size, part_device, part_size, index_structure.device_index);
         cudaDeviceSynchronize();
 
         const auto kernelStop = std::chrono::high_resolution_clock::now();
