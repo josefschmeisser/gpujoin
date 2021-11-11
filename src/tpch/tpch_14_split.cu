@@ -294,10 +294,11 @@ __global__ void ij_join_finalization_kernel(
     int64_t sum2 = 0;
 
     for (int i = 0; i < iteration_count; ++i) {
-if (lane_id == 0) printf("block: %d warp: %d iteration: %d first tid: %d\n", blockIdx.x, warp_id, i, tid);
+//if (lane_id == 0) printf("block: %d warp: %d iteration: %d first tid: %d\n", blockIdx.x, warp_id, i, tid);
 
-        unsigned valid_items = min(ITEMS_PER_ITERATION, lineitem_buffer_size - tid);
-//if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
+//        unsigned valid_items = min(ITEMS_PER_ITERATION, lineitem_buffer_size - tid);
+        unsigned valid_items = min(ITEMS_PER_ITERATION, tid_limit - tid);
+//if (lane_id == 0) printf("warp: %d iteration: %d valid_items: %d\n", warp_id, i, valid_items);
 
         // Load a segment of consecutive items that are blocked across threads
         BlockLoadT(temp_storage.load).Load(g_l_partkey_buffer + tid, input_thread_data, valid_items);
