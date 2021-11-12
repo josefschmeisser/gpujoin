@@ -110,7 +110,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
-    const unsigned tile_size = min(n, (n + BLOCK_THREADS - 1) / gridDim.x);
+    const unsigned tile_size = min(n, (n + gridDim.x - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
     const unsigned tid_limit = min(tid + tile_size, n);
 
@@ -124,7 +124,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     for (int i = 0; i < iteration_count; ++i) {
 //if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
 
-        unsigned valid_items = min(ITEMS_PER_ITERATION, n - tid);
+        unsigned valid_items = min(ITEMS_PER_ITERATION, tid_limit - tid);
 //if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
         // Load a segment of consecutive items that are blocked across threads
@@ -345,7 +345,7 @@ void generate_datasets(dataset_type dt, std::vector<index_key_t, host_allocator_
     std::uniform_int_distribution<> lookup_distrib(0, keys.size() - 1);
     std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distrib(rng)]; });
 
-std::sort(lookups.begin(), lookups.end());
+//std::sort(lookups.begin(), lookups.end());
 }
 
 template<class IndexStructureType>
@@ -358,7 +358,7 @@ std::unique_ptr<IndexStructureType> build_index(const std::vector<index_key_t, h
 template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType& index_structure, const index_key_t* d_lookup_keys, unsigned num_lookup_keys) {
     int num_blocks;
-    
+
     if /*constexpr*/ (!partitial_sorting) {
         num_blocks = (num_lookup_keys + blockSize - 1) / blockSize;
     } else {

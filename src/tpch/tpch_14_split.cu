@@ -280,13 +280,13 @@ __global__ void ij_join_finalization_kernel(
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
 
-    const unsigned tile_size = min(lineitem_buffer_size, (lineitem_buffer_size + BLOCK_THREADS - 1) / gridDim.x);
+    const unsigned tile_size = min(lineitem_buffer_size, (lineitem_buffer_size + gridDim.x - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
     const unsigned tid_limit = min(tid + tile_size, lineitem_buffer_size);
 
-//if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
 
     const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
+//if (lane_id == 0) printf("warp: %d tile_size: %d iteration_count: %u\n", warp_id, tile_size, iteration_count);
 
     index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO omit this
 
