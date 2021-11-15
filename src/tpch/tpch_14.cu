@@ -24,7 +24,7 @@
 #include "indexes.cuh"
 #include "device_array.hpp"
 
-#define MEASURE_CYCLES
+//#define MEASURE_CYCLES
 //#define SKIP_SORT
 
 using namespace cub;
@@ -958,6 +958,8 @@ __managed__ unsigned long long lookup_cycles = 0;
 __managed__ unsigned long long scan_cycles = 0;
 __managed__ unsigned long long sync_cycles = 0;
 __managed__ unsigned long long sort_cycles = 0;
+__managed__ unsigned long long join_cycles = 0;
+__managed__ unsigned long long total_cycles = 0;
 
 template<
     unsigned BLOCK_THREADS,
@@ -974,6 +976,10 @@ __global__ void ij_full_kernel_2(
     int64_t* __restrict__ l_discount_buffer
     )
 {
+#ifdef MEASURE_CYCLES
+    const auto kernel_start = clock64();
+#endif
+
     enum {
         ITEMS_PER_WARP = ITEMS_PER_THREAD * 32, // soft upper limit
         ITEMS_PER_BLOCK = BLOCK_THREADS*ITEMS_PER_THREAD,
@@ -1168,18 +1174,16 @@ uint32_t max_partkey = 0;
                 l_partkey = l_partkey_buffer[first_pos + acquired_cnt - 1 - lane_id];
 //printf("warp: %d lane: %d - tid: %u l_partkey: %u\n", warp_id, lane_id, assoc_pos, l_partkey);
             }
-/*
+
 #ifdef MEASURE_CYCLES
             const auto lookup_t1 = clock64();
 #endif
-*/
             payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
 #ifdef MEASURE_CYCLES
             __syncwarp();
             const auto lookup_t2 = clock64();
             if (lane_id == 0) {
-//                atomicAdd(&lookup_cycles, (unsigned long long)lookup_t2 - lookup_t1);
-                atomicAdd(&lookup_cycles, (unsigned long long)lookup_t2 - sort_t2);
+                atomicAdd(&lookup_cycles, (unsigned long long)lookup_t2 - lookup_t1);
             }
 #endif
 
@@ -1203,6 +1207,14 @@ uint32_t max_partkey = 0;
         if (lane_id == 0) buffer_idx = 0;
 #endif
 
+#ifdef MEASURE_CYCLES
+        __syncwarp();
+        const auto join_t2 = clock64();
+        if (lane_id == 0) {
+            atomicAdd(&join_cycles, (unsigned long long)join_t2 - sort_t2);
+        }
+#endif
+
         // prepare next iteration
         if (lane_id == 0) {
             fully_occupied_warps = 0;
@@ -1222,6 +1234,14 @@ uint32_t max_partkey = 0;
         atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
         atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
+
+#ifdef MEASURE_CYCLES
+    __syncwarp();
+    const auto kernel_end = clock64();
+    if (lane_id == 0) {
+        atomicAdd(&total_cycles, (unsigned long long)kernel_end - kernel_start);
+    }
+#endif
 }
 
 
@@ -1596,7 +1616,9 @@ int main(int argc, char** argv) {
         << "scan_cycles: " << (double)scan_cycles
         << "; sync_cycles: " << (double)sync_cycles
         << "; sort_cycles: " << (double)sort_cycles
-        << "; lookup_cycles: " << (double)lookup_cycles 
+        << "; lookup_cycles: " << (double)lookup_cycles
+        << "; join_cycles: " << (double)join_cycles
+        << "; total_cycles: " << (double)total_cycles
         << std::endl; 
 
     cudaDeviceReset();
