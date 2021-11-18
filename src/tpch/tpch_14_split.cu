@@ -20,7 +20,6 @@
 #include <vector>
 
 #include "cuda_utils.cuh"
-#include "LinearProbingHashTable.cuh"
 #include "cuda_allocator.hpp"
 #include "numa_allocator.hpp"
 #include "mmap_allocator.hpp"
@@ -29,6 +28,7 @@
 
 //#define MEASURE_CYCLES
 //#define SKIP_SORT
+#define PRE_SORT
 
 using namespace cub;
 
@@ -59,8 +59,6 @@ static const uint32_t invalid_tid __attribute__((unused)) = std::numeric_limits<
 
 __device__ unsigned int count = 0;
 __managed__ int tupleCount;
-
-using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
 
 __device__ int my_strcmp(const char *str_a, const char *str_b, unsigned len){
     int match = 0;
@@ -260,10 +258,7 @@ __global__ void ij_join_finalization_kernel(
 
     using index_key_t = uint32_t;
 
-    // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
     using BlockLoadT = cub::BlockLoad<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
-
-    //typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
     using BlockRadixSortT = cub::BlockRadixSort<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, uint32_t>;
 
     __shared__ union TempStorage {
@@ -319,7 +314,7 @@ __global__ void ij_join_finalization_kernel(
 
         __syncthreads();
 
-#if 0
+#ifndef SKIP_SORT
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
             using key_array_t = index_key_t[ITEMS_PER_THREAD];
@@ -347,7 +342,7 @@ __global__ void ij_join_finalization_kernel(
 //if (lane_id == 0) printf("warp: %d iteration: %d - old: %u actual_count: %u\n", warp_id, i, old, actual_count);
 
             if (actual_count == 0) break;
-#if 1
+
             bool active = lane_id < actual_count;
 
             uint32_t assoc_tid = 0;
@@ -362,7 +357,6 @@ __global__ void ij_join_finalization_kernel(
             payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
             active = active && (tid_b != invalid_tid);
 
-#if 1
             sum2 += active;
 
             // evaluate predicate
@@ -375,8 +369,6 @@ __global__ void ij_join_finalization_kernel(
                     sum1 += summand;
                 }
             }
-#endif
-#endif
         } while (true);
 
         tid += valid_items;
@@ -419,6 +411,11 @@ auto left_pipeline(Database& db) {
         l_extendedprice_buffer.push_back(lineitem.l_extendedprice[i].raw);
         l_discount_buffer.push_back(lineitem.l_discount[i].raw);
     }
+
+#ifdef PRE_SORT
+    auto permutation = compute_permutation(l_partkey_buffer.begin(), l_partkey_buffer.end(), std::less<>{});
+    apply_permutation(permutation, l_partkey_buffer, l_extendedprice_buffer, l_discount_buffer);
+#endif
 
     // copy elements
     cuda_allocator<int, cuda_allocation_type::device> device_buffer_allocator;
@@ -475,7 +472,7 @@ struct helper {
 
         int num_sms;
         cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-        int num_blocks = 1;// num_sms*4; // TODO
+        int num_blocks = num_sms*4; // TODO
 
         auto left = left_pipeline(db);
 printf("count: %lu\n", left.size);
@@ -578,10 +575,10 @@ int main(int argc, char** argv) {
             return 0;
     }
 
-
+/*
     printf("sum1: %lu\n", globalSum1);
     printf("sum2: %lu\n", globalSum2);
-
+*/
     const int64_t result = 100*(globalSum1*1'000)/(globalSum2/1'000);
     printf("%ld.%ld\n", result/1'000'000, result%1'000'000);
 
