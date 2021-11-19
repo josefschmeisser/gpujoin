@@ -463,6 +463,7 @@ struct helper {
         }
 
         index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
+        printf("index size: %lu bytes\n", index_structure.memory_consumption());
     }
 
     void run_ij_buffer() {

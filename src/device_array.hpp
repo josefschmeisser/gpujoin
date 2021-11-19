@@ -27,10 +27,14 @@ struct abstract_device_array {
         ptr_ = nullptr;
         return tmp;
     }
+
+    size_t size() const { return size_; }
 };
 
 template<class T, class Allocator>
 struct device_array : abstract_device_array<T> {
+    using value_type = T;
+
     Allocator allocator_;
 
     device_array(T* ptr, size_t size, Allocator allocator) : abstract_device_array<T>(ptr, size), allocator_(allocator) {}
@@ -46,11 +50,15 @@ struct device_array : abstract_device_array<T> {
 
 template<class T>
 struct device_array<T, void> : abstract_device_array<T> {
+    using value_type = T;
+
     device_array(T* ptr, size_t size) : abstract_device_array<T>(ptr, size) {}
 };
 
 template<class T>
 struct device_array_wrapper {
+    using value_type = T;
+
     std::unique_ptr<abstract_device_array<T>> device_array_;
 
     device_array_wrapper() = default;
@@ -64,12 +72,27 @@ struct device_array_wrapper {
         device_array_ = std::make_unique<device_array<T, void>>(ptr, size);
     }
 
-    T* data() { return device_array_->data(); }
+    T* data() {
+        return (device_array_) ? device_array_->data() : nullptr;
+    }
 
-    T* release() { return device_array_->release(); }
+    const T* data() const {
+        return (device_array_) ? device_array_->data() : nullptr;
+    }
+
+    T* release() {
+        return (device_array_) ? device_array_->release() : nullptr;
+    }
 
     void swap(device_array_wrapper& other) {
         std::swap(device_array_, other.device_array_);
+    }
+
+    size_t size() const {
+        if (!device_array_) {
+            throw std::runtime_error("attempt to obtain the size of an empty device_array_wrapper");
+        }
+        return device_array_->size();
     }
 };
 

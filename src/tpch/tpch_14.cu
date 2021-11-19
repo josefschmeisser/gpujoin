@@ -1304,6 +1304,7 @@ struct helper {
         if (sort_indexed_relation) {
             printf("sorting part relation...\n");
             sort_relation(db.part);
+sort_relation(db.lineitem);
         }
         lineitem_size = db.lineitem.l_orderkey.size();
         part_size = db.part.p_partkey.size();
@@ -1323,6 +1324,7 @@ struct helper {
 
 #ifndef USE_HJ
         index_structure.construct(db.part.p_partkey, part_device_ptrs->p_partkey);
+        printf("index size: %lu bytes\n", index_structure.memory_consumption());
 #endif
     }
 
@@ -1534,8 +1536,8 @@ void load_and_run_ij(const std::string& path, bool as_full_pipline_breaker) {
         printf("full pipline breaker\n");
         h.run_two_phase_ij_buffer();
     } else {
-        //h.run_ij();
-        h.run_ij_buffer();
+        h.run_ij();
+        //h.run_ij_buffer();
     }
 }
 

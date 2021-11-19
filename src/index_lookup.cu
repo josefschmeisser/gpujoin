@@ -352,6 +352,7 @@ template<class IndexStructureType>
 std::unique_ptr<IndexStructureType> build_index(const std::vector<index_key_t, host_allocator_t<index_key_t>>& h_keys, index_key_t* d_keys) {
     auto index = std::make_unique<IndexStructureType>();
     index->construct(h_keys, d_keys);
+    printf("index size: %lu bytes\n", index->memory_consumption());
     return index;
 }
 

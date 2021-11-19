@@ -58,6 +58,10 @@ struct btree_index {
     template<class Allocator>
     __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column, Allocator& allocator);
     // TODO
+
+    __host__ size_t memory_consumption() const {
+        return h_tree_.tree_size_in_byte(h_tree_.root);
+    }
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
@@ -65,7 +69,8 @@ struct radix_spline_index {
     using key_t = Key;
     using value_t = Value;
 
-    rs::device_array_guard<key_t> guard;
+    size_t memory_consumption_ = 0;
+    rs::device_array_guard<key_t> guard_;
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
     struct device_index_t {
@@ -104,16 +109,24 @@ struct radix_spline_index {
         // migrate radix spline
         const auto start = std::chrono::high_resolution_clock::now();
 
-//        device_index.d_rs_ = rs::copy_radix_spline<vector_to_device_array>(h_rs); // TODO
         DeviceAllocator<key_t> device_allocator;
-        migrate_radix_spline(h_rs, device_index.d_rs_, device_allocator);
+        guard_ = migrate_radix_spline(h_rs, device_index.d_rs_, device_allocator);
 
         const auto finish = std::chrono::high_resolution_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;
         std::cout << "radixspline migration time: " << duration << " ms\n";
 
+        // calculate memory consumption
+        memory_consumption_ = sizeof(rs::DeviceRadixSpline<key_t>) +
+            guard_.radix_table_guard.size()*sizeof(typename decltype(guard_.radix_table_guard)::value_type) +
+            guard_.spline_points_guard.size()*sizeof(typename decltype(guard_.spline_points_guard)::value_type);
+
         auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline<key_t>*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
+    }
+
+    __host__ size_t memory_consumption() const {
+        return memory_consumption_;
     }
 };
 
@@ -149,6 +162,15 @@ struct harmonia_index {
         tree.construct(h_column);
         DeviceAllocator<key_t> device_allocator;
         tree.create_device_handle(device_index.d_tree, device_allocator, guard);
+    }
+
+    __host__ size_t memory_consumption() const {
+        auto size = guard.keys_guard.size()*sizeof(typename decltype(guard.keys_guard)::value_type);
+        size += guard.children_guard.size()*sizeof(typename decltype(guard.children_guard)::value_type);
+        if (guard.values_guard.data()) {
+            size += guard.values_guard.size()*sizeof(typename decltype(guard.values_guard)::value_type);
+        }
+        return size;
     }
 };
 
@@ -187,6 +209,10 @@ struct lower_bound_index {
         device_index.d_column = d_column;
         device_index.d_size = h_column.size();
     }
+
+    __host__ size_t memory_consumption() const {
+        return 0;
+    }
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
@@ -207,6 +233,10 @@ struct no_op_index {
 
     template<class Vector>
     __host__ void construct(const Vector& h_column, const key_t* d_column) {}
+
+    __host__ size_t memory_consumption() const {
+        return 0;
+    }
 };
 
 // traits

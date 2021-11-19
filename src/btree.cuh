@@ -374,7 +374,7 @@ struct btree {
         return migrate_subtree(root, migrated_pages, pos, memcpy_fun);
     }
 
-    size_t tree_size_in_byte(const NodeBase* tree) {
+    size_t tree_size_in_byte(const NodeBase* tree) const {
         if (tree->header.isLeaf) { return page_size; }
 
         size_t size = page_size;
