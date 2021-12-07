@@ -50,16 +50,13 @@ struct cuda_allocator {
         if /*constexpr*/ (CudaAllocationType == cuda_allocation_type::device) {
             cudaMalloc(&temp, s * sizeof(T));
         } else if (CudaAllocationType == cuda_allocation_type::unified) {
-            //printf("allocate managed\n");
             cudaMallocManaged(&temp, s * sizeof(T));
-            //__host__ ​cudaError_t cudaMemAdvise ( const void* devPtr, size_t count, cudaMemoryAdvise advice, int  device ) 
             cudaMemAdvise(temp, s * sizeof(T), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId);
         } else {
             // zero copy
             pointer host_ptr;
             cudaMallocHost(&host_ptr, s * sizeof(T));
             cudaHostGetDevicePointer(&temp, host_ptr, 0);
-            printf("zero copy\n");
         }
         if (temp == nullptr) {
             throw std::bad_alloc();
