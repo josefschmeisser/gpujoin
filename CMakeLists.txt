@@ -21,6 +21,8 @@ endif()
 set(MY_CUDA_TARGET "pascal" CACHE STRING "CUDA target architecture chosen by the user at CMake configure time")
 set_property(CACHE MY_CUDA_TARGET PROPERTY STRINGS pascal volta)
 
+if(false)
+message(STATUS "current: ${CMAKE_CUDA_FLAGS}")
 if("${MY_CUDA_TARGET}" STREQUAL "pascal")
     string(APPEND CMAKE_CUDA_FLAGS " -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61")
 elseif("${MY_CUDA_TARGET}" STREQUAL "volta")
@@ -28,9 +30,11 @@ elseif("${MY_CUDA_TARGET}" STREQUAL "volta")
 endif()
 message(STATUS "selected target architecture: ${MY_CUDA_TARGET}")
 message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
+endif()
 
 #set(CMAKE_CUDA_ARCHITECTURES 60 61 70 CACHE STRING "CUDA architectures")
-#set(CMAKE_CUDA_ARCHITECTURES 60 61 70)
+set(CMAKE_CUDA_ARCHITECTURES 60)
+message(STATUS "current: ${CMAKE_CUDA_FLAGS}")
 
 # TODO cmake 3.17: use FindCUDAToolkit()
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
@@ -84,3 +88,45 @@ target_link_libraries(huge_pages numa)
 
 add_subdirectory(src/tpch)
 add_subdirectory(test)
+
+
+
+
+add_executable(test_lineinfo src/test_lineinfo.cu)
+target_link_libraries(test_lineinfo tpch_common numa pthread)
+# additional nvcc flags
+if(true)
+    # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
+    # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
+    target_compile_options(test_lineinfo PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                        #--generate-line-info
+                        -lineinfo
+                        >)
+endif()
+
+
+
+add_executable(async
+#contrib/numa-gpu/sql-ops/cudautils/gpu_common.cu
+
+  #  contrib/numa-gpu/sql-ops/cpputils/gpu_common.cpp
+    src/async.cu
+
+)
+target_include_directories(async PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
+)
+target_link_libraries(async numa pthread)
+# additional nvcc flags
+if(true)
+    # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
+    # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
+    target_compile_options(async PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                        #--generate-line-info
+                        #-lineinfo
+                        --default-stream per-thread
+                        --expt-relaxed-constexpr
+                        >)
+endif()
