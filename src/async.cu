@@ -7,6 +7,14 @@
 #include <memory>
 
 
+#include "cuda_utils.cuh"
+#include "cuda_allocator.hpp"
+#include "numa_allocator.hpp"
+#include "mmap_allocator.hpp"
+#include "indexes.cuh"
+#include "device_array.hpp"
+
+
 #include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
 #include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
 #include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
@@ -72,6 +80,46 @@ int main(int argc, char** argv) {
     std::cout << "sharedMemPerBlock: " << device_properties.sharedMemPerBlock << std::endl;
 
 
+
+
+/*
+struct PrefixSumAndCopyWithPayloadArgs {
+  // Inputs
+  const void *const __restrict__ src_partition_attr;
+  const void *const __restrict__ src_payload_attr;
+  std::size_t const data_length;
+  std::size_t const canonical_chunk_length;
+  uint32_t const padding_length;
+  uint32_t const radix_bits;
+  uint32_t const ignore_bits;
+
+  // State
+  ScanState<unsigned long long> *const prefix_scan_state;
+  unsigned long long *const __restrict__ tmp_partition_offsets;
+
+  // Outputs
+  void *const __restrict__ dst_partition_attr;
+  void *const __restrict__ dst_payload_attr;
+  unsigned long long *const __restrict__ partition_offsets;
+};
+*/
+
+    ScanState<unsigned long long>* prefix_scan_state; // see: device_exclusive_prefix_sum_initialize
+
+    PrefixSumAndCopyWithPayloadArgs prefix_sum_and_copy_args {
+        nullptr,
+        nullptr,
+        0,
+        -1, // not used?
+        0,
+        22,
+        8
+    };
+
+
+    prefix_sum_and_copy_args;
+
+
 /*
 // Arguments to the partitioning function.
 //
@@ -98,7 +146,7 @@ struct RadixPartitionArgs {
 };
 */
 
-    RadixPartitionArgs args {
+    RadixPartitionArgs radix_partition_args {
         nullptr,
         nullptr,
         0,
