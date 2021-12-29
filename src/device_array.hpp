@@ -96,6 +96,22 @@ struct device_array_wrapper {
     }
 };
 
+template<class T>
+auto create_device_array(size_t size) {
+    using array_allocator_type = cuda_allocator<T>;
+    array_allocator_type array_allocator;
+    T* ptr = array_allocator.allocate(size);
+    return device_array_wrapper<T>(ptr, size);
+}
+
+template<class T, class Allocator>
+auto create_device_array(size_t size, Allocator& allocator) {
+    using array_allocator_type = typename Allocator::rebind<T>::other;
+    array_allocator_type array_allocator = allocator;
+    T* ptr = array_allocator.allocate(size);
+    return device_array_wrapper<T>(ptr, size);
+}
+
 #if 0
 template<class T, class OutputAllocator, class InputAllocator>
 auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
