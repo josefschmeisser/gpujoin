@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -6,6 +7,7 @@
 #include <chrono>
 #include <memory>
 
+#include <cub/util_debug.cuh>
 
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"
@@ -18,6 +20,43 @@
 #include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
 #include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
 #include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
+
+
+static const int block_size = 64;
+static const int grid_size = 1;
+static const uint32_t radix_bits = 22;
+
+
+namespace gpu_prefix_sum {
+
+// same as in partition.rs
+uint32_t fanout(uint32_t radix_bits) {
+    return (1 << radix_bits);
+}
+
+template<class G, class B>
+size_t state_size(G grid_size, B block_size) {
+    cudaDeviceProp device_properties;
+    const auto ret = cudaGetDeviceProperties(&device_properties, 0); // FIXME
+    CubDebugExit(ret);
+
+    const auto warp_size = device_properties.warpSize;
+    return ((grid_size * block_size) / warp_size + warp_size);
+}
+
+} // end namespace gpu_prefix_sum
+
+
+struct parition_offsets {
+    //void* local_offsets;
+    device_array_wrapper<unsigned long long> local_offsets;
+
+    template<class Allocator>
+    parition_offsets(uint32_t max_chunks, uint32_t radix_bits, Allocator& allocator) {
+        const auto num_partitions = gpu_prefix_sum::fanout(radix_bits);
+        local_offsets = create_device_array<unsigned long long>(num_partitions * max_chunks);
+    }
+};
 
 
 
@@ -76,7 +115,7 @@ __global__ void join_kernel(float *x, int n) {
 
 int main(int argc, char** argv) {
     cudaDeviceProp device_properties;
-    const auto ret = cudaGetDeviceProperties(&device_properties, 0);
+    CubDebugExit(cudaGetDeviceProperties(&device_properties, 0));
     std::cout << "sharedMemPerBlock: " << device_properties.sharedMemPerBlock << std::endl;
 
 
@@ -104,20 +143,28 @@ struct PrefixSumAndCopyWithPayloadArgs {
 };
 */
 
-    ScanState<unsigned long long>* prefix_scan_state; // see: device_exclusive_prefix_sum_initialize
+
+//    ScanState<unsigned long long>* prefix_scan_state; // see: device_exclusive_prefix_sum_initialize
+    const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, block_size);
+    auto prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
+
+    partition_offsets offsets(grid_size, radix_bits, device_allocator);
 
     PrefixSumAndCopyWithPayloadArgs prefix_sum_and_copy_args {
+        // Inputs
         nullptr,
         nullptr,
         0,
-        -1, // not used?
+        0, // TODO check: not used?
         0,
-        22,
-        8
+        radix_bits,
+        8,
+        // State
+        prefix_scan_state.data(),
+        offsets.local_offsets.data(),
+        // Outputs
     };
 
-
-    prefix_sum_and_copy_args;
 
 
 /*
@@ -162,7 +209,7 @@ struct RadixPartitionArgs {
 
     //gpu_chunked_laswwc_radix_partition<<<1, 64>>>(args, );
 
-    gpu_chunked_laswwc_radix_partition_int32_int32<<<1, 64>>>(args, device_properties.sharedMemPerBlock);
+    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size>>>(radix_partition_args, device_properties.sharedMemPerBlock);
     cudaDeviceSynchronize();
 
 #if 0
