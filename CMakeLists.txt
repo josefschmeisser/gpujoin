@@ -118,7 +118,7 @@ target_include_directories(async PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
 )
-target_link_libraries(async numa pthread)
+target_link_libraries(async ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
 if(true)
     # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
