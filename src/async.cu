@@ -9,6 +9,10 @@
 
 #include <cub/util_debug.cuh>
 
+#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
+#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
+#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
+
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"
 #include "numa_allocator.hpp"
@@ -17,15 +21,12 @@
 #include "device_array.hpp"
 
 
-#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
-#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
-#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
-
-
 static const int block_size = 64;
 static const int grid_size = 1;
 static const uint32_t radix_bits = 22;
 
+template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
+template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
 
 namespace gpu_prefix_sum {
 
@@ -47,12 +48,12 @@ size_t state_size(G grid_size, B block_size) {
 } // end namespace gpu_prefix_sum
 
 
-struct parition_offsets {
+struct partition_offsets {
     //void* local_offsets;
     device_array_wrapper<unsigned long long> local_offsets;
 
     template<class Allocator>
-    parition_offsets(uint32_t max_chunks, uint32_t radix_bits, Allocator& allocator) {
+    partition_offsets(uint32_t max_chunks, uint32_t radix_bits, Allocator& allocator) {
         const auto num_partitions = gpu_prefix_sum::fanout(radix_bits);
         local_offsets = create_device_array<unsigned long long>(num_partitions * max_chunks);
     }
@@ -119,6 +120,7 @@ int main(int argc, char** argv) {
     std::cout << "sharedMemPerBlock: " << device_properties.sharedMemPerBlock << std::endl;
 
 
+    device_allocator_t<int> device_allocator;
 
 
 /*
@@ -163,9 +165,35 @@ struct PrefixSumAndCopyWithPayloadArgs {
         prefix_scan_state.data(),
         offsets.local_offsets.data(),
         // Outputs
+        nullptr,
+        nullptr,
+        offsets.local_offsets.data()
     };
 
 
+// __host__ ​cudaError_t cudaLaunchCooperativeKernel ( const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream ) 
+/*
+template <typename K, typename V>
+__device__ void gpu_contiguous_prefix_sum_and_copy_with_payload(args)
+*/
+    cudaStream_t scan_stream;
+    CubDebugExit(cudaStreamCreate(&scan_stream));
+
+    //const void* func = &gpu_contiguous_prefix_sum_and_copy_with_payload<int, int>;
+
+    void* args[1];
+    args[0] = &prefix_sum_and_copy_args;
+    CubDebugExit(cudaLaunchCooperativeKernel(
+        //func,
+        (void*)gpu_contiguous_prefix_sum_and_copy_with_payload_int32_int32,
+        dim3(grid_size),
+        dim3(block_size),
+        args,
+        device_properties.sharedMemPerBlock,
+        scan_stream
+    ));
+    cudaDeviceSynchronize();
+    printf("gpu_contiguous_prefix_sum_and_copy_with_payload_int32_int32 done\n");
 
 /*
 // Arguments to the partitioning function.
