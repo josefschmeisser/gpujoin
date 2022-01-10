@@ -19,11 +19,10 @@
 #include "zipf.hpp"
 
 #include "cuda_utils.cuh"
-#include "cuda_allocator.hpp"
-#include "numa_allocator.hpp"
-#include "mmap_allocator.hpp"
-#include "indexes.cuh"
 #include "device_array.hpp"
+
+#include "index_lookup_config.cuh"
+#include "index_lookup_common.cuh"
 
 using namespace std;
 
@@ -31,31 +30,6 @@ static const int blockSize = 64;
 //static const int blockSize = 256; // best for sorting on pascal
 static const unsigned maxRepetitions = 10;
 static const unsigned activeLanes = 32;
-static const unsigned defaultNumLookups = 1e8;
-static unsigned defaultNumElements = 1e5;
-static const unsigned max_bits = 26;
-static const bool partitial_sorting = true;
-
-using index_key_t = uint32_t;
-using value_t = uint32_t;
-
-// host allocator
-//template<class T> using host_allocator_t = huge_page_allocator<T>;
-//template<class T> using host_allocator_t = mmap_allocator<T, huge_2mb, 1>;
-template<class T> using host_allocator_t = std::allocator<T>;
-//template<class T> using host_allocator_t = cuda_allocator<T, true>;
-
-// device allocators
-//template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::device>;
-template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::zero_copy>;
-//using indexed_allocator_t = cuda_allocator<index_key_t>;
-using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
-using lookup_keys_allocator_t = cuda_allocator<index_key_t>;
-
-//using index_type = lower_bound_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
-using index_type = harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
-//using index_type = btree_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
-//using index_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 
 
 template<class IndexStructureType>
@@ -318,44 +292,6 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
 }
 #endif
 
-enum dataset_type : unsigned { dense = 0, uniform };
-
-template<class IndexStructureType>
-void generate_datasets(dataset_type dt, std::vector<index_key_t, host_allocator_t<index_key_t>>& keys, std::vector<index_key_t, host_allocator_t<index_key_t>>& lookups) {
-    auto rng = std::default_random_engine {};
-
-    if (dt == dense) {
-        std::iota(keys.begin(), keys.end(), 0);
-    } else if (dt == uniform) {
-        // create random keys
-        std::uniform_int_distribution<> key_distrib(0, 1 << (max_bits - 1));
-        std::unordered_set<index_key_t> unique;
-        unique.reserve(keys.size());
-        while (unique.size() < keys.size()) {
-            const auto key = key_distrib(rng);
-            unique.insert(key);
-        }
-
-        std::copy(unique.begin(), unique.end(), keys.begin());
-        std::sort(keys.begin(), keys.end());
-    } else {
-        assert(false);
-    }
-
-    std::uniform_int_distribution<> lookup_distrib(0, keys.size() - 1);
-    std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distrib(rng)]; });
-
-//std::sort(lookups.begin(), lookups.end());
-}
-
-template<class IndexStructureType>
-std::unique_ptr<IndexStructureType> build_index(const std::vector<index_key_t, host_allocator_t<index_key_t>>& h_keys, index_key_t* d_keys) {
-    auto index = std::make_unique<IndexStructureType>();
-    index->construct(h_keys, d_keys);
-    printf("index size: %lu bytes\n", index->memory_consumption());
-    return index;
-}
-
 template<class IndexStructureType>
 auto run_lookup_benchmark(IndexStructureType& index_structure, const index_key_t* d_lookup_keys, unsigned num_lookup_keys) {
     int num_blocks;
@@ -425,7 +361,7 @@ void run_lane_limited_lookup_benchmark() {
 #endif
 
 int main(int argc, char** argv) {
-    auto num_elements = defaultNumElements;
+    auto num_elements = default_num_elements;
     if (argc > 1) {
         std::string::size_type sz;
         num_elements = std::stod(argv[1], &sz);
@@ -435,15 +371,15 @@ int main(int argc, char** argv) {
     // generate datasets
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
-    lookup_keys.resize(defaultNumLookups);
-    generate_datasets<index_type>(dense, indexed, lookup_keys);
+    lookup_keys.resize(default_num_lookups);
+    generate_datasets<index_key_t, index_type>(dense, max_bits, indexed, lookup_keys);
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
     auto d_indexed = create_device_array_from(indexed, indexed_allocator);
     lookup_keys_allocator_t lookup_keys_allocator;
     auto d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
-    auto index = build_index<index_type>(indexed, d_indexed.data());
+    auto index = build_index<index_key_t, index_type>(indexed, d_indexed.data());
 
 /*
 auto v = std::vector<int, cuda_allocator<int>>();
