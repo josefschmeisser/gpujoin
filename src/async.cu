@@ -20,10 +20,14 @@
 #include "indexes.cuh"
 #include "device_array.hpp"
 
+#include "index_lookup_config.cuh"
+#include "index_lookup_common.cuh"
+
 
 static const int block_size = 64;
 static const int grid_size = 1;
 static const uint32_t radix_bits = 22;
+static const uint32_t ignore_bits = 8;
 
 template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
 template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
@@ -115,10 +119,31 @@ __global__ void join_kernel(float *x, int n) {
 }
 
 int main(int argc, char** argv) {
+    auto num_elements = default_num_elements;
+    auto num_lookups = default_num_lookups;
+    if (argc > 1) {
+        std::string::size_type sz;
+        num_elements = std::stod(argv[1], &sz);
+    }
+    std::cout << "index size: " << num_elements << std::endl;
+
+    // generate datasets
+    std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
+    indexed.resize(num_elements);
+    lookup_keys.resize(default_num_elements);
+    generate_datasets<index_key_t, index_type>(dense, max_bits, indexed, lookup_keys);
+
+    // create gpu accessible vectors
+    indexed_allocator_t indexed_allocator;
+    auto d_indexed = create_device_array_from(indexed, indexed_allocator);
+    lookup_keys_allocator_t lookup_keys_allocator;
+    auto d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
+    auto index = build_index<index_key_t, index_type>(indexed, d_indexed.data());
+
+    // fetch device properties
     cudaDeviceProp device_properties;
     CubDebugExit(cudaGetDeviceProperties(&device_properties, 0));
     std::cout << "sharedMemPerBlock: " << device_properties.sharedMemPerBlock << std::endl;
-
 
     device_allocator_t<int> device_allocator;
 
@@ -145,8 +170,14 @@ struct PrefixSumAndCopyWithPayloadArgs {
 };
 */
 
+    // dummy payloads
+    auto d_payloads = create_device_array<int32_t>(num_lookups);
 
-//    ScanState<unsigned long long>* prefix_scan_state; // see: device_exclusive_prefix_sum_initialize
+    // allocate output arrays
+    auto dst_partition_attr = create_device_array<index_key_t>(num_lookups);
+    auto dst_payload_attrs = create_device_array<int32_t>(num_lookups);
+
+    //ScanState<unsigned long long>* prefix_scan_state; // see: device_exclusive_prefix_sum_initialize
     const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, block_size);
     auto prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
@@ -154,28 +185,28 @@ struct PrefixSumAndCopyWithPayloadArgs {
 
     PrefixSumAndCopyWithPayloadArgs prefix_sum_and_copy_args {
         // Inputs
-        nullptr,
-        nullptr,
-        0,
+        d_lookup_keys.data(),
+        d_payloads.data(),
+        num_elements,
         0, // TODO check: not used?
         0,
         radix_bits,
-        8,
+        ignore_bits,
         // State
         prefix_scan_state.data(),
         offsets.local_offsets.data(),
         // Outputs
-        nullptr,
-        nullptr,
+        dst_partition_attr.data(),
+        dst_payload_attrs.data(),
         offsets.local_offsets.data()
     };
 
 
-// __host__ ​cudaError_t cudaLaunchCooperativeKernel ( const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream ) 
-/*
-template <typename K, typename V>
-__device__ void gpu_contiguous_prefix_sum_and_copy_with_payload(args)
-*/
+    //__host__ ​cudaError_t cudaLaunchCooperativeKernel ( const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream ) 
+    /*
+    template <typename K, typename V>
+    __device__ void gpu_contiguous_prefix_sum_and_copy_with_payload(args)
+    */
     cudaStream_t scan_stream;
     CubDebugExit(cudaStreamCreate(&scan_stream));
 
@@ -222,23 +253,33 @@ struct RadixPartitionArgs {
 */
 
     RadixPartitionArgs radix_partition_args {
+        // Inputs
+        dst_partition_attr.data(),
+        dst_payload_attrs.data(),
+        num_lookups,
+        0,
+        radix_bits,
+        ignore_bits,
+        offsets.local_offsets.data(),
+        // State
+        nullptr,
         nullptr,
         nullptr,
         0,
-        0,
-        22,
-        8,
-        nullptr
+        // Outputs
+
     };
 
     /*
     template <typename K, typename V>
-    __device__ void gpu_chunked_laswwc_radix_partition(RadixPartitionArgs &args, uint32_t shared_mem_bytes);*/
+    __device__ void gpu_chunked_laswwc_radix_partition(RadixPartitionArgs &args, uint32_t shared_mem_bytes);
+    */
 
     //gpu_chunked_laswwc_radix_partition<<<1, 64>>>(args, );
 
     gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size>>>(radix_partition_args, device_properties.sharedMemPerBlock);
     cudaDeviceSynchronize();
+    printf("gpu_chunked_laswwc_radix_partition_int32_int32 done\n");
 
 #if 0
     cudaStream_t partition_stream, join_stream;
