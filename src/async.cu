@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -63,7 +64,32 @@ struct partition_offsets {
     }
 };
 
+template<class T>
+constexpr unsigned padding_length() {
+    return GPU_CACHE_LINE_SIZE / sizeof(T);
+}
 
+template<class T>
+struct partitioned_relation {
+    device_array_wrapper<T> relation;
+    device_array_wrapper<uint64_t> offsets;
+
+    template<class Allocator>
+    partitioned_relation(size_t len, uint32_t max_chunks, uint32_t radix_bits, Allocator& allocator) {
+        const auto chunks = 1; // we only consider contiguous histograms (at least for now)
+        const auto padding_len = ::padding_length<T>();
+        const auto num_partitions = gpu_prefix_sum::fanout(radix_bits);
+        const auto relation_len = len + (num_partitions * chunks) * padding_len;
+
+        // allocate device accessible arrays
+        relation = create_device_array<T>(relation_len);
+        offsets = create_device_array<uint64_t>(num_partitions * chunks);
+    }
+
+    unsigned padding_length() const {
+        return ::padding_length<T>();
+    }
+};
 
 #if 0
 const int N = 1 << 20;
@@ -182,6 +208,7 @@ struct PrefixSumAndCopyWithPayloadArgs {
     auto prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
     partition_offsets offsets(grid_size, radix_bits, device_allocator);
+    partitioned_relation<index_key_t> partitioned_relation_inst(num_lookups, grid_size, radix_bits, device_allocator);
 
     PrefixSumAndCopyWithPayloadArgs prefix_sum_and_copy_args {
         // Inputs
@@ -189,7 +216,7 @@ struct PrefixSumAndCopyWithPayloadArgs {
         d_payloads.data(),
         num_elements,
         0, // TODO check: not used?
-        0,
+        partitioned_relation_inst.padding_length(),
         radix_bits,
         ignore_bits,
         // State
@@ -257,7 +284,7 @@ struct RadixPartitionArgs {
         dst_partition_attr.data(),
         dst_payload_attrs.data(),
         num_lookups,
-        0,
+        partitioned_relation_inst.padding_length(),
         radix_bits,
         ignore_bits,
         offsets.local_offsets.data(),
@@ -267,7 +294,7 @@ struct RadixPartitionArgs {
         nullptr,
         0,
         // Outputs
-
+        partitioned_relation_inst.relation.data()
     };
 
     /*
