@@ -185,7 +185,11 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
     return device_array_wrapper<T>(vec.data(), vec.size());
 }
 
-template<class T, template<class U> class OutputAllocator>
+// This alias template removes the depency on the additional template parameter of cuda_allocator
+template<class T>
+using default_cuda_allocator = cuda_allocator<T>;
+
+template<class T, template<class U> class OutputAllocator = default_cuda_allocator>
 auto create_device_array_from(const T* arr, size_t size) {
     static OutputAllocator<T> allocator;
     T* ptr = allocator.allocate(size);
