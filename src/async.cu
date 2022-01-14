@@ -1,3 +1,4 @@
+#include <bits/stdint-uintn.h>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -27,8 +28,8 @@
 
 static const int block_size = 64;
 static const int grid_size = 1;
-static const uint32_t radix_bits = 22;
-static const uint32_t ignore_bits = 8;
+static const uint32_t radix_bits = 10;
+static const uint32_t ignore_bits = 3;
 
 template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
 template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
@@ -146,7 +147,7 @@ __global__ void join_kernel(float *x, int n) {
 
 int main(int argc, char** argv) {
     auto num_elements = default_num_elements;
-    auto num_lookups = default_num_lookups;
+    auto num_lookups = 1000;// default_num_lookups;
     if (argc > 1) {
         std::string::size_type sz;
         num_elements = std::stod(argv[1], &sz);
@@ -214,7 +215,7 @@ struct PrefixSumAndCopyWithPayloadArgs {
         // Inputs
         d_lookup_keys.data(),
         d_payloads.data(),
-        num_elements,
+        num_lookups,
         0, // TODO check: not used?
         partitioned_relation_inst.padding_length(),
         radix_bits,
@@ -237,17 +238,23 @@ struct PrefixSumAndCopyWithPayloadArgs {
     cudaStream_t scan_stream;
     CubDebugExit(cudaStreamCreate(&scan_stream));
 
+    const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
+    printf("required_shared_mem_bytes %lu\n", required_shared_mem_bytes);
     //const void* func = &gpu_contiguous_prefix_sum_and_copy_with_payload<int, int>;
+    assert(required_shared_mem_bytes <= device_properties.sharedMemPerBlock);
 
+    // prepare kernel arguments
+    auto d_prefix_sum_and_copy_args = create_device_array_from(reinterpret_cast<const uint8_t*>(&prefix_sum_and_copy_args), sizeof(prefix_sum_and_copy_args));
     void* args[1];
-    args[0] = &prefix_sum_and_copy_args;
+    args[0] = &prefix_sum_and_copy_args;// d_prefix_sum_and_copy_args.data();
+
     CubDebugExit(cudaLaunchCooperativeKernel(
         //func,
         (void*)gpu_contiguous_prefix_sum_and_copy_with_payload_int32_int32,
         dim3(grid_size),
         dim3(block_size),
         args,
-        device_properties.sharedMemPerBlock,
+        required_shared_mem_bytes,
         scan_stream
     ));
     cudaDeviceSynchronize();
