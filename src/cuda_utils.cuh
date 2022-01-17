@@ -37,4 +37,7 @@ __forceinline__ __device__ T round_up_pow2(T value) {
 }
 
 #define FULL_MASK 0xffffffff
+
+#ifndef GPU_CACHE_LINE_SIZE
 #define GPU_CACHE_LINE_SIZE 128
+#endif
