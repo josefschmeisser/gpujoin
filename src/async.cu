@@ -1,4 +1,3 @@
-#include <bits/stdint-uintn.h>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -304,6 +303,8 @@ struct RadixPartitionArgs {
         partitioned_relation_inst.relation.data()
     };
 
+    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
+
     /*
     template <typename K, typename V>
     __device__ void gpu_chunked_laswwc_radix_partition(RadixPartitionArgs &args, uint32_t shared_mem_bytes);
@@ -311,7 +312,7 @@ struct RadixPartitionArgs {
 
     //gpu_chunked_laswwc_radix_partition<<<1, 64>>>(args, );
 
-    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size>>>(radix_partition_args, device_properties.sharedMemPerBlock);
+    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, scan_stream>>>(radix_partition_args, device_properties.sharedMemPerBlock);
     cudaDeviceSynchronize();
     printf("gpu_chunked_laswwc_radix_partition_int32_int32 done\n");
 
