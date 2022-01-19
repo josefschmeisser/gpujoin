@@ -54,12 +54,14 @@ size_t state_size(G grid_size, B block_size) {
 
 
 struct partition_offsets {
-    //void* local_offsets;
+    device_array_wrapper<unsigned long long> offsets;
     device_array_wrapper<unsigned long long> local_offsets;
 
     template<class Allocator>
     partition_offsets(uint32_t max_chunks, uint32_t radix_bits, Allocator& allocator) {
+        const auto chunks = 1; // we only consider contiguous histograms (at least for now)
         const auto num_partitions = gpu_prefix_sum::fanout(radix_bits);
+        offsets = create_device_array<unsigned long long>(num_partitions * chunks);
         local_offsets = create_device_array<unsigned long long>(num_partitions * max_chunks);
     }
 };
@@ -225,7 +227,7 @@ struct PrefixSumAndCopyWithPayloadArgs {
         // Outputs
         dst_partition_attr.data(),
         dst_payload_attrs.data(),
-        offsets.local_offsets.data()
+        offsets.offsets.data()
     };
 
 
@@ -293,7 +295,7 @@ struct RadixPartitionArgs {
         partitioned_relation_inst.padding_length(),
         radix_bits,
         ignore_bits,
-        offsets.local_offsets.data(),
+        offsets.offsets.data(),
         // State
         nullptr,
         nullptr,
@@ -303,7 +305,7 @@ struct RadixPartitionArgs {
         partitioned_relation_inst.relation.data()
     };
 
-    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
+//    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
     /*
     template <typename K, typename V>
