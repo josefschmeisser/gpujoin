@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "utils.hpp"
+#include "zipf.hpp"
 
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"
@@ -16,15 +17,17 @@
 #include "indexes.cuh"
 #include "device_array.hpp"
 
-enum dataset_type : unsigned { dense = 0, uniform };
+enum class dataset_type : unsigned { dense, uniform };
+
+enum class lookup_pattern_type : unsigned { uniform, zipf };
 
 template<class KeyType, class IndexStructureType, class VectorType>
-void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, VectorType& lookups) {
+void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
     auto rng = std::default_random_engine {};
 
-    if (dt == dense) {
+    if (dt == dataset_type::dense) {
         std::iota(keys.begin(), keys.end(), 0);
-    } else if (dt == uniform) {
+    } else if (dt == dataset_type::uniform) {
         // create random keys
         std::uniform_int_distribution<> key_distrib(0, 1 << (max_bits - 1));
         std::unordered_set<KeyType> unique;
@@ -40,10 +43,22 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, Vec
         assert(false);
     }
 
-    std::uniform_int_distribution<> lookup_distrib(0, keys.size() - 1);
-    std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distrib(rng)]; });
+    if (lookup_pattern == lookup_pattern_type::uniform) {
+        std::uniform_int_distribution<> lookup_distribution(0, keys.size() - 1);
+        std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distribution(rng)]; });
+    } else if (lookup_pattern == lookup_pattern_type::zipf) {
+        std::mt19937 generator;
+        generator.seed(0);
+        zipf_distribution<uint64_t> lookup_distribution(keys.size(), zipf_factor);
+        for (uint64_t i = 0; i < lookups.size(); ++i) {
+            const auto key_pos = lookup_distribution(generator);
+            lookups[i] = keys[key_pos];
+        }
+    } else {
+        assert(false);
+    }
 
-//std::sort(lookups.begin(), lookups.end());
+    //std::sort(lookups.begin(), lookups.end());
 }
 
 template<class KeyType, class IndexStructureType, class VectorType>

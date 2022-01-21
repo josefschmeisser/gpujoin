@@ -361,6 +361,7 @@ void run_lane_limited_lookup_benchmark() {
 #endif
 
 int main(int argc, char** argv) {
+    double zipf_factor = 1.25;
     auto num_elements = default_num_elements;
     if (argc > 1) {
         std::string::size_type sz;
@@ -372,7 +373,7 @@ int main(int argc, char** argv) {
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(default_num_lookups);
-    generate_datasets<index_key_t, index_type>(dense, max_bits, indexed, lookup_keys);
+    generate_datasets<index_key_t, index_type>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::zipf, zipf_factor, lookup_keys);
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
