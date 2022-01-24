@@ -147,8 +147,9 @@ __global__ void join_kernel(float *x, int n) {
 }
 
 int main(int argc, char** argv) {
+    double zipf_factor = 1.25;
     auto num_elements = default_num_elements;
-    auto num_lookups = 1000;// default_num_lookups;
+    size_t num_lookups = 1000;// default_num_lookups;
     if (argc > 1) {
         std::string::size_type sz;
         num_elements = std::stod(argv[1], &sz);
@@ -159,7 +160,7 @@ int main(int argc, char** argv) {
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(default_num_elements);
-    generate_datasets<index_key_t, index_type>(dense, max_bits, indexed, lookup_keys);
+    generate_datasets<index_key_t, index_type>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::zipf, zipf_factor, lookup_keys);
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
@@ -211,13 +212,13 @@ struct PrefixSumAndCopyWithPayloadArgs {
 
     partition_offsets offsets(grid_size, radix_bits, device_allocator);
     partitioned_relation<index_key_t> partitioned_relation_inst(num_lookups, grid_size, radix_bits, device_allocator);
-
+/*
     PrefixSumAndCopyWithPayloadArgs prefix_sum_and_copy_args {
         // Inputs
         d_lookup_keys.data(),
         d_payloads.data(),
         num_lookups,
-        0, // TODO check: not used?
+        0, // not used
         partitioned_relation_inst.padding_length(),
         radix_bits,
         ignore_bits,
@@ -229,7 +230,21 @@ struct PrefixSumAndCopyWithPayloadArgs {
         dst_payload_attrs.data(),
         offsets.offsets.data()
     };
-
+    */
+    PrefixSumArgs prefix_sum_and_copy_args {
+        // Inputs
+        d_lookup_keys.data(),
+        num_lookups,
+        0, // not used
+        partitioned_relation_inst.padding_length(),
+        radix_bits,
+        ignore_bits,
+        // State
+        prefix_scan_state.data(),
+        offsets.local_offsets.data(),
+        // Outputs
+        offsets.offsets.data()
+    };
 
     //__host__ ​cudaError_t cudaLaunchCooperativeKernel ( const void* func, dim3 gridDim, dim3 blockDim, void** args, size_t sharedMem, cudaStream_t stream ) 
     /*
@@ -245,13 +260,15 @@ struct PrefixSumAndCopyWithPayloadArgs {
     assert(required_shared_mem_bytes <= device_properties.sharedMemPerBlock);
 
     // prepare kernel arguments
-    auto d_prefix_sum_and_copy_args = create_device_array_from(reinterpret_cast<const uint8_t*>(&prefix_sum_and_copy_args), sizeof(prefix_sum_and_copy_args));
+    //auto d_prefix_sum_and_copy_args = create_device_array_from(reinterpret_cast<const uint8_t*>(&prefix_sum_and_copy_args), sizeof(prefix_sum_and_copy_args));
     void* args[1];
     args[0] = &prefix_sum_and_copy_args;// d_prefix_sum_and_copy_args.data();
 
     CubDebugExit(cudaLaunchCooperativeKernel(
         //func,
-        (void*)gpu_contiguous_prefix_sum_and_copy_with_payload_int32_int32,
+//        (void*)gpu_contiguous_prefix_sum_and_copy_with_payload_int32_int32,
+        (void*)gpu_chunked_prefix_sum_int32,
+        //(void*)gpu_contiguous_prefix_sum_int32,
         dim3(grid_size),
         dim3(block_size),
         args,
@@ -289,8 +306,10 @@ struct RadixPartitionArgs {
 
     RadixPartitionArgs radix_partition_args {
         // Inputs
-        dst_partition_attr.data(),
-        dst_payload_attrs.data(),
+        //dst_partition_attr.data(),
+        //dst_payload_attrs.data(),
+        d_lookup_keys.data(),
+        d_payloads.data(),
         num_lookups,
         partitioned_relation_inst.padding_length(),
         radix_bits,
