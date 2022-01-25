@@ -27,8 +27,8 @@
 
 static const int block_size = 64;
 static const int grid_size = 1;
-static const uint32_t radix_bits = 10;
-static const uint32_t ignore_bits = 3;
+static const uint32_t radix_bits = 6;// 10;
+static const uint32_t ignore_bits = 0;//3;
 
 template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
 template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
@@ -267,8 +267,8 @@ struct PrefixSumAndCopyWithPayloadArgs {
     CubDebugExit(cudaLaunchCooperativeKernel(
         //func,
 //        (void*)gpu_contiguous_prefix_sum_and_copy_with_payload_int32_int32,
-        (void*)gpu_chunked_prefix_sum_int32,
-        //(void*)gpu_contiguous_prefix_sum_int32,
+        //(void*)gpu_chunked_prefix_sum_int32,
+        (void*)gpu_contiguous_prefix_sum_int32,
         dim3(grid_size),
         dim3(block_size),
         args,
@@ -314,6 +314,7 @@ struct RadixPartitionArgs {
         partitioned_relation_inst.padding_length(),
         radix_bits,
         ignore_bits,
+//        offsets.local_offsets.data(),
         offsets.offsets.data(),
         // State
         nullptr,
@@ -333,8 +334,13 @@ struct RadixPartitionArgs {
 
     //gpu_chunked_laswwc_radix_partition<<<1, 64>>>(args, );
 
-    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, scan_stream>>>(radix_partition_args, device_properties.sharedMemPerBlock);
+    //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, scan_stream>>>(radix_partition_args, device_properties.sharedMemPerBlock);
+
+    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
+    gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, scan_stream>>>(radix_partition_args);
     cudaDeviceSynchronize();
+
+
     printf("gpu_chunked_laswwc_radix_partition_int32_int32 done\n");
 
 #if 0
