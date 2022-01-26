@@ -29,6 +29,8 @@ struct abstract_device_array {
     }
 
     size_t size() const { return size_; }
+
+    virtual std::unique_ptr<abstract_device_array<T>> to_host_accessible() const = 0;
 };
 
 template<class T, class Allocator>
@@ -46,6 +48,8 @@ struct device_array : abstract_device_array<T> {
             allocator_.deallocate(this->ptr_, sizeof(T)*this->size_);
         }
     }
+
+    std::unique_ptr<abstract_device_array<T>> to_host_accessible() const override;
 };
 
 template<class T>
@@ -53,7 +57,28 @@ struct device_array<T, void> : abstract_device_array<T> {
     using value_type = T;
 
     device_array(T* ptr, size_t size) : abstract_device_array<T>(ptr, size) {}
+
+    std::unique_ptr<abstract_device_array<T>> to_host_accessible() const override;
 };
+
+template<class T, class Allocator>
+std::unique_ptr<abstract_device_array<T>> device_array<T, Allocator>::to_host_accessible() const {
+    if /*constexpr*/ (is_allocation_host_accessible<Allocator>::value) {
+        return std::make_unique<device_array<T, void>>(this->ptr_, this->size_);
+    } else {
+        //default_cuda_allocator<T> allocator;
+        std::allocator<T> array_allocator;
+        T* ptr = array_allocator.allocate(this->size_);
+        const auto ret = cudaMemcpy(ptr, this->ptr_, this->size_*sizeof(T), cudaMemcpyDeviceToHost);
+        if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
+        return std::make_unique<device_array<T, decltype(array_allocator)>>(this->ptr_, this->size_, array_allocator);
+    }
+}
+
+template<class T>
+std::unique_ptr<abstract_device_array<T>> device_array<T, void>::to_host_accessible() const {
+    return std::make_unique<device_array<T, void>>(this->ptr_, this->size_);
+}
 
 template<class T>
 struct device_array_wrapper {
@@ -72,6 +97,12 @@ struct device_array_wrapper {
         device_array_ = std::make_unique<device_array<T, void>>(ptr, size);
     }
 
+private:
+    device_array_wrapper(std::unique_ptr<abstract_device_array<T>>&& device_array) {
+        device_array_.swap(device_array);
+    }
+
+public:
     T* data() {
         return (device_array_) ? device_array_->data() : nullptr;
     }
@@ -94,6 +125,13 @@ struct device_array_wrapper {
         }
         return device_array_->size();
     }
+
+    device_array_wrapper<T> to_host_accessible() const {
+        if (device_array_) {
+            return device_array_wrapper(device_array_->to_host_accessible());
+        }
+        return device_array_wrapper();
+    }
 };
 
 template<class T>
@@ -106,7 +144,7 @@ auto create_device_array(size_t size) {
 
 template<class T, class Allocator>
 auto create_device_array(size_t size, Allocator& allocator) {
-    using array_allocator_type = typename Allocator::rebind<T>::other;
+    using array_allocator_type = typename Allocator::template rebind<T>::other;
     array_allocator_type array_allocator = allocator;
     T* ptr = array_allocator.allocate(size);
     return device_array_wrapper<T>(ptr, size);
@@ -156,7 +194,7 @@ auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAlloca
 
 template<class T, class OutputAllocator, class InputAllocator>
 auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
-    using array_allocator_type = typename OutputAllocator::rebind<T>::other;
+    using array_allocator_type = typename OutputAllocator::template rebind<T>::other;
 
     // check if rebinding is sufficient
     if (std::is_same<InputAllocator, array_allocator_type>::value) {
