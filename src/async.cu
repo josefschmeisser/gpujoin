@@ -25,8 +25,8 @@
 #include "index_lookup_common.cuh"
 
 
-static const int block_size = 64;
-static const int grid_size = 1;
+static const int block_size = 128;// 64;
+static const int grid_size = 10;//1;
 static const uint32_t radix_bits = 6;// 10;
 static const uint32_t ignore_bits = 0;//3;
 
@@ -82,7 +82,7 @@ struct partitioned_relation {
         const auto padding_len = ::padding_length<T>();
         const auto num_partitions = gpu_prefix_sum::fanout(radix_bits);
         const auto relation_len = len + (num_partitions * chunks) * padding_len;
-
+printf("relation_len: %lu\n", relation_len);
         // allocate device accessible arrays
         relation = create_device_array<T>(relation_len);
         offsets = create_device_array<uint64_t>(num_partitions * chunks);
@@ -144,6 +144,13 @@ __global__ void join_kernel(float *x, int n) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     for (int i = tid; i < n; i += blockDim.x * gridDim.x) {
     }
+}
+
+void dump_offsets(const partition_offsets& offsets) {
+    auto h_offsets = offsets.offsets.to_host_accessible();
+    std::cout << stringify(h_offsets.data(), h_offsets.data() + h_offsets.size()) << std::endl;
+    auto h_local_offsets = offsets.local_offsets.to_host_accessible();
+    std::cout << stringify(h_local_offsets.data(), h_local_offsets.data() + h_local_offsets.size()) << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -211,7 +218,8 @@ struct PrefixSumAndCopyWithPayloadArgs {
     auto prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
     partition_offsets offsets(grid_size, radix_bits, device_allocator);
-    partitioned_relation<index_key_t> partitioned_relation_inst(num_lookups, grid_size, radix_bits, device_allocator);
+    //partitioned_relation<index_key_t> partitioned_relation_inst(num_lookups, grid_size, radix_bits, device_allocator);
+    partitioned_relation<Tuple<int32_t, int32_t>> partitioned_relation_inst(num_lookups, grid_size, radix_bits, device_allocator);
 /*
     PrefixSumAndCopyWithPayloadArgs prefix_sum_and_copy_args {
         // Inputs
@@ -278,6 +286,7 @@ struct PrefixSumAndCopyWithPayloadArgs {
     cudaDeviceSynchronize();
     printf("gpu_contiguous_prefix_sum_and_copy_with_payload_int32_int32 done\n");
 
+dump_offsets(offsets);
 /*
 // Arguments to the partitioning function.
 //
@@ -325,7 +334,7 @@ struct RadixPartitionArgs {
         partitioned_relation_inst.relation.data()
     };
 
-//    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
+    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
     /*
     template <typename K, typename V>
@@ -334,9 +343,8 @@ struct RadixPartitionArgs {
 
     //gpu_chunked_laswwc_radix_partition<<<1, 64>>>(args, );
 
-    //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, scan_stream>>>(radix_partition_args, device_properties.sharedMemPerBlock);
+//gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, scan_stream>>>(radix_partition_args, device_properties.sharedMemPerBlock);
 
-    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
     gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, scan_stream>>>(radix_partition_args);
     cudaDeviceSynchronize();
 
