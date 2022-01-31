@@ -71,7 +71,7 @@ std::unique_ptr<abstract_device_array<T>> device_array<T, Allocator>::to_host_ac
         T* ptr = array_allocator.allocate(this->size_);
         const auto ret = cudaMemcpy(ptr, this->ptr_, this->size_*sizeof(T), cudaMemcpyDeviceToHost);
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
-        return std::make_unique<device_array<T, decltype(array_allocator)>>(this->ptr_, this->size_, array_allocator);
+        return std::make_unique<device_array<T, decltype(array_allocator)>>(ptr, this->size_, array_allocator);
     }
 }
 
@@ -88,21 +88,30 @@ struct device_array_wrapper {
 
     device_array_wrapper() = default;
 
+    device_array_wrapper(const device_array_wrapper&) = delete;
+
+    device_array_wrapper(device_array_wrapper&& other) noexcept : device_array_(other.device_array_.release()) {}
+
     template<class Allocator>
     device_array_wrapper(T* ptr, size_t size, Allocator allocator) {
         device_array_ = std::make_unique<device_array<T, Allocator>>(ptr, size, allocator);
     }
 
-    device_array_wrapper(T* ptr, size_t size) {
-        device_array_ = std::make_unique<device_array<T, void>>(ptr, size);
-    }
-
 private:
     device_array_wrapper(std::unique_ptr<abstract_device_array<T>>&& device_array) {
-        device_array_.swap(device_array);
+        device_array_.reset(device_array.release());
     }
 
 public:
+    device_array_wrapper& operator=(device_array_wrapper&& r) noexcept {
+        device_array_.reset(r.device_array_.release());
+        return *this;
+    }
+
+    static device_array_wrapper<T> create_reference_only(T* ptr, size_t size) {
+        return device_array_wrapper(std::make_unique<device_array<T, void>>(ptr, size));
+    }
+
     T* data() {
         return (device_array_) ? device_array_->data() : nullptr;
     }
@@ -139,7 +148,7 @@ auto create_device_array(size_t size) {
     using array_allocator_type = cuda_allocator<T>;
     array_allocator_type array_allocator;
     T* ptr = array_allocator.allocate(size);
-    return device_array_wrapper<T>(ptr, size);
+    return device_array_wrapper<T>(ptr, size, array_allocator);
 }
 
 template<class T, class Allocator>
@@ -147,7 +156,7 @@ auto create_device_array(size_t size, Allocator& allocator) {
     using array_allocator_type = typename Allocator::template rebind<T>::other;
     array_allocator_type array_allocator = allocator;
     T* ptr = array_allocator.allocate(size);
-    return device_array_wrapper<T>(ptr, size);
+    return device_array_wrapper<T>(ptr, size, array_allocator);
 }
 
 #if 0
@@ -199,7 +208,7 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
     // check if rebinding is sufficient
     if (std::is_same<InputAllocator, array_allocator_type>::value) {
         printf("same allocator after all\n");
-        return device_array_wrapper<T>(vec.data(), vec.size());
+        return device_array_wrapper<T>::create_reference_only(vec.data(), vec.size());
     }
 
     // allocate memory
@@ -220,7 +229,7 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
 
 template<class T, class OutputAllocator>
 auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAllocator& allocator) {
-    return device_array_wrapper<T>(vec.data(), vec.size());
+    return device_array_wrapper<T>::create_reference_only(vec.data(), vec.size());
 }
 
 // This alias template removes the depency on the additional template parameter of cuda_allocator
