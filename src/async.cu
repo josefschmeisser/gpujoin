@@ -1,3 +1,4 @@
+#include <sys/types.h>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -30,7 +31,7 @@
 #include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
 
 
-static const int num_streams = 2;
+static const int num_streams = 1;//2;
 static const int block_size = 128;// 64;
 static const int grid_size = 1;//1;
 static const uint32_t radix_bits = 6;// 10;
@@ -178,7 +179,7 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
         state->partitioned_relation_inst.padding_length(),
         radix_bits,
         ignore_bits,
-//        offsets.local_offsets.data(),
+        //state->partition_offsets_inst.local_offsets.data(),
         state->partition_offsets_inst.offsets.data(),
         // State
         nullptr,
@@ -191,6 +192,20 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
 
     return state;
 }
+
+template<class IndexStructureType>
+struct PartionedLookupArgs {
+    // Input
+    IndexStructureType index_structure;
+    void* rel;
+    uint32_t rel_length;
+    uint64_t* rel_partition_offsets;
+    uint32_t radix_bits;
+    uint32_t ignore_bits;
+    // Output
+    value_t* __restrict__ tids;
+};
+
 
 template<class IndexStructureType>
 __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const Tuple<index_key_t, int32_t>* __restrict__ relation, value_t* __restrict__ tids) {
@@ -220,6 +235,27 @@ std::string tmpl_to_string(const Tuple<K, V>& tuple) {
 }
 
 
+void dump_partitions(const stream_state& state) {
+    const auto offsets = state.partition_offsets_inst.offsets.to_host_accessible();
+    const auto relation = state.partitioned_relation_inst.relation.to_host_accessible();
+    const auto padding_length = state.radix_partition_args->padding_length;
+    const auto fanout = 1U << state.radix_partition_args->radix_bits;
+
+    for (size_t p = 0; p < offsets.size(); ++p) {
+        std::cout << "partition " << p << " offset: " << offsets.data()[p] << std::endl;
+
+        const uint32_t upper = (p + 1U < fanout) ? offsets.data()[p + 1U] - padding_length : relation.size();
+
+        std::cout << "upper: " << upper << std::endl;
+
+        for (size_t i = offsets.data()[p]; i < upper; ++i) {
+            std::cout << relation.data()[i].key << ", ";
+        }
+        std::cout << std::endl;
+    }
+}
+
+
 template<class IndexStructureType>
 void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties) {
     const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
@@ -239,17 +275,22 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
         required_shared_mem_bytes,
         state.stream
     ));
+cudaDeviceSynchronize();
+auto r = state.partition_offsets_inst.offsets.to_host_accessible();
+std::cout << "offsets:" << stringify(r.data(), r.data() + state.partition_offsets_inst.offsets.size()) << std::endl;
 
     const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
-    //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
-    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
+    //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 
 
 cudaDeviceSynchronize();
-auto r = state.partitioned_relation_inst.relation.to_host_accessible();
-std::cout << "result:" << stringify(r.data(), r.data() + state.num_lookups) << std::endl;
+auto r2 = state.partitioned_relation_inst.relation.to_host_accessible();
+std::cout << "result:" << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
+
+dump_partitions(state);
 return;
     lookup_kernel<<<grid_size, block_size, 4*1024, state.stream>>>(index_structure.device_index, state.num_lookups, state.partitioned_relation_inst.relation.data(), state.d_dst_tids.data());
 }
@@ -257,7 +298,7 @@ return;
 int main(int argc, char** argv) {
     double zipf_factor = 1.25;
     auto num_elements = default_num_elements;
-    size_t num_lookups = 1024;// default_num_lookups;
+    size_t num_lookups = 128;// default_num_lookups;
     if (argc > 1) {
         std::string::size_type sz;
         num_elements = std::stod(argv[1], &sz);
