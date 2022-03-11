@@ -5,6 +5,7 @@
 #include <numeric>
 #include <vector>
 #include <unordered_set>
+#include <string>
 
 #include <cuda_runtime_api.h>
 #include <numa.h>
@@ -69,12 +70,17 @@ void apply_permutation(PermutationVector& permutation, InputVectors&... vectors)
     }
 }
 
+template<class T>
+std::string tmpl_to_string(const T& value) {
+    return std::to_string(value);
+}
+
 template<class InputIt>
 std::string stringify(InputIt first, InputIt last) {
     auto comma_fold = [](std::string a, auto b) {
-        return std::move(a) + ',' + std::to_string(b);
+        return std::move(a) + ',' + tmpl_to_string(b);
     };
-    return std::accumulate(std::next(first), last, std::to_string(*first), comma_fold);
+    return std::accumulate(std::next(first), last, tmpl_to_string(*first), comma_fold);
 }
 
 // TODO test

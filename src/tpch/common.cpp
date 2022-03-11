@@ -357,7 +357,8 @@ void sort_relation(part_table_t& part) {
 }
 
 void sort_relation(lineitem_table_t& lineitem) {
-    auto permutation = compute_permutation(lineitem.l_orderkey.begin(), lineitem.l_orderkey.end(), std::less<>{});
+//    auto permutation = compute_permutation(lineitem.l_orderkey.begin(), lineitem.l_orderkey.end(), std::less<>{});
+auto permutation = compute_permutation(lineitem.l_partkey.begin(), lineitem.l_partkey.end(), std::less<>{});
     apply_permutation(
         permutation,
         lineitem.l_orderkey,

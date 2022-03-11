@@ -343,6 +343,7 @@ struct harmonia_tree {
         // migrate key array
         typename DeviceAllocator::rebind<key_t>::other keys_allocator = device_allocator;
         guard.keys_guard = create_device_array_from(keys, keys_allocator);
+//std::exchange(guard.keys_guard, create_device_array_from(keys, keys_allocator));
         handle.keys = guard.keys_guard.data();
 
         // migrate children array

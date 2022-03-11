@@ -77,7 +77,8 @@ std::unique_ptr<abstract_device_array<T>> device_array<T, Allocator>::to_host_ac
 
 template<class T>
 std::unique_ptr<abstract_device_array<T>> device_array<T, void>::to_host_accessible() const {
-    return std::make_unique<device_array<T, void>>(this->ptr_, this->size_);
+    //return std::make_unique<device_array<T, void>>(this->ptr_, this->size_);
+    throw std::runtime_error("attempt to copy allocation of unknown origin");
 }
 
 template<class T>

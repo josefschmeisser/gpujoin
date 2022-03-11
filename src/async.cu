@@ -1,3 +1,4 @@
+#include <__clang_cuda_builtin_vars.h>
 #include <sys/types.h>
 #include <cassert>
 #include <cmath>
@@ -194,20 +195,6 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
 }
 
 template<class IndexStructureType>
-struct PartionedLookupArgs {
-    // Input
-    IndexStructureType index_structure;
-    void* rel;
-    uint32_t rel_length;
-    uint64_t* rel_partition_offsets;
-    uint32_t radix_bits;
-    uint32_t ignore_bits;
-    // Output
-    value_t* __restrict__ tids;
-};
-
-
-template<class IndexStructureType>
 __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const Tuple<index_key_t, int32_t>* __restrict__ relation, value_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
@@ -225,6 +212,61 @@ printf("lookup %u\n", relation[i].key);
 
         i += stride;
         active_lanes = __ballot_sync(FULL_MASK, i < n);
+    }
+}
+
+template<class IndexStructureType>
+struct PartionedLookupArgs {
+    // Input
+    IndexStructureType index_structure;
+    void* rel;
+    uint32_t rel_length;
+    uint64_t* rel_partition_offsets;
+    uint32_t* task_assignment;
+    uint32_t radix_bits;
+    uint32_t ignore_bits;
+    // Output
+    value_t* __restrict__ tids;
+};
+
+template<class IndexStructureType, class TupleType>
+__global__ void partitioned_lookup_assign_tasks(PartionedLookupArgs<IndexStructureType>& args) {
+}
+
+template<class IndexStructureType, class TupleType>
+__global__ void partitioned_lookup_kernel(PartionedLookupArgs<IndexStructureType>& args) {
+#if 0
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    int i = index;
+    uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
+    while (active_lanes) {
+        bool active = i < n;
+printf("lookup %u\n", relation[i].key);
+        auto tid = index_structure.cooperative_lookup(active, relation[i].key);
+        if (active) {
+            tids[i] = tid;
+            printf("tid %lu\n", tid);
+        }
+
+        i += stride;
+        active_lanes = __ballot_sync(FULL_MASK, i < n);
+    }
+#endif
+    const auto fanout = 1U << args.radix_bits;
+
+    const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel);
+
+    for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
+        const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - padding_length : args.rel_length;
+        const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
+
+        for (uint32_t i = threadIdx.x; i < partition_size; i += blockDim.x) {
+            TupleType tuple = relation[i];
+            const auto tid = args.index_structure.lookup(tuple.key);
+            args.tids[tuple.value] = tid;
+        }
     }
 }
 
