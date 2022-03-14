@@ -1,4 +1,3 @@
-#include <__clang_cuda_builtin_vars.h>
 #include <sys/types.h>
 #include <cassert>
 #include <cmath>
@@ -33,8 +32,8 @@
 
 
 static const int num_streams = 1;//2;
-static const int block_size = 128;// 64;
-static const int grid_size = 1;//1;
+static const int block_size = 64;// 128;// 64;
+static const int grid_size = 2;//1;
 static const uint32_t radix_bits = 6;// 10;
 static const uint32_t ignore_bits = 0;//3;
 
@@ -43,6 +42,21 @@ template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_alloca
 
 
 
+//template<class IndexStructureType>
+struct PartitionedLookupArgs {
+    // Input
+//    IndexStructureType index_structure;
+    void* rel;
+    uint32_t rel_length;
+    uint32_t rel_padding_length;
+    //uint64_t* rel_partition_offsets;
+    unsigned long long* rel_partition_offsets;
+    uint32_t* task_assignment;
+    uint32_t radix_bits;
+    uint32_t ignore_bits;
+    // Output
+    value_t* __restrict__ tids;
+};
 
 
 #if 0
@@ -114,6 +128,7 @@ struct stream_state {
     device_array_wrapper<index_key_t> d_dst_partition_attr;
     device_array_wrapper<int32_t> d_dst_payload_attrs;
     device_array_wrapper<value_t> d_dst_tids;
+    device_array_wrapper<uint32_t> d_task_assignment;
 
     device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
@@ -122,9 +137,12 @@ struct stream_state {
 
     std::unique_ptr<PrefixSumArgs> prefix_sum_and_copy_args;
     std::unique_ptr<RadixPartitionArgs> radix_partition_args;
+    std::unique_ptr<PartitionedLookupArgs> partitioned_lookup_args;
 };
 
 std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, size_t num_lookups) {
+    device_allocator_t<int> device_allocator;
+
     auto state = std::make_unique<stream_state>();
 //printf("num_lookups: %lu\n", num_lookups);
     CubDebugExit(cudaStreamCreate(&state->stream));
@@ -133,27 +151,36 @@ auto wrapper = device_array_wrapper<index_key_t>::create_reference_only(const_ca
 auto r = wrapper.to_host_accessible();
 */
 
+#if 0
 std::vector<index_key_t> tmp;
 tmp.resize(num_lookups);
 cudaMemcpy(tmp.data(), d_lookup_keys, num_lookups*sizeof(index_key_t), cudaMemcpyDeviceToHost);
 std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
-
+#endif
 
     state->num_lookups = num_lookups;
 
     // dummy payloads
-    state->d_payloads = create_device_array<int32_t>(num_lookups);
+    //state->d_payloads = create_device_array<int32_t>(num_lookups);
+
+    // initialize payloads
+    {
+        std::vector<int32_t> payloads;
+        payloads.resize(num_lookups);
+        std::iota(payloads.begin(), payloads.end(), 0);
+        state->d_payloads = create_device_array_from(payloads, device_allocator);
+    }
 
     // allocate output arrays
     state->d_dst_partition_attr = create_device_array<index_key_t>(num_lookups);
     state->d_dst_payload_attrs = create_device_array<int32_t>(num_lookups);
     state->d_dst_tids = create_device_array<value_t>(num_lookups);
+    state->d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
     // see: device_exclusive_prefix_sum_initialize
     const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, block_size);
     state->d_prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
-    device_allocator_t<int> device_allocator;
     state->partition_offsets_inst = partition_offsets(grid_size, radix_bits, device_allocator);
     state->partitioned_relation_inst = partitioned_relation<Tuple<index_key_t, int32_t>>(num_lookups, grid_size, radix_bits, device_allocator);
 
@@ -191,6 +218,32 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
         state->partitioned_relation_inst.relation.data()
     });
 
+/*
+//template<class IndexStructureType>
+struct PartitionedLookupArgs {
+    // Input
+//    IndexStructureType index_structure;
+    void* rel;
+    uint32_t rel_length;
+    uint32_t rel_padding_length;
+    uint64_t* rel_partition_offsets;
+    uint32_t* task_assignment;
+    uint32_t radix_bits;
+    uint32_t ignore_bits;
+    // Output
+    value_t* __restrict__ tids;
+};*/
+    state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
+        state->partitioned_relation_inst.relation.data(),
+        static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
+        state->partitioned_relation_inst.padding_length(),
+        state->partition_offsets_inst.offsets.data(),
+        state->d_task_assignment.data(),
+        radix_bits,
+        ignore_bits,
+        state->d_dst_tids.data()
+    });
+
     return state;
 }
 
@@ -203,11 +256,11 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
     while (active_lanes) {
         bool active = i < n;
-printf("lookup %u\n", relation[i].key);
+//printf("lookup %u\n", relation[i].key);
         auto tid = index_structure.cooperative_lookup(active, relation[i].key);
         if (active) {
             tids[i] = tid;
-            printf("tid %lu\n", tid);
+//            printf("tid %u\n", tid);
         }
 
         i += stride;
@@ -215,26 +268,42 @@ printf("lookup %u\n", relation[i].key);
     }
 }
 
-template<class IndexStructureType>
-struct PartionedLookupArgs {
-    // Input
-    IndexStructureType index_structure;
-    void* rel;
-    uint32_t rel_length;
-    uint64_t* rel_partition_offsets;
-    uint32_t* task_assignment;
-    uint32_t radix_bits;
-    uint32_t ignore_bits;
-    // Output
-    value_t* __restrict__ tids;
-};
-
+/*
 template<class IndexStructureType, class TupleType>
-__global__ void partitioned_lookup_assign_tasks(PartionedLookupArgs<IndexStructureType>& args) {
+__global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs<IndexStructureType>& args) {
+*/
+__global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
+    const auto fanout = 1U << args.radix_bits;
+
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+        const uint32_t rel_size = args.rel_length - args.rel_padding_length*fanout;
+        const uint32_t avg_task_size = (rel_size + gridDim.x - 1U) / gridDim.x;
+
+        args.task_assignment[0] = 0U;
+        uint32_t task_id = 1U;
+        uint32_t task_size = 0U;
+        for (uint32_t p = 0U; p < fanout && task_id < gridDim.x; ++p) {
+            const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
+            const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
+
+            task_size += partition_size;
+            if (task_size >= avg_task_size) {
+                args.task_assignment[task_id] = p + 1U;
+// TODO
+                task_size = 0U;
+                task_id += 1;
+            }
+        }
+
+        for (uint32_t i = task_id; i <= gridDim.x; ++i) {
+            args.task_assignment[i] = fanout;
+        }
+    }
 }
 
-template<class IndexStructureType, class TupleType>
-__global__ void partitioned_lookup_kernel(PartionedLookupArgs<IndexStructureType>& args) {
+template<class TupleType, class IndexStructureType>
+//__global__ void partitioned_lookup_kernel(PartitionedLookupArgs<IndexStructureType>& args) {
+__global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
 #if 0
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
@@ -256,15 +325,17 @@ printf("lookup %u\n", relation[i].key);
 #endif
     const auto fanout = 1U << args.radix_bits;
 
-    const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel);
 
     for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
-        const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - padding_length : args.rel_length;
+        const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel) + args.rel_partition_offsets[p];
+
+        const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
         const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
 
         for (uint32_t i = threadIdx.x; i < partition_size; i += blockDim.x) {
             TupleType tuple = relation[i];
-            const auto tid = args.index_structure.lookup(tuple.key);
+//printf("thread: %u i: %u lookup: %i\n", threadIdx.x, i, tuple.key);
+            const auto tid = index_structure.lookup(tuple.key);
             args.tids[tuple.value] = tid;
         }
     }
@@ -298,6 +369,28 @@ void dump_partitions(const stream_state& state) {
 }
 
 
+void dump_task_assignment(const stream_state& state) {
+    const auto assignment = state.d_task_assignment.to_host_accessible();
+
+    std::cout << "task assignment: " << stringify(assignment.data(), assignment.data() + assignment.size()) << std::endl;
+}
+
+
+bool validate_results(const stream_state& state, const std::vector<index_key_t>& lookup_keys) {
+    const auto tids = state.d_dst_tids.to_host_accessible();
+
+    std::cout << "tids: " << stringify(tids.data(), tids.data() + tids.size()) << std::endl;
+
+
+    for (size_t i = 0; i < lookup_keys.size(); ++i) {
+        if (tids.data()[i] != lookup_keys[i]) {
+            std::cerr << "missmatch at: " << i << std::endl;
+        }
+    }
+    std::cout << "validation done" << std::endl;
+}
+
+
 template<class IndexStructureType>
 void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties) {
     const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
@@ -319,22 +412,33 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     ));
 cudaDeviceSynchronize();
 auto r = state.partition_offsets_inst.offsets.to_host_accessible();
-std::cout << "offsets:" << stringify(r.data(), r.data() + state.partition_offsets_inst.offsets.size()) << std::endl;
+std::cout << "offsets: " << stringify(r.data(), r.data() + state.partition_offsets_inst.offsets.size()) << std::endl;
 
     const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
     gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
     //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
-
+    //gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 
 cudaDeviceSynchronize();
 auto r2 = state.partitioned_relation_inst.relation.to_host_accessible();
-std::cout << "result:" << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
+std::cout << "result: " << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
 
-dump_partitions(state);
-return;
-    lookup_kernel<<<grid_size, block_size, 4*1024, state.stream>>>(index_structure.device_index, state.num_lookups, state.partitioned_relation_inst.relation.data(), state.d_dst_tids.data());
+//dump_partitions(state);
+
+    partitioned_lookup_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_lookup_args);
+
+
+cudaDeviceSynchronize();
+dump_task_assignment(state);
+
+//    lookup_kernel<<<grid_size, block_size, 4*1024, state.stream>>>(index_structure.device_index, state.num_lookups, state.partitioned_relation_inst.relation.data(), state.d_dst_tids.data());
+partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
+cudaDeviceSynchronize();
+
+//validate_results(state);
+
 }
 
 int main(int argc, char** argv) {
@@ -543,6 +647,8 @@ printf("stream portion: %lu\n", stream_portion);
         run_on_stream(*state, *index, device_properties);
     }
     cudaDeviceSynchronize();
+
+    validate_results(*stream_states.front(), lookup_keys);
 
     cudaDeviceReset();
 
