@@ -207,8 +207,8 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
         state->partitioned_relation_inst.padding_length(),
         radix_bits,
         ignore_bits,
-        //state->partition_offsets_inst.local_offsets.data(),
-        state->partition_offsets_inst.offsets.data(),
+        state->partition_offsets_inst.local_offsets.data(),
+        //state->partition_offsets_inst.offsets.data(),
         // State
         nullptr,
         nullptr,
@@ -218,21 +218,6 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
         state->partitioned_relation_inst.relation.data()
     });
 
-/*
-//template<class IndexStructureType>
-struct PartitionedLookupArgs {
-    // Input
-//    IndexStructureType index_structure;
-    void* rel;
-    uint32_t rel_length;
-    uint32_t rel_padding_length;
-    uint64_t* rel_partition_offsets;
-    uint32_t* task_assignment;
-    uint32_t radix_bits;
-    uint32_t ignore_bits;
-    // Output
-    value_t* __restrict__ tids;
-};*/
     state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
         state->partitioned_relation_inst.relation.data(),
         static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
@@ -416,8 +401,8 @@ std::cout << "offsets: " << stringify(r.data(), r.data() + state.partition_offse
 
     const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
-    gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
-    //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
+    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
     //gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 
@@ -457,7 +442,7 @@ int main(int argc, char** argv) {
     lookup_keys.resize(num_lookups);
     generate_datasets<index_key_t, index_type>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::uniform, zipf_factor, lookup_keys);
 std::cout << stringify(lookup_keys.begin(), lookup_keys.end());
-//return 0;
+
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
     auto d_indexed = create_device_array_from(indexed, indexed_allocator);
