@@ -31,7 +31,7 @@
 #include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
 
 
-static const int num_streams = 1;//2;
+static const int num_streams = 2;//2;
 static const int block_size = 64;// 128;// 64;
 static const int grid_size = 2;//1;
 static const uint32_t radix_bits = 6;// 10;
@@ -140,7 +140,7 @@ struct stream_state {
     std::unique_ptr<PartitionedLookupArgs> partitioned_lookup_args;
 };
 
-std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, size_t num_lookups) {
+std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, size_t num_lookups, value_t* d_dst_tids) {
     device_allocator_t<int> device_allocator;
 
     auto state = std::make_unique<stream_state>();
@@ -174,7 +174,7 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
     // allocate output arrays
     state->d_dst_partition_attr = create_device_array<index_key_t>(num_lookups);
     state->d_dst_payload_attrs = create_device_array<int32_t>(num_lookups);
-    state->d_dst_tids = create_device_array<value_t>(num_lookups);
+    //state->d_dst_tids = create_device_array<value_t>(num_lookups);
     state->d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
     // see: device_exclusive_prefix_sum_initialize
@@ -226,7 +226,8 @@ std::cout << "input:" << stringify(tmp.begin(), tmp.end()) << std::endl;
         state->d_task_assignment.data(),
         radix_bits,
         ignore_bits,
-        state->d_dst_tids.data()
+        //state->d_dst_tids.data()
+        d_dst_tids
     });
 
     return state;
@@ -360,19 +361,21 @@ void dump_task_assignment(const stream_state& state) {
     std::cout << "task assignment: " << stringify(assignment.data(), assignment.data() + assignment.size()) << std::endl;
 }
 
+template<class ResultVectorType>
+bool validate_results(const std::vector<index_key_t>& lookup_keys, const ResultVectorType& tids) {
+    const auto h_tids = tids.to_host_accessible();
 
-bool validate_results(const stream_state& state, const std::vector<index_key_t>& lookup_keys) {
-    const auto tids = state.d_dst_tids.to_host_accessible();
+    std::cout << "tids: " << stringify(h_tids.data(), h_tids.data() + h_tids.size()) << std::endl;
 
-    std::cout << "tids: " << stringify(tids.data(), tids.data() + tids.size()) << std::endl;
-
-
+    bool valid = true;
     for (size_t i = 0; i < lookup_keys.size(); ++i) {
-        if (tids.data()[i] != lookup_keys[i]) {
+        if (h_tids.data()[i] != lookup_keys[i]) {
+            valid = false;
             std::cerr << "missmatch at: " << i << std::endl;
         }
     }
     std::cout << "validation done" << std::endl;
+    return valid;
 }
 
 
@@ -429,7 +432,7 @@ cudaDeviceSynchronize();
 int main(int argc, char** argv) {
     double zipf_factor = 1.25;
     auto num_elements = default_num_elements;
-    size_t num_lookups = 128;// default_num_lookups;
+    size_t num_lookups = 256;// default_num_lookups;
     if (argc > 1) {
         std::string::size_type sz;
         num_elements = std::stod(argv[1], &sz);
@@ -449,6 +452,8 @@ std::cout << stringify(lookup_keys.begin(), lookup_keys.end());
     lookup_keys_allocator_t lookup_keys_allocator;
     auto d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
     auto index = build_index<index_key_t, index_type>(indexed, d_indexed.data());
+    auto d_dst_tids = create_device_array<value_t>(num_lookups);
+
 /*
 auto r = d_lookup_keys.to_host_accessible();
 std::cout << "result:" << stringify(r.data(), r.data() + num_lookups) << std::endl;
@@ -609,6 +614,7 @@ struct RadixPartitionArgs {
     size_t remaining = num_lookups;
     size_t max_stream_portion = num_lookups / num_streams;
     const index_key_t* d_stream_lookup_keys = d_lookup_keys.data();
+    value_t* d_stream_tids = d_dst_tids.data();
 /*
 auto r = d_lookup_keys.to_host_accessible();
 std::cout << "input:" << stringify(r.data(), r.data() + num_lookups) << std::endl;
@@ -622,10 +628,11 @@ std::cout << "input:" << stringify(r.data(), r.data() + num_lookups) << std::end
         size_t stream_portion = std::min(remaining, max_stream_portion);
         remaining -= stream_portion;
 printf("stream portion: %lu\n", stream_portion);
-        auto state = create_stream_state(d_stream_lookup_keys, stream_portion);
+        auto state = create_stream_state(d_stream_lookup_keys, stream_portion, d_stream_tids);
         stream_states.push_back(std::move(state));
 
         d_stream_lookup_keys += stream_portion;
+        d_stream_tids += stream_portion;
     }
 
     for (const auto& state : stream_states) {
@@ -633,7 +640,7 @@ printf("stream portion: %lu\n", stream_portion);
     }
     cudaDeviceSynchronize();
 
-    validate_results(*stream_states.front(), lookup_keys);
+    validate_results(lookup_keys, d_dst_tids);
 
     cudaDeviceReset();
 
