@@ -90,22 +90,6 @@ add_subdirectory(src/tpch)
 add_subdirectory(test)
 
 
-
-
-add_executable(test_lineinfo src/test_lineinfo.cu)
-target_link_libraries(test_lineinfo tpch_common numa pthread)
-# additional nvcc flags
-if(true)
-    # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
-    # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
-    target_compile_options(test_lineinfo PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                        #--generate-line-info
-                        -lineinfo
-                        >)
-endif()
-
-
-
 add_executable(async
 #contrib/numa-gpu/sql-ops/cudautils/gpu_common.cu
 
@@ -126,6 +110,7 @@ if(true)
     target_compile_options(async PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                         #--generate-line-info
                         #-lineinfo
+                        #-G
                         --default-stream per-thread
                         --expt-relaxed-constexpr
                         >)

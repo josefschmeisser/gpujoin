@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(default_num_lookups);
-    generate_datasets<index_key_t, index_type>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::zipf, zipf_factor, lookup_keys);
+    generate_datasets<index_key_t>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::zipf, zipf_factor, lookup_keys);
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;

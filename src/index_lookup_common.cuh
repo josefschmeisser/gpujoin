@@ -25,10 +25,11 @@ enum class dataset_type : unsigned { dense, uniform };
 
 enum class lookup_pattern_type : unsigned { uniform, zipf };
 
-template<class KeyType, class IndexStructureType, class VectorType>
+template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
     auto rng = std::default_random_engine {};
 
+    // generate dataset to be indexed
     if (dt == dataset_type::dense) {
         std::iota(keys.begin(), keys.end(), 0);
     } else if (dt == dataset_type::uniform) {
@@ -47,8 +48,9 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
         assert(false);
     }
 
+    // generate lookup keys
     if (lookup_pattern == lookup_pattern_type::uniform) {
-        std::uniform_int_distribution<> lookup_distribution(0, keys.size() - 1);
+        std::uniform_int_distribution<size_t> lookup_distribution(0, keys.size() - 1);
         std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distribution(rng)]; });
     } else if (lookup_pattern == lookup_pattern_type::zipf) {
         std::mt19937 generator;

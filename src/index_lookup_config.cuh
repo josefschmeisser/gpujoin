@@ -1,4 +1,3 @@
-#include <pthread.h>
 #pragma once
 
 #include <cstdint>
