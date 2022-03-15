@@ -32,10 +32,10 @@
 
 
 static const int num_streams = 2;//2;
-static const int block_size = 64;// 128;// 64;
-static const int grid_size = 2;//1;
-static const uint32_t radix_bits = 6;// 10;
-static const uint32_t ignore_bits = 0;//3;
+static const int block_size = 128;// 64;
+static int grid_size = 0;//1;
+static const uint32_t radix_bits = 12;// 10;
+static const uint32_t ignore_bits = 4;//3;
 
 template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
 template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
@@ -230,12 +230,26 @@ __global__ void partitioned_lookup_kernel(const IndexStructureType index_structu
         const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
         const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
 
+#if 0
+        // standard lookup implementation
         for (uint32_t i = threadIdx.x; i < partition_size; i += blockDim.x) {
             TupleType tuple = relation[i];
 //printf("thread: %u i: %u lookup: %i\n", threadIdx.x, i, tuple.key);
             const auto tid = index_structure.lookup(tuple.key);
             args.tids[tuple.value] = tid;
         }
+#else
+        // cooperative lookup implementation
+        for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
+//printf("thread: %u i: %u lookup: %i\n", threadIdx.x, i, tuple.key);
+            const bool active = i < partition_size;
+            TupleType tuple = active ? relation[i] : TupleType();
+            const auto tid = index_structure.cooperative_lookup(active, tuple.key);
+            if (active) {
+                args.tids[tuple.value] = tid;
+            }
+        }
+#endif
     }
 }
 
@@ -347,6 +361,14 @@ int main(int argc, char** argv) {
     }
     std::cout << "index size: " << num_elements << std::endl;
 
+
+    if (grid_size == 0) {
+        int num_sms;
+        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
+        grid_size = num_sms;
+    }
+
+
     // generate datasets
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
@@ -387,10 +409,20 @@ int main(int argc, char** argv) {
         d_stream_tids += stream_portion;
     }
 
+
+
+
+    auto start_ts = std::chrono::high_resolution_clock::now();
     for (const auto& state : stream_states) {
         run_on_stream(*state, *index, device_properties);
     }
     cudaDeviceSynchronize();
+    const auto stop_ts = std::chrono::high_resolution_clock::now();
+    const auto rt = std::chrono::duration_cast<std::chrono::microseconds>(stop_ts - start_ts).count()/1000.;
+    std::cout << "Kernel time: " << rt << " ms\n";
+    std::cout << "GPU MOps: " << (num_lookups/1e6)/(rt/1e3) << std::endl;
+
+
 
     validate_results(lookup_keys, d_dst_tids);
 
