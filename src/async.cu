@@ -233,17 +233,15 @@ __global__ void partitioned_lookup_kernel(const IndexStructureType index_structu
 #if 0
         // standard lookup implementation
         for (uint32_t i = threadIdx.x; i < partition_size; i += blockDim.x) {
-            TupleType tuple = relation[i];
-//printf("thread: %u i: %u lookup: %i\n", threadIdx.x, i, tuple.key);
+            const TupleType tuple = relation[i];
             const auto tid = index_structure.lookup(tuple.key);
             args.tids[tuple.value] = tid;
         }
 #else
         // cooperative lookup implementation
         for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
-//printf("thread: %u i: %u lookup: %i\n", threadIdx.x, i, tuple.key);
             const bool active = i < partition_size;
-            TupleType tuple = active ? relation[i] : TupleType();
+            const TupleType tuple = active ? relation[i] : TupleType();
             const auto tid = index_structure.cooperative_lookup(active, tuple.key);
             if (active) {
                 args.tids[tuple.value] = tid;
@@ -306,15 +304,18 @@ bool validate_results(const std::vector<index_key_t>& lookup_keys, const ResultV
 
 template<class IndexStructureType>
 void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties) {
+    // calculate prefix sum kernel shared memory requirement
     const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
+#ifdef DEBUG_INTERMEDIATE_STATE
     printf("required_shared_mem_bytes %lu\n", required_shared_mem_bytes);
-
+#endif
     assert(required_shared_mem_bytes <= device_properties.sharedMemPerBlock);
 
     // prepare kernel arguments
     void* args[1];
     args[0] = state.prefix_sum_and_copy_args.get();
 
+    // calculate prefix sum
     CubDebugExit(cudaLaunchCooperativeKernel(
         (void*)gpu_contiguous_prefix_sum_int32,
         dim3(grid_size),
@@ -323,32 +324,33 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
         required_shared_mem_bytes,
         state.stream
     ));
-/*
-cudaDeviceSynchronize();
-auto r = state.partition_offsets_inst.offsets.to_host_accessible();
-std::cout << "offsets: " << stringify(r.data(), r.data() + state.partition_offsets_inst.local_offsets.size()) << std::endl;
-*/
+#ifdef DEBUG_INTERMEDIATE_STATE
+    cudaDeviceSynchronize();
+    auto r = state.partition_offsets_inst.offsets.to_host_accessible();
+    std::cout << "offsets: " << stringify(r.data(), r.data() + state.partition_offsets_inst.local_offsets.size()) << std::endl;
+#endif
+
+    // calculate radix partition kernel shared memory requirement
     const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
     //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
     gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
     //gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
-/*
-cudaDeviceSynchronize();
-auto r2 = state.partitioned_relation_inst.relation.to_host_accessible();
-std::cout << "result: " << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
-*/
-//dump_partitions(state);
+#ifdef DEBUG_INTERMEDIATE_STATE
+    cudaDeviceSynchronize();
+    auto r2 = state.partitioned_relation_inst.relation.to_host_accessible();
+    std::cout << "result: " << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
+    dump_partitions(state);
+#endif
 
     partitioned_lookup_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_lookup_args);
+#ifdef DEBUG_INTERMEDIATE_STATE
+    cudaDeviceSynchronize();
+    dump_task_assignment(state);
+#endif
 
-/*
-cudaDeviceSynchronize();
-dump_task_assignment(state);
-*/
-partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
-//cudaDeviceSynchronize();
+    partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
 }
 
 int main(int argc, char** argv) {

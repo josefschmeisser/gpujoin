@@ -33,7 +33,7 @@ template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocati
 using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
 using lookup_keys_allocator_t = cuda_allocator<index_key_t>;
 
-using index_type = lower_bound_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
+//using index_type = lower_bound_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 //using index_type = harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 //using index_type = btree_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
-//using index_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
+using index_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;

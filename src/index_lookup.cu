@@ -173,9 +173,9 @@ auto run_lookup_benchmark(IndexStructureType& index_structure, const index_key_t
         cudaDeviceSynchronize();
     }
     const auto kernelStop = std::chrono::high_resolution_clock::now();
-    const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+    const auto kernelTime = std::chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
-    std::cout << "GPU MOps: " << (maxRepetitions*num_lookup_keys/1e6)/(kernelTime/1e3) << endl;
+    std::cout << "GPU MOps: " << (maxRepetitions*num_lookup_keys/1e6)/(kernelTime/1e3) << std::endl;
 
     // transfer results
     std::unique_ptr<value_t[]> h_tids(new value_t[num_lookup_keys]);
