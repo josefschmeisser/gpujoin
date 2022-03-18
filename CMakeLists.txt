@@ -95,6 +95,7 @@ add_executable(async
 
   #  contrib/numa-gpu/sql-ops/cpputils/gpu_common.cpp
     src/async.cu
+    src/measuring.cpp
 
 )
 target_include_directories(async PUBLIC

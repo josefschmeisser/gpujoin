@@ -5,6 +5,7 @@
 #include <numeric>
 #include <memory>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <cub/block/block_load.cuh>
@@ -210,4 +211,14 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
         tid += valid_items;
     }
+}
+
+std::vector<std::pair<std::string, std::string>> allocator_type_names() {
+    std::vector<std::pair<std::string, std::string>> r = {
+        std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value())),
+        std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
+        std::make_pair(std::string("indexed_allocator"), std::string(type_name<indexed_allocator_t>::value())),
+        std::make_pair(std::string("lookup_keys_allocator"), std::string(type_name<lookup_keys_allocator_t>::value()))
+    };
+    return r;
 }

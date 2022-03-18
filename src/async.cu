@@ -10,6 +10,7 @@
 #include <memory>
 
 #include <cub/util_debug.cuh>
+#include <string>
 
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"
@@ -24,12 +25,14 @@
 #include "gpu_prefix_sum.hpp"
 #include "partitioned_relation.hpp"
 #include "utils.hpp"
+#include "measuring.hpp"
 
 #undef GPU_CACHE_LINE_SIZE
 #include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
 #include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
 #include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
 
+using namespace measuring;
 
 static const int num_streams = 2;//2;
 static const int block_size = 128;// 64;
@@ -55,10 +58,17 @@ struct PartitionedLookupArgs {
     value_t* __restrict__ tids;
 };
 
-__global__ void join_kernel(float *x, int n) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    for (int i = tid; i < n; i += blockDim.x * gridDim.x) {
-    }
+
+static experiment_description create_experiment_description(size_t num_elements, size_t num_lookups, double zipf_factor) {
+    experiment_description r;
+    r.name = "plain_lookup";
+    r.approach = "streamed";
+    r.other = allocator_type_names();
+    r.other.push_back(std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())));
+    r.other.push_back(std::make_pair(std::string("num_elements"), std::to_string(num_elements)));
+    r.other.push_back(std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)));
+    r.other.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
+    return r;
 }
 
 void dump_offsets(const partition_offsets& offsets) {
@@ -370,6 +380,10 @@ int main(int argc, char** argv) {
         grid_size = num_sms;
     }
 
+    auto& measuring_config = measuring::get_settings();
+    measuring_config.dest_file = "index_scan_results.yml";
+    measuring_config.repetitions = 10u;
+    const auto experiment_desc = create_experiment_description(num_elements, num_lookups, zipf_factor);
 
     // generate datasets
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
@@ -413,7 +427,7 @@ int main(int argc, char** argv) {
 
 
 
-
+/*
     auto start_ts = std::chrono::high_resolution_clock::now();
     for (const auto& state : stream_states) {
         run_on_stream(*state, *index, device_properties);
@@ -422,8 +436,14 @@ int main(int argc, char** argv) {
     const auto stop_ts = std::chrono::high_resolution_clock::now();
     const auto rt = std::chrono::duration_cast<std::chrono::microseconds>(stop_ts - start_ts).count()/1000.;
     std::cout << "Kernel time: " << rt << " ms\n";
-    std::cout << "GPU MOps: " << (num_lookups/1e6)/(rt/1e3) << std::endl;
+    std::cout << "GPU MOps: " << (num_lookups/1e6)/(rt/1e3) << std::endl;*/
 
+    measure(experiment_desc, [&]() {
+        for (const auto& state : stream_states) {
+            run_on_stream(*state, *index, device_properties);
+        }
+        cudaDeviceSynchronize();
+    });
 
 
     validate_results(lookup_keys, d_dst_tids);

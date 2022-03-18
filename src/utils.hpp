@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_set>
 #include <string>
+#include <cstring>
 
 #include <cuda_runtime_api.h>
 #include <numa.h>
@@ -104,5 +105,24 @@ template<class T>
 struct target_memcpy {
     void* operator()(void* dest, const void* src, size_t n) {
         return memcpy(dest, src, n);
+    }
+};
+
+template<class SingletonType>
+struct singleton {
+    singleton() = delete;
+
+    singleton(const singleton& other) = delete;
+
+    static SingletonType& instance() {
+        static SingletonType inst;
+        return inst;
+    }
+};
+
+template<class T>
+struct type_name {
+    static const char* value() {
+        return typeid(T).name();
     }
 };
