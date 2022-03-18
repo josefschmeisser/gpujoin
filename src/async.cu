@@ -380,6 +380,7 @@ int main(int argc, char** argv) {
         grid_size = num_sms;
     }
 
+    // set-up the measuring utility
     auto& measuring_config = measuring::get_settings();
     measuring_config.dest_file = "index_scan_results.yml";
     measuring_config.repetitions = 10u;

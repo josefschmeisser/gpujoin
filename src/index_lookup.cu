@@ -15,19 +15,33 @@
 #include "tpch/common.hpp"
 #include "utils.hpp"
 #include "zipf.hpp"
-
 #include "cuda_utils.cuh"
 #include "device_array.hpp"
+#include "measuring.hpp"
 
 #include "index_lookup_config.cuh"
 #include "index_lookup_common.cuh"
 
 using namespace std;
+using namespace measuring;
 
 static const int blockSize = 64;
 //static const int blockSize = 256; // best for sorting on pascal
 static const unsigned maxRepetitions = 10;
 static const unsigned activeLanes = 32;
+
+
+static experiment_description create_experiment_description(size_t num_elements, size_t num_lookups, double zipf_factor) {
+    experiment_description r;
+    r.name = "plain_lookup";
+    r.approach = partitial_sorting ? "partial_sorting" : "plain";
+    r.other = allocator_type_names();
+    r.other.push_back(std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())));
+    r.other.push_back(std::make_pair(std::string("num_elements"), std::to_string(num_elements)));
+    r.other.push_back(std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)));
+    r.other.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
+    return r;
+}
 
 #if 0
 template<
@@ -146,7 +160,7 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
 #endif
 
 template<class IndexStructureType>
-auto run_lookup_benchmark(IndexStructureType& index_structure, const index_key_t* d_lookup_keys, unsigned num_lookup_keys) {
+auto run_lookup_benchmark(const measuring::experiment_description& experiment_desc, IndexStructureType& index_structure, const index_key_t* d_lookup_keys, unsigned num_lookup_keys) {
     int num_blocks;
 
     if /*constexpr*/ (!partitial_sorting) {
@@ -163,6 +177,7 @@ auto run_lookup_benchmark(IndexStructureType& index_structure, const index_key_t
     cudaMalloc(&d_tids, num_lookup_keys*sizeof(value_t));
 
     printf("executing kernel...\n");
+#if 0
     auto kernelStart = std::chrono::high_resolution_clock::now();
     for (unsigned rep = 0; rep < maxRepetitions; ++rep) {
         if /*constexpr*/ (!partitial_sorting) {
@@ -176,6 +191,15 @@ auto run_lookup_benchmark(IndexStructureType& index_structure, const index_key_t
     const auto kernelTime = std::chrono::duration_cast<chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
     std::cout << "Kernel time: " << kernelTime << " ms\n";
     std::cout << "GPU MOps: " << (maxRepetitions*num_lookup_keys/1e6)/(kernelTime/1e3) << std::endl;
+#endif
+    measure(experiment_desc, [&]() {
+        if /*constexpr*/ (!partitial_sorting) {
+            lookup_kernel<<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
+        } else {
+            lookup_kernel_with_sorting_v1<blockSize, 4><<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
+        }
+        cudaDeviceSynchronize();
+    });
 
     // transfer results
     std::unique_ptr<value_t[]> h_tids(new value_t[num_lookup_keys]);
@@ -216,16 +240,23 @@ void run_lane_limited_lookup_benchmark() {
 int main(int argc, char** argv) {
     double zipf_factor = 1.25;
     auto num_elements = default_num_elements;
+    auto num_lookups = default_num_lookups;
     if (argc > 1) {
         std::string::size_type sz;
         num_elements = std::stod(argv[1], &sz);
     }
     std::cout << "index size: " << num_elements << std::endl;
 
+    // set-up the measuring utility
+    auto& measuring_config = measuring::get_settings();
+    measuring_config.dest_file = "index_scan_results.yml";
+    measuring_config.repetitions = 10u;
+    const auto experiment_desc = create_experiment_description(num_elements, num_lookups, zipf_factor);
+
     // generate datasets
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
-    lookup_keys.resize(default_num_lookups);
+    lookup_keys.resize(num_lookups);
     generate_datasets<index_key_t>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::zipf, zipf_factor, lookup_keys);
 
     // create gpu accessible vectors
@@ -235,21 +266,14 @@ int main(int argc, char** argv) {
     auto d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
     auto index = build_index<index_key_t, index_type>(indexed, d_indexed.data());
 
-/*
-auto v = std::vector<int, cuda_allocator<int>>();
-auto t1 = create_device_array_from(indexed, a);
-auto tt = create_device_array_from(v, a);
-*/
-
     std::unique_ptr<value_t[]> h_tids;
     if /*constexpr*/ (activeLanes < 32) {
-
+        assert(false); // TODO
     } else {
-        auto result = run_lookup_benchmark(*index, d_lookup_keys.data(), lookup_keys.size());
+        auto result = run_lookup_benchmark(experiment_desc, *index, d_lookup_keys.data(), lookup_keys.size());
         h_tids.swap(result);
     }
 
-#if 1
     // validate results
     printf("validating results...\n");
     for (unsigned i = 0; i < lookup_keys.size(); ++i) {
@@ -259,7 +283,6 @@ auto tt = create_device_array_from(v, a);
             throw;
         }
     }
-#endif
 
     return 0;
 }

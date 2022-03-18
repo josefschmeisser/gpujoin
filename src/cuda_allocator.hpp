@@ -100,3 +100,24 @@ template<class T>
 struct is_allocation_host_accessible<cuda_allocator<T, cuda_allocation_type::device>> {
     static constexpr bool value = false;
 };
+
+template<class T>
+struct type_name<cuda_allocator<T, cuda_allocation_type::device>> {
+    static const char* value() {
+        return "cuda_device_allocator";
+    }
+};
+
+template<class T>
+struct type_name<cuda_allocator<T, cuda_allocation_type::unified>> {
+    static const char* value() {
+        return "cuda_um_allocator";
+    }
+};
+
+template<class T>
+struct type_name<cuda_allocator<T, cuda_allocation_type::zero_copy>> {
+    static const char* value() {
+        return "cuda_zc_allocator";
+    }
+};

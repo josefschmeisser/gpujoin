@@ -126,3 +126,10 @@ struct type_name {
         return typeid(T).name();
     }
 };
+
+template<class T>
+struct type_name<std::allocator<T>> {
+    static const char* value() {
+        return "std::allocator";
+    }
+};

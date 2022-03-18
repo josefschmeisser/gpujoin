@@ -60,7 +60,7 @@ include_directories(
 #add_executable(rs_lookup src/rs_lookup.cu)
 #target_link_libraries(rs_lookup ${CUDART_LIBRARY} numa radixspline)
 
-add_executable(index_lookup src/index_lookup.cu)
+add_executable(index_lookup src/index_lookup.cu src/measuring.cpp)
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
 if(false)
@@ -91,12 +91,10 @@ add_subdirectory(test)
 
 
 add_executable(async
-#contrib/numa-gpu/sql-ops/cudautils/gpu_common.cu
-
-  #  contrib/numa-gpu/sql-ops/cpputils/gpu_common.cpp
+    #contrib/numa-gpu/sql-ops/cudautils/gpu_common.cu
+    #contrib/numa-gpu/sql-ops/cpputils/gpu_common.cpp
     src/async.cu
     src/measuring.cpp
-
 )
 target_include_directories(async PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>

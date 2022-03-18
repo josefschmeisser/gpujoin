@@ -65,6 +65,13 @@ struct btree_index {
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+struct type_name<btree_index<Key, Value, DeviceAllocator, HostAllocator>> {
+    static const char* value() {
+        return "btree";
+    }
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct radix_spline_index {
     using key_t = Key;
     using value_t = Value;
@@ -131,6 +138,13 @@ struct radix_spline_index {
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+struct type_name<radix_spline_index<Key, Value, DeviceAllocator, HostAllocator>> {
+    static const char* value() {
+        return "radix_spline";
+    }
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct harmonia_index {
     using key_t = Key;
     using value_t = Value;
@@ -171,6 +185,13 @@ struct harmonia_index {
             size += guard.values_guard.size()*sizeof(typename decltype(guard.values_guard)::value_type);
         }
         return size;
+    }
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+struct type_name<harmonia_index<Key, Value, DeviceAllocator, HostAllocator>> {
+    static const char* value() {
+        return "harmonia";
     }
 };
 
@@ -216,6 +237,13 @@ struct lower_bound_index {
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+struct type_name<lower_bound_index<Key, Value, DeviceAllocator, HostAllocator>> {
+    static const char* value() {
+        return "lower_bound";
+    }
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct no_op_index {
     using key_t = Key;
     using value_t = Value;
@@ -236,6 +264,13 @@ struct no_op_index {
 
     __host__ size_t memory_consumption() const {
         return 0;
+    }
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+struct type_name<no_op_index<Key, Value, DeviceAllocator, HostAllocator>> {
+    static const char* value() {
+        return "no_op";
     }
 };
 
