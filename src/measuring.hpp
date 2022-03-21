@@ -19,17 +19,6 @@ struct experiment_description {
 };
 
 struct measurement {
-/*
-    std::string experiment;
-    std::string approach;*/
-    std::string device; // TODO move
-/*
-    std::string index_type;
-    std::string index_config;
-    std::string host_allocator;
-    std::string index_allocator;
-    std::string query_allocator;*/
-    //std::string other;
     std::string short_commit_hash;
     double duration_ms;
     uint32_t timestamp;

@@ -18,6 +18,7 @@
 #include "cuda_utils.cuh"
 #include "device_array.hpp"
 #include "measuring.hpp"
+#include "device_properties.hpp"
 
 #include "index_lookup_config.cuh"
 #include "index_lookup_common.cuh"
@@ -27,16 +28,28 @@ using namespace measuring;
 
 static const int blockSize = 64;
 //static const int blockSize = 256; // best for sorting on pascal
-static const unsigned maxRepetitions = 10;
+static const unsigned repetitions = 10;
 static const unsigned activeLanes = 32;
 
+/*
+std::string get_cuda_device_name(unsigned device_id) {
+    char device_name[256];
+    const auto error_id = cuDeviceGetName(device_name, 256, device_id);
+    if (error_id != CUDA_SUCCESS) {
+        std::cerr << "failed to fetch device name for device: " << device_id << std::endl;
+        return "unknown";
+    }
+    return device_name;
+}*/
 
 static experiment_description create_experiment_description(size_t num_elements, size_t num_lookups, double zipf_factor) {
     experiment_description r;
     r.name = "plain_lookup";
     r.approach = partitial_sorting ? "partial_sorting" : "plain";
     r.other = allocator_type_names();
+    r.other.push_back(std::make_pair(std::string("device"), std::string(get_device_properties(0).name)));
     r.other.push_back(std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())));
+    r.other.push_back(std::make_pair(std::string("max_bits"), std::to_string(max_bits)));
     r.other.push_back(std::make_pair(std::string("num_elements"), std::to_string(num_elements)));
     r.other.push_back(std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)));
     r.other.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
@@ -250,7 +263,7 @@ int main(int argc, char** argv) {
     // set-up the measuring utility
     auto& measuring_config = measuring::get_settings();
     measuring_config.dest_file = "index_scan_results.yml";
-    measuring_config.repetitions = 10u;
+    measuring_config.repetitions = repetitions;
     const auto experiment_desc = create_experiment_description(num_elements, num_lookups, zipf_factor);
 
     // generate datasets

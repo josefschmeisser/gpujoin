@@ -18,14 +18,15 @@
 #include "mmap_allocator.hpp"
 #include "indexes.cuh"
 #include "device_array.hpp"
+#include "utils.hpp"
+#include "measuring.hpp"
+#include "device_properties.hpp"
 
 #include "index_lookup_config.cuh"
 #include "index_lookup_common.cuh"
 
 #include "gpu_prefix_sum.hpp"
 #include "partitioned_relation.hpp"
-#include "utils.hpp"
-#include "measuring.hpp"
 
 #undef GPU_CACHE_LINE_SIZE
 #include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
@@ -64,7 +65,9 @@ static experiment_description create_experiment_description(size_t num_elements,
     r.name = "plain_lookup";
     r.approach = "streamed";
     r.other = allocator_type_names();
+    r.other.push_back(std::make_pair(std::string("device"), std::string(get_device_properties(0).name)));
     r.other.push_back(std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())));
+    r.other.push_back(std::make_pair(std::string("max_bits"), std::to_string(max_bits)));
     r.other.push_back(std::make_pair(std::string("num_elements"), std::to_string(num_elements)));
     r.other.push_back(std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)));
     r.other.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
@@ -401,11 +404,14 @@ int main(int argc, char** argv) {
     auto index = build_index<index_key_t, index_type>(indexed, d_indexed.data());
     auto d_dst_tids = create_device_array<value_t>(num_lookups);
 
-
+/*
     // fetch device properties
     cudaDeviceProp device_properties;
     CubDebugExit(cudaGetDeviceProperties(&device_properties, 0));
     std::cout << "sharedMemPerBlock: " << device_properties.sharedMemPerBlock << std::endl;
+    std::cout << "name: " << device_properties.name << std::endl;
+*/
+
 
     size_t remaining = num_lookups;
     size_t max_stream_portion = num_lookups / num_streams;
@@ -426,8 +432,6 @@ int main(int argc, char** argv) {
         d_stream_tids += stream_portion;
     }
 
-
-
 /*
     auto start_ts = std::chrono::high_resolution_clock::now();
     for (const auto& state : stream_states) {
@@ -439,6 +443,7 @@ int main(int argc, char** argv) {
     std::cout << "Kernel time: " << rt << " ms\n";
     std::cout << "GPU MOps: " << (num_lookups/1e6)/(rt/1e3) << std::endl;*/
 
+    const auto& device_properties = get_device_properties(0);
     measure(experiment_desc, [&]() {
         for (const auto& state : stream_states) {
             run_on_stream(*state, *index, device_properties);

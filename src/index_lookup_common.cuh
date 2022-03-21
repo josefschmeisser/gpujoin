@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <numeric>
 #include <memory>
+#include <stdexcept>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -28,14 +30,19 @@ enum class lookup_pattern_type : unsigned { uniform, zipf };
 
 template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
+    const std::size_t upper_limit = 1ul << (max_bits - 1u);
     auto rng = std::default_random_engine {};
+
+    if (keys.size() - 1 > upper_limit) {
+        throw std::runtime_error("resulting dataset would exceed the provided limit defined by 'max_bits'");
+    }
 
     // generate dataset to be indexed
     if (dt == dataset_type::dense) {
         std::iota(keys.begin(), keys.end(), 0);
     } else if (dt == dataset_type::uniform) {
         // create random keys
-        std::uniform_int_distribution<> key_distrib(0, 1 << (max_bits - 1));
+        std::uniform_int_distribution<> key_distrib(0, upper_limit);
         std::unordered_set<KeyType> unique;
         unique.reserve(keys.size());
         while (unique.size() < keys.size()) {

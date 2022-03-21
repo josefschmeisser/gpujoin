@@ -10,9 +10,9 @@
 
 // standard constants
 static const unsigned default_num_lookups = 1e8;
-static const unsigned default_num_elements = 1e5;
-static const unsigned max_bits = 26;
-static const bool partitial_sorting = true;
+static const unsigned default_num_elements = 1e6;
+static const unsigned max_bits = 24;
+static const bool partitial_sorting = false;
 
 // types
 using index_key_t = uint32_t;
