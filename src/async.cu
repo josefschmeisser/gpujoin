@@ -297,15 +297,15 @@ void dump_task_assignment(const stream_state& state) {
     std::cout << "task assignment: " << stringify(assignment.data(), assignment.data() + assignment.size()) << std::endl;
 }
 
-template<class ResultVectorType>
-bool validate_results(const std::vector<index_key_t>& lookup_keys, const ResultVectorType& tids) {
+template<class IndexedVectorType, class ResultVectorType>
+bool validate_results(const std::vector<index_key_t>& lookup_keys, const IndexedVectorType& indexed, const ResultVectorType& tids) {
     const auto h_tids = tids.to_host_accessible();
 
     //std::cout << "tids: " << stringify(h_tids.data(), h_tids.data() + h_tids.size()) << std::endl;
 
     bool valid = true;
     for (size_t i = 0; i < lookup_keys.size(); ++i) {
-        if (h_tids.data()[i] != lookup_keys[i]) {
+        if (indexed[h_tids.data()[i]] != lookup_keys[i]) {
             valid = false;
             std::cerr << "missmatch at: " << i << std::endl;
         }
@@ -393,7 +393,7 @@ int main(int argc, char** argv) {
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(num_lookups);
-    generate_datasets<index_key_t>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::uniform, zipf_factor, lookup_keys);
+    generate_datasets<index_key_t>(dataset_type::sparse, max_bits, indexed, lookup_pattern_type::uniform, zipf_factor, lookup_keys);
     //std::cout << stringify(lookup_keys.begin(), lookup_keys.end());
 
     // create gpu accessible vectors
@@ -452,7 +452,7 @@ int main(int argc, char** argv) {
     });
 
 
-    validate_results(lookup_keys, d_dst_tids);
+    validate_results(lookup_keys, indexed, d_dst_tids);
 
     cudaDeviceReset();
 
