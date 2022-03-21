@@ -63,7 +63,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     } else if (lookup_pattern == lookup_pattern_type::zipf) {
         std::mt19937 generator;
         generator.seed(0);
-        zipf_distribution<uint64_t> lookup_distribution(keys.size(), zipf_factor);
+        zipf_distribution<uint64_t> lookup_distribution(keys.size() - 1, zipf_factor);
         for (uint64_t i = 0; i < lookups.size(); ++i) {
             const auto key_pos = lookup_distribution(generator);
             lookups[i] = keys[key_pos];
