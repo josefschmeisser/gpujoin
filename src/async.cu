@@ -64,13 +64,7 @@ static experiment_description create_experiment_description(size_t num_elements,
     experiment_description r;
     r.name = "plain_lookup";
     r.approach = "streamed";
-    r.other = allocator_type_names();
-    r.other.push_back(std::make_pair(std::string("device"), std::string(get_device_properties(0).name)));
-    r.other.push_back(std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())));
-    r.other.push_back(std::make_pair(std::string("max_bits"), std::to_string(max_bits)));
-    r.other.push_back(std::make_pair(std::string("num_elements"), std::to_string(num_elements)));
-    r.other.push_back(std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)));
-    r.other.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
+    r.other = create_common_experiment_description_pairs(num_elements, num_lookups, zipf_factor);
     return r;
 }
 
@@ -367,9 +361,9 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 }
 
 int main(int argc, char** argv) {
-    double zipf_factor = 1.25;
     auto num_elements = default_num_elements;
     size_t num_lookups = default_num_lookups;
+    double zipf_factor = default_zipf_factor;
     if (argc > 1) {
         std::string::size_type sz;
         num_elements = std::stod(argv[1], &sz);

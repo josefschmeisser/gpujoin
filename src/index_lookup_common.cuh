@@ -22,11 +22,8 @@
 #include "mmap_allocator.hpp"
 #include "indexes.cuh"
 #include "device_array.hpp"
+#include "index_lookup_config.cuh"
 
-
-enum class dataset_type : unsigned { dense, uniform };
-
-enum class lookup_pattern_type : unsigned { uniform, zipf };
 
 template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
@@ -40,9 +37,9 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     // generate dataset to be indexed
     if (dt == dataset_type::dense) {
         std::iota(keys.begin(), keys.end(), 0);
-    } else if (dt == dataset_type::uniform) {
+    } else if (dt == dataset_type::sparse) {
         // create random keys
-        std::uniform_int_distribution<> key_distrib(0, upper_limit);
+        std::uniform_int_distribution<KeyType> key_distrib(0, upper_limit);
         std::unordered_set<KeyType> unique;
         unique.reserve(keys.size());
         while (unique.size() < keys.size()) {
@@ -58,7 +55,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
 
     // generate lookup keys
     if (lookup_pattern == lookup_pattern_type::uniform) {
-        std::uniform_int_distribution<size_t> lookup_distribution(0, keys.size() - 1);
+        std::uniform_int_distribution<size_t> lookup_distribution(0ul, keys.size() - 1ul);
         std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distribution(rng)]; });
     } else if (lookup_pattern == lookup_pattern_type::zipf) {
         std::mt19937 generator;
@@ -72,7 +69,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
         assert(false);
     }
 
-    //std::sort(lookups.begin(), lookups.end());
+    std::sort(lookups.begin(), lookups.end());
 }
 
 template<class KeyType, class IndexStructureType, class VectorType>
@@ -220,12 +217,38 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     }
 }
 
-std::vector<std::pair<std::string, std::string>> allocator_type_names() {
+template<>
+std::string tmpl_to_string(const dataset_type& v) {
+    return (v == dataset_type::dense) ? "dense" : "sparse";
+}
+
+template<>
+std::string tmpl_to_string(const lookup_pattern_type& v) {
+    return (v == lookup_pattern_type::uniform) ? "uniform" : "zipf";
+}
+
+std::vector<std::pair<std::string, std::string>> create_common_experiment_description_pairs(size_t num_elements, size_t num_lookups, double zipf_factor) {
     std::vector<std::pair<std::string, std::string>> r = {
+        std::make_pair(std::string("device"), std::string(get_device_properties(0).name)),
+        std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())),
+        std::make_pair(std::string("dataset"), tmpl_to_string(dataset)),
+        std::make_pair(std::string("lookup_pattern"), tmpl_to_string(lookup_pattern)),
+        std::make_pair(std::string("num_elements"), std::to_string(num_elements)),
+        std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)),
+        // allocators:
         std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value())),
         std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
         std::make_pair(std::string("indexed_allocator"), std::string(type_name<indexed_allocator_t>::value())),
         std::make_pair(std::string("lookup_keys_allocator"), std::string(type_name<lookup_keys_allocator_t>::value()))
     };
+
+    if (dataset == dataset_type::sparse) {
+        r.push_back(std::make_pair(std::string("max_bits"), std::to_string(max_bits)));
+    }
+
+    if (lookup_pattern == lookup_pattern_type::zipf) {
+        r.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
+    }
+
     return r;
 }

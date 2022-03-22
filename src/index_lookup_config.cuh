@@ -8,11 +8,18 @@
 #include "mmap_allocator.hpp"
 #include "indexes.cuh"
 
+enum class dataset_type : unsigned { dense, sparse };
+
+enum class lookup_pattern_type : unsigned { uniform, zipf };
+
 // standard constants
 static const unsigned default_num_lookups = 1e8;
 static const unsigned default_num_elements = 1e6;
+static const double default_zipf_factor = 1.25;
 static const unsigned max_bits = 24;
 static const bool partitial_sorting = false;
+static const dataset_type dataset = dataset_type::sparse;
+static const lookup_pattern_type lookup_pattern = lookup_pattern_type::uniform;
 
 // types
 using index_key_t = uint32_t;

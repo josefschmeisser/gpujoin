@@ -46,13 +46,7 @@ static experiment_description create_experiment_description(size_t num_elements,
     experiment_description r;
     r.name = "plain_lookup";
     r.approach = partitial_sorting ? "partial_sorting" : "plain";
-    r.other = allocator_type_names();
-    r.other.push_back(std::make_pair(std::string("device"), std::string(get_device_properties(0).name)));
-    r.other.push_back(std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())));
-    r.other.push_back(std::make_pair(std::string("max_bits"), std::to_string(max_bits)));
-    r.other.push_back(std::make_pair(std::string("num_elements"), std::to_string(num_elements)));
-    r.other.push_back(std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)));
-    r.other.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
+    r.other = create_common_experiment_description_pairs(num_elements, num_lookups, zipf_factor);
     return r;
 }
 
@@ -270,8 +264,11 @@ int main(int argc, char** argv) {
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
     indexed.resize(num_elements);
     lookup_keys.resize(num_lookups);
-    generate_datasets<index_key_t>(dataset_type::dense, max_bits, indexed, lookup_pattern_type::zipf, zipf_factor, lookup_keys);
-
+    generate_datasets<index_key_t>(dataset_type::sparse, max_bits, indexed, lookup_pattern_type::uniform, zipf_factor, lookup_keys);
+/*
+    std::cout << "keys: " << stringify(indexed.begin(), indexed.begin() +16) << std::endl;
+    std::cout << "lookups: " << stringify(lookup_keys.begin(), lookup_keys.begin() +2048) << std::endl;
+*/
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
     auto d_indexed = create_device_array_from(indexed, indexed_allocator);
