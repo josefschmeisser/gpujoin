@@ -22,7 +22,7 @@
 #include "measuring.hpp"
 #include "device_properties.hpp"
 
-#include "index_lookup_config.cuh"
+#include "index_lookup_config.hpp"
 #include "index_lookup_common.cuh"
 
 #include "gpu_prefix_sum.hpp"
@@ -42,8 +42,9 @@ static const uint32_t radix_bits = 12;// 10;
 static const uint32_t ignore_bits = 4;//3;
 
 template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
-template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
+//template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
 
+using index_type = INDEX_TYPE;
 
 struct PartitionedLookupArgs {
     // Input
@@ -60,11 +61,13 @@ struct PartitionedLookupArgs {
 };
 
 
-static experiment_description create_experiment_description(size_t num_elements, size_t num_lookups, double zipf_factor) {
+static experiment_description create_experiment_description() {
+    const auto& config = get_experiment_config();
+
     experiment_description r;
     r.name = "plain_lookup";
     r.approach = "streamed";
-    r.other = create_common_experiment_description_pairs(num_elements, num_lookups, zipf_factor);
+    r.other = create_common_experiment_description_pairs<index_type>();
     return r;
 }
 
@@ -361,6 +364,7 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 }
 
 int main(int argc, char** argv) {
+/*
     auto num_elements = default_num_elements;
     size_t num_lookups = default_num_lookups;
     double zipf_factor = default_zipf_factor;
@@ -369,7 +373,9 @@ int main(int argc, char** argv) {
         num_elements = std::stod(argv[1], &sz);
     }
     std::cout << "index size: " << num_elements << std::endl;
-
+*/
+    parse_options(argc, argv);
+    const auto& config = get_experiment_config();
 
     if (grid_size == 0) {
         int num_sms;
@@ -381,13 +387,13 @@ int main(int argc, char** argv) {
     auto& measuring_config = measuring::get_settings();
     measuring_config.dest_file = "index_scan_results.yml";
     measuring_config.repetitions = 10u;
-    const auto experiment_desc = create_experiment_description(num_elements, num_lookups, zipf_factor);
+    const auto experiment_desc = create_experiment_description();
 
     // generate datasets
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
-    indexed.resize(num_elements);
-    lookup_keys.resize(num_lookups);
-    generate_datasets<index_key_t>(dataset_type::sparse, max_bits, indexed, lookup_pattern_type::uniform, zipf_factor, lookup_keys);
+    indexed.resize(config.num_elements);
+    lookup_keys.resize(config.num_lookups);
+    generate_datasets<index_key_t>(dataset_type::sparse, config.max_bits, indexed, lookup_pattern_type::uniform, config.zipf_factor, lookup_keys);
     //std::cout << stringify(lookup_keys.begin(), lookup_keys.end());
 
     // create gpu accessible vectors
@@ -396,7 +402,7 @@ int main(int argc, char** argv) {
     lookup_keys_allocator_t lookup_keys_allocator;
     auto d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
     auto index = build_index<index_key_t, index_type>(indexed, d_indexed.data());
-    auto d_dst_tids = create_device_array<value_t>(num_lookups);
+    auto d_dst_tids = create_device_array<value_t>(config.num_lookups);
 
 /*
     // fetch device properties
@@ -407,8 +413,8 @@ int main(int argc, char** argv) {
 */
 
 
-    size_t remaining = num_lookups;
-    size_t max_stream_portion = num_lookups / num_streams;
+    size_t remaining = config.num_lookups;
+    size_t max_stream_portion = config.num_lookups / num_streams;
     const index_key_t* d_stream_lookup_keys = d_lookup_keys.data();
     value_t* d_stream_tids = d_dst_tids.data();
 

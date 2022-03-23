@@ -19,8 +19,9 @@
 #include "device_array.hpp"
 #include "measuring.hpp"
 #include "device_properties.hpp"
+#include "indexes.cuh"
 
-#include "index_lookup_config.cuh"
+#include "index_lookup_config.hpp"
 #include "index_lookup_common.cuh"
 
 using namespace std;
@@ -30,6 +31,8 @@ static const int blockSize = 64;
 //static const int blockSize = 256; // best for sorting on pascal
 static const unsigned repetitions = 10;
 static const unsigned activeLanes = 32;
+
+using index_type = INDEX_TYPE;
 
 /*
 std::string get_cuda_device_name(unsigned device_id) {
@@ -42,11 +45,13 @@ std::string get_cuda_device_name(unsigned device_id) {
     return device_name;
 }*/
 
-static experiment_description create_experiment_description(size_t num_elements, size_t num_lookups, double zipf_factor) {
+static experiment_description create_experiment_description() {
+    const auto& config = get_experiment_config();
+
     experiment_description r;
     r.name = "plain_lookup";
-    r.approach = partitial_sorting ? "partial_sorting" : "plain";
-    r.other = create_common_experiment_description_pairs(num_elements, num_lookups, zipf_factor);
+    r.approach = config.partitial_sorting ? "partial_sorting" : "plain";
+    r.other = create_common_experiment_description_pairs<index_type>();
     return r;
 }
 
@@ -168,9 +173,10 @@ __global__ void lookup_kernel_with_sorting_v2(const IndexStructureType index_str
 
 template<class IndexStructureType>
 auto run_lookup_benchmark(const measuring::experiment_description& experiment_desc, IndexStructureType& index_structure, const index_key_t* d_lookup_keys, unsigned num_lookup_keys) {
-    int num_blocks;
+    const auto& config = get_experiment_config();
 
-    if /*constexpr*/ (!partitial_sorting) {
+    int num_blocks;
+    if /*constexpr*/ (!config.partitial_sorting) {
         num_blocks = (num_lookup_keys + blockSize - 1) / blockSize;
     } else {
         int num_sms;
@@ -200,10 +206,10 @@ auto run_lookup_benchmark(const measuring::experiment_description& experiment_de
     std::cout << "GPU MOps: " << (maxRepetitions*num_lookup_keys/1e6)/(kernelTime/1e3) << std::endl;
 #endif
     measure(experiment_desc, [&]() {
-        if /*constexpr*/ (!partitial_sorting) {
+        if /*constexpr*/ (!config.partitial_sorting) {
             lookup_kernel<<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
         } else {
-            lookup_kernel_with_sorting_v1<blockSize, 4><<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
+            lookup_kernel_with_sorting_v1<blockSize, 4><<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids, config.max_bits);
         }
         cudaDeviceSynchronize();
     });
@@ -245,6 +251,7 @@ void run_lane_limited_lookup_benchmark() {
 #endif
 
 int main(int argc, char** argv) {
+/*
     double zipf_factor = 1.25;
     auto num_elements = default_num_elements;
     auto num_lookups = default_num_lookups;
@@ -253,18 +260,21 @@ int main(int argc, char** argv) {
         num_elements = std::stod(argv[1], &sz);
     }
     std::cout << "index size: " << num_elements << std::endl;
+*/
+    parse_options(argc, argv);
+    const auto& config = get_experiment_config();
 
     // set-up the measuring utility
     auto& measuring_config = measuring::get_settings();
     measuring_config.dest_file = "index_scan_results.yml";
     measuring_config.repetitions = repetitions;
-    const auto experiment_desc = create_experiment_description(num_elements, num_lookups, zipf_factor);
+    const auto experiment_desc = create_experiment_description();
 
     // generate datasets
     std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
-    indexed.resize(num_elements);
-    lookup_keys.resize(num_lookups);
-    generate_datasets<index_key_t>(dataset_type::sparse, max_bits, indexed, lookup_pattern_type::uniform, zipf_factor, lookup_keys);
+    indexed.resize(config.num_elements);
+    lookup_keys.resize(config.num_lookups);
+    generate_datasets<index_key_t>(dataset_type::sparse, config.max_bits, indexed, lookup_pattern_type::uniform, config.zipf_factor, lookup_keys);
 /*
     std::cout << "keys: " << stringify(indexed.begin(), indexed.begin() +16) << std::endl;
     std::cout << "lookups: " << stringify(lookup_keys.begin(), lookup_keys.begin() +2048) << std::endl;

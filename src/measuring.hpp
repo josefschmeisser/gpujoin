@@ -7,6 +7,8 @@
 
 namespace measuring {
 
+static const unsigned warm_up_rounds = 3;
+
 struct measuring_settings {
     std::string dest_file;
     unsigned repetitions;
@@ -31,7 +33,9 @@ void write_out_measurement(const experiment_description& d, const measurement& m
 
 template<class Func>
 void measure(const experiment_description& d, Func func) {
-    printf("repetitions: %u\n", get_settings().repetitions);
+    for (unsigned i = 0; i < warm_up_rounds; ++i) {
+        func();
+    }
     for (unsigned i = 0; i < get_settings().repetitions; ++i) {
         const auto start_ts = std::chrono::high_resolution_clock::now();
         func();

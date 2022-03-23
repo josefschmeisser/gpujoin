@@ -60,7 +60,7 @@ include_directories(
 #add_executable(rs_lookup src/rs_lookup.cu)
 #target_link_libraries(rs_lookup ${CUDART_LIBRARY} numa radixspline)
 
-add_executable(index_lookup src/index_lookup.cu src/measuring.cpp src/device_properties.cpp)
+add_executable(index_lookup src/index_lookup.cu src/measuring.cpp src/device_properties.cpp src/index_lookup_config.cpp)
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
 if(false)
@@ -96,6 +96,7 @@ add_executable(async
     src/async.cu
     src/measuring.cpp
     src/device_properties.cpp
+    src/index_lookup_config.cpp
 )
 target_include_directories(async PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>

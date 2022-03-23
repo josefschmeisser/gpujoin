@@ -22,8 +22,8 @@
 #include "mmap_allocator.hpp"
 #include "indexes.cuh"
 #include "device_array.hpp"
-#include "index_lookup_config.cuh"
-
+#include "index_lookup_config.hpp"
+#include "index_lookup_config.tpp"
 
 template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
@@ -69,7 +69,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
         assert(false);
     }
 
-    std::sort(lookups.begin(), lookups.end());
+    //std::sort(lookups.begin(), lookups.end());
 }
 
 template<class KeyType, class IndexStructureType, class VectorType>
@@ -103,7 +103,7 @@ template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
     class    IndexStructureType>
-__global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids) {
+__global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids, unsigned max_bits) {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
@@ -217,24 +217,17 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     }
 }
 
-template<>
-std::string tmpl_to_string(const dataset_type& v) {
-    return (v == dataset_type::dense) ? "dense" : "sparse";
-}
+template<class IndexType>
+std::vector<std::pair<std::string, std::string>> create_common_experiment_description_pairs() {
+    const auto& config = get_experiment_config();
 
-template<>
-std::string tmpl_to_string(const lookup_pattern_type& v) {
-    return (v == lookup_pattern_type::uniform) ? "uniform" : "zipf";
-}
-
-std::vector<std::pair<std::string, std::string>> create_common_experiment_description_pairs(size_t num_elements, size_t num_lookups, double zipf_factor) {
     std::vector<std::pair<std::string, std::string>> r = {
         std::make_pair(std::string("device"), std::string(get_device_properties(0).name)),
-        std::make_pair(std::string("index_type"), std::string(type_name<index_type>::value())),
-        std::make_pair(std::string("dataset"), tmpl_to_string(dataset)),
-        std::make_pair(std::string("lookup_pattern"), tmpl_to_string(lookup_pattern)),
-        std::make_pair(std::string("num_elements"), std::to_string(num_elements)),
-        std::make_pair(std::string("num_lookups"), std::to_string(num_lookups)),
+        std::make_pair(std::string("index_type"), std::string(type_name<IndexType>::value())),
+        std::make_pair(std::string("dataset"), tmpl_to_string(config.dataset)),
+        std::make_pair(std::string("lookup_pattern"), tmpl_to_string(config.lookup_pattern)),
+        std::make_pair(std::string("num_elements"), std::to_string(config.num_elements)),
+        std::make_pair(std::string("num_lookups"), std::to_string(config.num_lookups)),
         // allocators:
         std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value())),
         std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
@@ -242,12 +235,12 @@ std::vector<std::pair<std::string, std::string>> create_common_experiment_descri
         std::make_pair(std::string("lookup_keys_allocator"), std::string(type_name<lookup_keys_allocator_t>::value()))
     };
 
-    if (dataset == dataset_type::sparse) {
-        r.push_back(std::make_pair(std::string("max_bits"), std::to_string(max_bits)));
+    if (config.dataset == dataset_type::sparse) {
+        r.push_back(std::make_pair(std::string("max_bits"), std::to_string(config.max_bits)));
     }
 
-    if (lookup_pattern == lookup_pattern_type::zipf) {
-        r.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(zipf_factor)));
+    if (config.lookup_pattern == lookup_pattern_type::zipf) {
+        r.push_back(std::make_pair(std::string("zipf_factor"), std::to_string(config.zipf_factor)));
     }
 
     return r;
