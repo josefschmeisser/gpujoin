@@ -26,6 +26,16 @@
 #include "indexes.cuh"
 #include "device_array.hpp"
 
+/*
+This approach differs from the one used in 'tpch_14.cu' in the way that the
+monolithic kernel used in the latter approach has been split into two kernels.
+Thereby, the first kernel evaluates the predicate on lineitem and subsequently
+materializes all matching tuples. A second kernel is immediately launched after
+the finalization of the first kernel. Having all matching tuples densely
+materialized allows us to omit the lane refill logic, which is applied in
+'tpch_14.cu'.
+*/
+
 //#define MEASURE_CYCLES
 //#define SKIP_SORT
 #define PRE_SORT

@@ -1304,7 +1304,6 @@ struct helper {
         if (sort_indexed_relation) {
             printf("sorting part relation...\n");
             sort_relation(db.part);
-sort_relation(db.lineitem);
         }
         lineitem_size = db.lineitem.l_orderkey.size();
         part_size = db.part.p_partkey.size();
