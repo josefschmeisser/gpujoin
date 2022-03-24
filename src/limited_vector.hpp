@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
@@ -34,11 +35,12 @@ struct limited_vector {
 
     template<class... Args>
     void emplace_back(Args&&... args) {
-        if (size_ + 1 >= limit_) {
+        if (size_ + 1 > limit_) {
             throw std::runtime_error("limited_vector capacity exceeded");
         }
 
         new (&vec_[size_++]) T(args...);
+        assert(size_ <= limit_);
     }
 
     T& back() noexcept { return vec_[size_ - 1]; }
