@@ -52,3 +52,8 @@ template<class T>
 auto make_vector_view(T* arr, size_t size) {
     return vector_view<T>(arr, size);
 }
+
+template<class VectorType>
+vector_view<typename VectorType::value_type> make_vector_view(VectorType& vector_value) {
+    return vector_view<typename VectorType::value_type>(&vector_value.front(), vector_value.size());
+}

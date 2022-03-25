@@ -9,15 +9,25 @@
 #include "btree.cuh"
 #include "harmonia.cuh"
 #include "rs.cuh"
+#include "vector_view.hpp"
 
 /*
 Each index structure struct contains a device_index struct which upon kernel invocation will be passed by value.
 Passing a struct by value has the advantage that the CUDA runtime copies the entire struct into constant memory.
 Reads to members of these structs are therefore cached and can futhermore be broadcasted/mutlicasted when accessed by multiple threads.
 */
+template<class Key>
+struct abstract_index {
+    using key_t = Key;
+
+    __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* d_column) = 0;
+
+    __host__ virtual size_t memory_consumption() const = 0;
+};
+
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
-struct btree_index {
+struct btree_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
 
@@ -41,8 +51,7 @@ struct btree_index {
         }
     } device_index;
 
-    template<class Vector>
-    __host__ void construct(const Vector& h_column, const key_t* d_column) {
+    __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         h_tree_.construct(h_column, 0.7);
 
         if /*constexpr*/ (std::is_same<DeviceAllocator<int>, HostAllocator<int>>::value) {
@@ -55,11 +64,7 @@ struct btree_index {
         }
     }
 
-    template<class Allocator>
-    __host__ void construct(const std::vector<key_t>& h_column, const key_t* d_column, Allocator& allocator);
-    // TODO
-
-    __host__ size_t memory_consumption() const {
+    __host__ size_t memory_consumption() const override {
         return h_tree_.tree_size_in_byte(h_tree_.root);
     }
 };
@@ -72,7 +77,7 @@ struct type_name<btree_index<Key, Value, DeviceAllocator, HostAllocator>> {
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
-struct radix_spline_index {
+struct radix_spline_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
 
@@ -108,8 +113,7 @@ struct radix_spline_index {
         }
     } device_index;
 
-    template<class Vector>
-    __host__ void construct(const Vector& h_column, const key_t* d_column) {
+    __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         device_index.d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
 
@@ -132,7 +136,7 @@ struct radix_spline_index {
         assert(h_column.size() == rrs->num_keys_);
     }
 
-    __host__ size_t memory_consumption() const {
+    __host__ size_t memory_consumption() const override {
         return memory_consumption_;
     }
 };
@@ -145,7 +149,7 @@ struct type_name<radix_spline_index<Key, Value, DeviceAllocator, HostAllocator>>
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
-struct harmonia_index {
+struct harmonia_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
 
@@ -171,14 +175,13 @@ struct harmonia_index {
         }
     } device_index;
 
-    template<class Vector>
-    __host__ void construct(const Vector& h_column, const key_t* /*d_column*/) {
+    __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* /*d_column*/) override {
         tree.construct(h_column);
         DeviceAllocator<key_t> device_allocator;
         tree.create_device_handle(device_index.d_tree, device_allocator, guard);
     }
 
-    __host__ size_t memory_consumption() const {
+    __host__ size_t memory_consumption() const override {
         auto size = guard.keys_guard.size()*sizeof(typename decltype(guard.keys_guard)::value_type);
         size += guard.children_guard.size()*sizeof(typename decltype(guard.children_guard)::value_type);
         if (guard.values_guard.data()) {
@@ -196,7 +199,7 @@ struct type_name<harmonia_index<Key, Value, DeviceAllocator, HostAllocator>> {
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
-struct lower_bound_index {
+struct lower_bound_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
 
@@ -225,13 +228,12 @@ struct lower_bound_index {
         }
     } device_index;
 
-    template<class Vector>
-    __host__ void construct(const Vector& h_column, const key_t* d_column) {
+    __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         device_index.d_column = d_column;
         device_index.d_size = h_column.size();
     }
 
-    __host__ size_t memory_consumption() const {
+    __host__ size_t memory_consumption() const override {
         return 0;
     }
 };
@@ -244,7 +246,7 @@ struct type_name<lower_bound_index<Key, Value, DeviceAllocator, HostAllocator>> 
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
-struct no_op_index {
+struct no_op_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
 
@@ -259,10 +261,9 @@ struct no_op_index {
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const { return value_t(); }
     } device_index;
 
-    template<class Vector>
-    __host__ void construct(const Vector& h_column, const key_t* d_column) {}
+    __host__ void construct(const vector_view<key_t>& /*h_column*/, const key_t* /*d_column*/) override {}
 
-    __host__ size_t memory_consumption() const {
+    __host__ size_t memory_consumption() const override {
         return 0;
     }
 };
