@@ -75,7 +75,8 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
 template<class KeyType, class IndexStructureType, class VectorType>
 std::unique_ptr<IndexStructureType> build_index(const VectorType& h_keys, KeyType* d_keys) {
     auto index = std::make_unique<IndexStructureType>();
-    index->construct(h_keys, d_keys);
+    const auto view = make_vector_view(const_cast<VectorType&>(h_keys));
+    index->construct(view, d_keys);
     printf("index size: %lu bytes\n", index->memory_consumption());
     return index;
 }
