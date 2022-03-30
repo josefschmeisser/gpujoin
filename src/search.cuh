@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cassert>
+
 #include "cuda_utils.cuh"
 
 template<class T>

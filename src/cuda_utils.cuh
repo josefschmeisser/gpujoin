@@ -1,5 +1,7 @@
 #pragma once
 
+__device__ int device_strcmp(const char* str_a, const char* str_b, unsigned len);
+
 // use with care, see: https://stackoverflow.com/a/4433731
 __forceinline__ __device__ unsigned lane_id() {
     unsigned ret;

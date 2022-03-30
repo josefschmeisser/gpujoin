@@ -14,7 +14,7 @@ add_executable(cuda_tpch_1 tpch_1.cu)
 target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 
 # index join executable
-add_executable(cuda_tpch_14 tpch_14.cu)
+add_executable(cuda_tpch_14 tpch_14_new.cu)
 target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
 # additional nvcc flags
 if(true)
@@ -27,6 +27,7 @@ if(true)
                         >)
 endif()
 
+if(false)
 # split index join executable
 add_executable(cuda_tpch_14_split tpch_14_split.cu)
 target_link_libraries(cuda_tpch_14_split tpch_common numa pthread radixspline cub)
@@ -46,3 +47,4 @@ endif()
 add_executable(cuda_hj_tpch_14 tpch_14.cu)
 target_compile_definitions(cuda_hj_tpch_14 PUBLIC USE_HJ)
 target_link_libraries(cuda_hj_tpch_14 tpch_common numa pthread radixspline cub)
+endif()

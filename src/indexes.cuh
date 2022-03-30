@@ -16,6 +16,14 @@ Each index structure struct contains a device_index struct which upon kernel inv
 Passing a struct by value has the advantage that the CUDA runtime copies the entire struct into constant memory.
 Reads to members of these structs are therefore cached and can futhermore be broadcasted/mutlicasted when accessed by multiple threads.
 */
+
+enum class index_type_enum : unsigned { btree, harmonia, lower_bound, radixspline, no_op };
+
+/*
+template<class >
+struct 
+*/
+
 template<class Key>
 struct abstract_index {
     using key_t = Key;
@@ -23,6 +31,11 @@ struct abstract_index {
     __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* d_column) = 0;
 
     __host__ virtual size_t memory_consumption() const = 0;
+/*
+    template<index_type_enum index_type>
+    __host__ typename as();
+
+    __host__*/
 };
 
 
