@@ -17,7 +17,7 @@ Passing a struct by value has the advantage that the CUDA runtime copies the ent
 Reads to members of these structs are therefore cached and can futhermore be broadcasted/mutlicasted when accessed by multiple threads.
 */
 
-enum class index_type_enum : unsigned { btree, harmonia, lower_bound, radixspline, no_op };
+enum class index_type_enum : unsigned { btree, harmonia, lower_bound, radix_spline, no_op };
 
 /*
 template<class >

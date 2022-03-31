@@ -2,13 +2,33 @@
 
 #include <cstdio>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <memory>
 
 #include "config.hpp"
+#include "common.hpp"
+#include "device_properties.hpp"
 #include "indexes.cuh"
 #include "utils.hpp"
-#include "common.hpp"
+#include "LinearProbingHashTable.cuh"
+#include "measuring.hpp"
+
+index_type_enum parse_index_type(const std::string& index_name) {
+    if (index_name == "btree") {
+        return index_type_enum::btree;
+    } else if (index_name == "harmonia") {
+        return index_type_enum::harmonia;
+    } else if (index_name == "lower_bound") {
+        return index_type_enum::lower_bound;
+    } else if (index_name == "radix_spline") {
+        return index_type_enum::radix_spline;
+    } else if (index_name == "no_op") {
+        return index_type_enum::no_op;
+    } else {
+        throw std::runtime_error("unknown index type");
+    }
+}
 
 struct query_data {
     Database db;
@@ -24,7 +44,7 @@ struct query_data {
     std::unique_ptr<part_table_plain_t> part_device_ptrs;
 
     void load_database() {
-        auto& config = get_experiment_config();
+        const auto& config = get_experiment_config();
 
         load_tables(db, config.db_path);
         if (config.sort_indexed_relation) {
@@ -47,19 +67,27 @@ struct query_data {
     }
 
     void create_index() {
-        auto& config = get_experiment_config();
-        if (config.index_type == "btree") {
-            index_structure = std::make_unique<btree_type>();
-        } else if (config.index_type == "harmonia") {
-            index_structure = std::make_unique<harmonia_type>();
-        } else if (config.index_type == "lower_bound") {
-            index_structure = std::make_unique<lower_bound_type>();
-        } else if (config.index_type == "radixspline") {
-            index_structure = std::make_unique<radix_spline_type>();
-        } else if (config.index_type == "no_op") {
-            index_structure = std::make_unique<no_op_type>();
-        } else {
-            assert(false);
+        const auto& config = get_experiment_config();
+
+        // allocate index structure
+        switch (parse_index_type(config.index_type)) {
+            case index_type_enum::btree:
+                index_structure = std::make_unique<btree_type>();
+                break;
+            case index_type_enum::harmonia:
+                index_structure = std::make_unique<harmonia_type>();
+                break;
+            case index_type_enum::lower_bound:
+                index_structure = std::make_unique<lower_bound_type>();
+                break;
+            case index_type_enum::radix_spline:
+                index_structure = std::make_unique<radix_spline_type>();
+                break;
+            case index_type_enum::no_op:
+                index_structure = std::make_unique<no_op_type>();
+                break;
+            default:
+                assert(false);
         }
 
         const auto view = make_vector_view(db.part.p_partkey);
@@ -68,6 +96,29 @@ struct query_data {
     }
 };
 
+static measuring::experiment_description create_experiment_description() {
+    const auto& config = get_experiment_config();
+
+    measuring::experiment_description r;
+    r.name = "tpch_query14";
+    r.approach = config.approach;
+    std::vector<std::pair<std::string, std::string>> other = {
+        std::make_pair(std::string("device"), std::string(get_device_properties(0).name)),
+        std::make_pair(std::string("index_type"), config.index_type),
+        std::make_pair(std::string("db_path"), config.db_path),
+        std::make_pair(std::string("prefetch_index"), tmpl_to_string(config.prefetch_index)),
+        std::make_pair(std::string("sort_indexed_relation"), tmpl_to_string(config.sort_indexed_relation)),
+        std::make_pair(std::string("block_size"), tmpl_to_string(config.block_size)),
+
+        // allocators:
+        std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator<int>>::value())),
+        std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
+        std::make_pair(std::string("device_table_allocator"), std::string(type_name<device_table_allocator<int>>::value()))
+    };
+    r.other.swap(other);
+
+    return r;
+}
 
 struct abstract_approach_dispatcher {
     virtual void run(query_data& d, index_type_enum index_type) const = 0;
@@ -76,10 +127,21 @@ struct abstract_approach_dispatcher {
 template<template<class T> class Func>
 struct approach_dispatcher : public abstract_approach_dispatcher {
     void run(query_data& d, index_type_enum index_type) const override {
-        printf("run\n");
         switch (index_type) {
             case index_type_enum::btree:
-                Func<bool>()(d);
+                Func<btree_type>()(d);
+                break;
+            case index_type_enum::harmonia:
+                Func<harmonia_type>()(d);
+                break;
+            case index_type_enum::lower_bound:
+                Func<lower_bound_type>()(d);
+                break;
+            case index_type_enum::radix_spline:
+                Func<radix_spline_type>()(d);
+                break;
+            case index_type_enum::no_op:
+                Func<no_op_type>()(d);
                 break;
             default:
                 assert(false);
@@ -94,11 +156,33 @@ struct my_approach {
     }
 };
 
+using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
+
+__global__ void hj_build_kernel(size_t n, const part_table_plain_t* part, device_ht_t ht);
+
+__global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__ part, const lineitem_table_plain_t* __restrict__ lineitem, device_ht_t ht);
+
+template<class IndexType>
+struct hj_approach {
+    void operator()(query_data& d) {
+        const auto& config = get_experiment_config();
+
+        LinearProbingHashTable<uint32_t, size_t> ht(d.part_size);
+        int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
+        hj_build_kernel<<<num_blocks, config.block_size>>>(d.part_size, d.part_device, ht.deviceHandle);
+
+        //num_blocks = 32*num_sms;
+        num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
+        hj_probe_kernel<<<num_blocks, config.block_size>>>(d.lineitem_size, d.part_device, d.lineitem_device, ht.deviceHandle);
+        cudaDeviceSynchronize();
+    }
+};
+
 template<class IndexStructureType>
 __global__ void test_kernel();
 
 template<class IndexType>
-struct streamed_approach {
+struct streamed_ij_approach {
     void operator()(query_data& d) {
         using namespace std;
 
@@ -131,25 +215,25 @@ struct streamed_approach {
     }
 };
 
-/*
-static const std::map<std::string, Option> optionStrings {
-    { "option1", Option1 },
-    { "option2", Option2 },
-    //...
-};*/
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "option1", std::make_shared<approach_dispatcher<my_approach>>() },
-    { "streamed", std::make_shared<approach_dispatcher<streamed_approach>>() }
+    { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
+    { "streamed_ij", std::make_shared<approach_dispatcher<streamed_ij_approach>>() }
 };
 
-// TODO move to cpp
 void execute_approach(std::string approach) {
+    auto& config = get_experiment_config();
 
-    query_data qd;/*
+    query_data qd;
     qd.load_database();
-    qd.create_index();
-*/
+    if (config.approach != "hj") {
+        qd.create_index();
+    }
 
-    approaches.at(approach)->run(qd, index_type_enum::btree);
+    const auto experiment_desc = create_experiment_description();
+    index_type_enum index_type = parse_index_type(config.index_type);
+    measure(experiment_desc, [&]() {
+        approaches.at(approach)->run(qd, index_type);
+    });
 }

@@ -4,22 +4,7 @@
 
 
 #ifdef USE_HJ
-    void run_hj() {
-        const auto kernelStart = std::chrono::high_resolution_clock::now();
 
-        LinearProbingHashTable<uint32_t, size_t> ht(part_size);
-        int num_blocks = (part_size + block_size - 1) / block_size;
-        hj_build_kernel<<<num_blocks, block_size>>>(part_size, part_device, ht.deviceHandle);
-
-        //num_blocks = 32*num_sms;
-        num_blocks = (lineitem_size + block_size - 1) / block_size;
-        hj_probe_kernel<<<num_blocks, block_size>>>(lineitem_size, part_device, lineitem_device, ht.deviceHandle);
-        cudaDeviceSynchronize();
-
-        const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "kernel time: " << kernelTime << " ms\n";
-    }
 #endif
 
     void run_ij() {

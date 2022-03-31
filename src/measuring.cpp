@@ -3,6 +3,7 @@
 #include <chrono>
 #include <fstream>
 #include <sstream>
+#include <iostream>
 
 #include "utils.hpp"
 
@@ -25,6 +26,13 @@ void write_out_measurement(const experiment_description& d, const measurement& m
 
     for (const auto& misc_pair : d.other) {
         entry << "  " << misc_pair.first << ": " << misc_pair.second << "\n";
+    }
+
+    const auto& settings = get_settings();
+
+    if (settings.stdout_only) {
+        std::cout << entry.str() << std::endl;
+        return;
     }
 
     // append the entry to the specified file

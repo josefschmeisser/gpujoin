@@ -12,6 +12,7 @@ static const unsigned warm_up_rounds = 3;
 struct measuring_settings {
     std::string dest_file;
     unsigned repetitions;
+    bool stdout_only = false;
 };
 
 struct experiment_description {

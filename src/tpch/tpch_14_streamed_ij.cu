@@ -289,4 +289,8 @@ __global__ void test_kernel() {
     printf("from gpu\n");
 }
 
-template __global__ void test_kernel<bool>();
+template __global__ void test_kernel<btree_type>();
+template __global__ void test_kernel<harmonia_type>();
+template __global__ void test_kernel<lower_bound_type>();
+template __global__ void test_kernel<radix_spline_type>();
+template __global__ void test_kernel<no_op_type>();
