@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 #include <limits>
+#include <iostream>
 
 #include "cuda_utils.cuh"
 #include "device_array.hpp"

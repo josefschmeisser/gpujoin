@@ -1,4 +1,4 @@
-add_library(tpch_common STATIC common.cpp parser.cpp)
+add_library(tpch_common STATIC common.cpp config.cpp ../measuring.cpp parser.cpp)
 set_property(TARGET tpch_common PROPERTY CXX_STANDARD 17) # no cuda compiliation units involved; so we can use c++17 here
 target_link_libraries(tpch_common pthread)
 
@@ -14,7 +14,7 @@ add_executable(cuda_tpch_1 tpch_1.cu)
 target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 
 # index join executable
-add_executable(cuda_tpch_14 tpch_14_new.cu)
+add_executable(cuda_tpch_14 tpch_14_new.cu tpch_14_common.cu tpch_14_streamed_ij.cu)
 target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
 # additional nvcc flags
 if(true)

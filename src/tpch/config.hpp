@@ -7,6 +7,7 @@
 
 // experiment config with default constants
 struct experiment_config {
+    std::string db_path = "n/a";
     std::string index_type = "btree";
     bool prefetch_index = false;
     bool sort_indexed_relation = true;

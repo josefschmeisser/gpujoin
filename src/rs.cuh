@@ -148,11 +148,13 @@ __device__ unsigned lower_bound(const T1& key, const T2* arr, const unsigned siz
     return lower;
 }
 
+/*
 __global__ void do_lower_bound(const int* arr, const unsigned size) {
     lower_bound(0, arr, size, [] (const auto& a, const auto& b) {
         return a < b;
     });
 }
+*/
 
 template<class Key>
 __device__ unsigned get_spline_segment(const DeviceRadixSpline<Key>* rs, const Key key) {

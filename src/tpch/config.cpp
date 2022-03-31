@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 
+#include "utils.hpp"
 #include "thirdparty/cxxopts.hpp"
 
 experiment_config& get_experiment_config() {
@@ -16,9 +17,8 @@ void parse_options(int argc, char** argv) {
     cxxopts::Options options(argv[0], "TPC-H query 14 runner");
 
     options.add_options()
-        ("e,elements", "Number of elements in the index", cxxopts::value<unsigned>()->default_value(std::to_string(config.num_elements)))
         // TODO
-        ("index", "Index type to use", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.index_type)))
+        ("i,index", "Index type to use", cxxopts::value<std::string>()->default_value(config.index_type))
         ("h,help", "Print usage")
     ;
 
@@ -29,6 +29,9 @@ void parse_options(int argc, char** argv) {
         exit(0);
     }
 
+    config.index_type = result["index"].as<std::string>();
+
+#if 0
     // update config state with the parsing results
     config.num_elements = result["elements"].as<unsigned>();
     config.num_lookups = result["lookups"].as<unsigned>();
@@ -53,4 +56,5 @@ void parse_options(int argc, char** argv) {
     } else {
         assert(false);
     }
+#endif
 }
