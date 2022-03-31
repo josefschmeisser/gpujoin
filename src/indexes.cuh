@@ -19,11 +19,6 @@ Reads to members of these structs are therefore cached and can futhermore be bro
 
 enum class index_type_enum : unsigned { btree, harmonia, lower_bound, radix_spline, no_op };
 
-/*
-template<class >
-struct 
-*/
-
 template<class Key>
 struct abstract_index {
     using key_t = Key;
@@ -31,13 +26,7 @@ struct abstract_index {
     __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* d_column) = 0;
 
     __host__ virtual size_t memory_consumption() const = 0;
-/*
-    template<index_type_enum index_type>
-    __host__ typename as();
-
-    __host__*/
 };
-
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
 struct btree_index : public abstract_index<Key> {
@@ -120,7 +109,7 @@ struct radix_spline_index : public abstract_index<Key> {
             } else {
                 return value_t();
             }
-/*
+            /*
             assert(false); // TODO implement
             return value_t();*/
         }
