@@ -294,3 +294,72 @@ template __global__ void test_kernel<harmonia_type>();
 template __global__ void test_kernel<lower_bound_type>();
 template __global__ void test_kernel<radix_spline_type>();
 template __global__ void test_kernel<no_op_type>();
+
+
+
+
+
+
+template<class IndexStructureType>
+__global__ void ij_(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
+
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < lineitem_size; i += stride) {
+        if (lineitem->l_shipdate[i] < lower_shipdate ||
+            lineitem->l_shipdate[i] >= upper_shipdate) {
+            continue;
+        }
+
+        const auto extendedprice = lineitem->l_extendedprice[i];
+        const auto discount = lineitem->l_discount[i];
+        const auto summand = extendedprice * (100 - discount);
+
+        // TODO materialize
+
+    }
+
+    // TODO compute prefix sum
+}
+
+struct JoinEntry {
+    unsigned lineitem_tid;
+    unsigned part_tid;
+};
+__device__ unsigned output_index = 0;
+
+
+template<class IndexStructureType>
+__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < lineitem_size + 31; i += stride) {
+        payload_t payload = invalid_tid;
+        if (i < lineitem_size &&
+            lineitem->l_shipdate[i] >= lower_shipdate &&
+            lineitem->l_shipdate[i] < upper_shipdate) {
+            payload = index_structure.lookup(lineitem->l_partkey[i]);
+        }
+
+        int match = payload != invalid_tid;
+        unsigned mask = __ballot_sync(FULL_MASK, match);
+        unsigned my_lane = lane_id();
+        unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
+//        printf("right %u\n", right);
+        unsigned offset = __popc(mask & right);
+
+        unsigned base = 0;
+        int leader = __ffs(mask) - 1;
+        if (my_lane == leader) {
+            base = atomicAdd(&output_index, __popc(mask));
+        }
+        base = __shfl_sync(FULL_MASK, base, leader);
+
+        if (match) {
+//            printf("lane %u store to: %u\n", my_lane, base + offset);
+            auto& join_entry = join_entries[base + offset];
+            join_entry.lineitem_tid = i;
+            join_entry.part_tid = payload;
+        }
+    }
+}
