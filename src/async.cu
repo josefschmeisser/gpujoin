@@ -38,8 +38,12 @@ using namespace measuring;
 static const int num_streams = 2;//2;
 static const int block_size = 128;// 64;
 static int grid_size = 0;//1;
-static const uint32_t radix_bits = 12;// 10;
+static const uint32_t radix_bits = 11;// 10;
 static const uint32_t ignore_bits = 4;//3;
+
+// 48 kiB shared memory:
+// laswwc max 8 bits
+// sswwc v2 max 7 bits
 
 template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
 //template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
@@ -156,10 +160,10 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
         state->partition_offsets_inst.local_offsets.data(),
         //state->partition_offsets_inst.offsets.data(),
         // State
-        nullptr,
-        nullptr,
-        nullptr,
-        0,
+        nullptr, // tmp_partition_offsets - used by gpu_chunked_sswwc_radix_partition_v2
+        nullptr, // l2_cache_buffers - only used by gpu_chunked_sswwc_radix_partition_v2g
+        nullptr, // device_memory_buffers - only used by gpu_chunked_hsswwc_* kernels
+        0, // device_memory_buffer_bytes - only used by gpu_chunked_hsswwc_* kernels
         // Outputs
         state->partitioned_relation_inst.relation.data()
     });
@@ -344,8 +348,8 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
     //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
-    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
-    //gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 #ifdef DEBUG_INTERMEDIATE_STATE
     cudaDeviceSynchronize();
