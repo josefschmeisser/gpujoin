@@ -30,6 +30,8 @@
 
 #include "tpch_14_common.cuh"
 
+#include "prefix_scan_state.h"
+
 /*
 TODO
 */
@@ -298,22 +300,51 @@ template __global__ void test_kernel<no_op_type>();
 
 
 
+struct partitioned_index_join_args {
+    // Input
+    const lineitem_table_plain_t lineitem;
+    const size_t lineitem_size;
+    const void* index_structure;
+
+    std::size_t const canonical_chunk_length; // TODO needed?
+    uint32_t const padding_length;
+    uint32_t const radix_bits;
+    uint32_t const ignore_bits;
+    // State
+    std::tuple<> materialized;
+
+
+
+    ScanState<unsigned long long> *const prefix_scan_state;
+    unsigned long long *const __restrict__ tmp_partition_offsets;
+
+
+
+    // Output
+    int64_t* global_numerator;
+    int64_t* global_denominator;
+};
 
 
 template<class IndexStructureType>
-__global__ void ij_(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
+//__global__ void partitioned_ij_scan(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
+__global__ void partitioned_ij_scan(partitioned_index_join_args& args) {
+
+    const auto* __restrict__ l_shipdate = args.lineitem.l_shipdate;
+    const auto* __restrict__ l_extendedprice = args.lineitem.l_extendedprice;
+    const auto* __restrict__ l_discount = args.lineitem.l_discount;
+    const auto* __restrict__ l_partkey = args.lineitem.l_partkey;
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size; i += stride) {
-        if (lineitem->l_shipdate[i] < lower_shipdate ||
-            lineitem->l_shipdate[i] >= upper_shipdate) {
+    for (int i = index; i < args.lineitem_size; i += stride) {
+        if (l_shipdate[i] < lower_shipdate ||
+            l_shipdate[i] >= upper_shipdate) {
             continue;
         }
 
-        const auto extendedprice = lineitem->l_extendedprice[i];
-        const auto discount = lineitem->l_discount[i];
-        const auto summand = extendedprice * (100 - discount);
+        const auto summand = l_extendedprice[i] * (100 - l_discount[i]);
+        const auto partkey = l_partkey[i];
 
         // TODO materialize
 
@@ -322,15 +353,25 @@ __global__ void ij_(const lineitem_table_plain_t* __restrict__ lineitem, const u
     // TODO compute prefix sum
 }
 
+
+template __global__ void partitioned_ij_scan<btree_type>();
+template __global__ void partitioned_ij_scan<harmonia_type>();
+template __global__ void partitioned_ij_scan<lower_bound_type>();
+template __global__ void partitioned_ij_scan<radix_spline_type>();
+template __global__ void partitioned_ij_scan<no_op_type>();
+
+
+
+/*
 struct JoinEntry {
     unsigned lineitem_tid;
     unsigned part_tid;
 };
 __device__ unsigned output_index = 0;
-
+*/
 
 template<class IndexStructureType>
-__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
+__global__ void partitioned_ij_lookup(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int i = index; i < lineitem_size + 31; i += stride) {
