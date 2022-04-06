@@ -304,6 +304,7 @@ struct partitioned_index_join_args {
     // Input
     const lineitem_table_plain_t lineitem;
     const size_t lineitem_size;
+    const part_table_plain_t part;
     const void* index_structure;
 
     std::size_t const canonical_chunk_length; // TODO needed?
@@ -371,14 +372,19 @@ __device__ unsigned output_index = 0;
 */
 
 template<class IndexStructureType>
-__global__ void partitioned_ij_lookup(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
+//__global__ void partitioned_ij_lookup(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
+__global__ void partitioned_ij_lookup(partitioned_index_join_args& args) {
+    int64_t numerator = 0;
+    int64_t denominator = 0;
+
+    const auto* __restrict__ p_type = args.part.p_type;
+
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size + 31; i += stride) {
+    for (int i = index; i < args.lineitem_size + 31; i += stride) {
         payload_t payload = invalid_tid;
-        if (i < lineitem_size &&
-            lineitem->l_shipdate[i] >= lower_shipdate &&
-            lineitem->l_shipdate[i] < upper_shipdate) {
+
+        if (...) {
             payload = index_structure.lookup(lineitem->l_partkey[i]);
         }
 
@@ -402,5 +408,33 @@ __global__ void partitioned_ij_lookup(const lineitem_table_plain_t* __restrict__
             join_entry.lineitem_tid = i;
             join_entry.part_tid = payload;
         }
+    }
+
+
+        size_t part_tid;
+        bool match = ht.lookup(lineitem->l_partkey[i], part_tid);
+        // TODO use lane refill
+        if (match) {
+            const auto extendedprice = lineitem->l_extendedprice[i];
+            const auto discount = lineitem->l_discount[i];
+            const auto summand = extendedprice * (100 - discount);
+            sum2 += summand;
+
+            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
+            if (device_strcmp(type, prefix, 5) == 0) {
+                sum1 += summand;
+            }
+        }
+    }
+
+    // reduce both sums
+    #pragma unroll
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        sum1 += __shfl_down_sync(FULL_MASK, numerator, offset);
+        sum2 += __shfl_down_sync(FULL_MASK, denomiator, offset);
+    }
+    if (lane_id() == 0) {
+        atomicAdd((unsigned long long int*)args.global_numerator, (unsigned long long int)numerator);
+        atomicAdd((unsigned long long int*)args.global_denominator, (unsigned long long int)denomiator);
     }
 }
