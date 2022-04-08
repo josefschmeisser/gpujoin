@@ -30,7 +30,10 @@
 
 #include "tpch_14_common.cuh"
 
-#include "prefix_scan_state.h"
+//#include "prefix_scan_state.h"
+#include <prefix_scan_state.h>
+
+#include "cuda_utils.cuh"
 
 /*
 TODO
@@ -312,9 +315,12 @@ struct partitioned_index_join_args {
     uint32_t const radix_bits;
     uint32_t const ignore_bits;
     // State
-    std::tuple<> materialized;
-
-
+    std::tuple<
+        decltype(lineitem.l_extendedprice),
+        decltype(lineitem.l_discount),
+        decltype(lineitem.l_partkey)
+        >* materialized;
+    uint32_t* materialized_size;
 
     ScanState<unsigned long long> *const prefix_scan_state;
     unsigned long long *const __restrict__ tmp_partition_offsets;
@@ -327,8 +333,56 @@ struct partitioned_index_join_args {
 };
 
 
-template<class IndexStructureType>
+//template<class IndexStructureType>
 //__global__ void partitioned_ij_scan(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
+__global__ void partitioned_ij_scan(partitioned_index_join_args args) {
+
+    const auto* __restrict__ l_shipdate = args.lineitem.l_shipdate;
+    const auto* __restrict__ l_extendedprice = args.lineitem.l_extendedprice;
+    const auto* __restrict__ l_discount = args.lineitem.l_discount;
+    const auto* __restrict__ l_partkey = args.lineitem.l_partkey;
+
+    const unsigned my_lane = lane_id();
+
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < args.lineitem_size + 31; i += stride) {
+        bool active = i < args.lineitem_size;
+
+        // evaluate predicate
+        active = (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
+
+        const auto summand = l_extendedprice[i] * (100 - l_discount[i]);
+        const auto partkey = l_partkey[i];
+
+        // TODO materialize
+
+        // determine all threads with matching tuples
+        uint32_t mask = __ballot_sync(FULL_MASK, active);
+        const auto count = __popc(mask);
+        if (count < 1) continue;
+
+        // update global buffer index
+        const uint32_t right = __funnelshift_l(FULL_MASK, 0, my_lane);
+        const unsigned offset = __popc(mask & right);
+        uint32_t base = 0;
+        if (my_lane == 0) {
+            base = atomicAdd(args.materialized_size, count);
+        }
+        base = __shfl_sync(FULL_MASK, base, 0);
+
+        if (active) {
+//            printf("lane %u store to: %u\n", my_lane, base + offset);
+            auto& tuple = args.materialized[base + offset];
+            std::get<0>(tuple) = summand; // FIXME
+            std::get<1>(tuple) = partkey; // FIXME
+        }
+    }
+
+    // TODO compute prefix sum
+}
+
+#if 0
 __global__ void partitioned_ij_scan(partitioned_index_join_args& args) {
 
     const auto* __restrict__ l_shipdate = args.lineitem.l_shipdate;
@@ -336,31 +390,54 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args& args) {
     const auto* __restrict__ l_discount = args.lineitem.l_discount;
     const auto* __restrict__ l_partkey = args.lineitem.l_partkey;
 
+    const unsigned my_lane = lane_id();
+
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < args.lineitem_size; i += stride) {
-        if (l_shipdate[i] < lower_shipdate ||
-            l_shipdate[i] >= upper_shipdate) {
-            continue;
-        }
+    for (int i = index; i < args.lineitem_size + 31; i += stride) {
+        bool active = i < args.lineitem_size;
+
+        // evaluate predicate
+        active = (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
 
         const auto summand = l_extendedprice[i] * (100 - l_discount[i]);
         const auto partkey = l_partkey[i];
 
         // TODO materialize
 
+        // determine all threads with matching tuples
+        uint32_t mask = __ballot_sync(FULL_MASK, active);
+        const auto count = __popc(mask);
+        if (count < 1) continue;
+
+        // update global buffer index
+        const uint32_t right = __funnelshift_l(FULL_MASK, 0, my_lane);
+        const unsigned offset = __popc(mask & right);
+        uint32_t base = 0;
+        if (my_lane == 0) {
+            base = atomicAdd(args.materialized_size, count);
+        }
+        base = __shfl_sync(FULL_MASK, base, 0);
+
+        if (active) {
+//            printf("lane %u store to: %u\n", my_lane, base + offset);
+            auto& join_entry = join_entries[base + offset];
+            join_entry.lineitem_tid = i;
+            join_entry.part_tid = payload;
+        }
     }
 
     // TODO compute prefix sum
 }
+#endif
 
-
+/*
 template __global__ void partitioned_ij_scan<btree_type>();
 template __global__ void partitioned_ij_scan<harmonia_type>();
 template __global__ void partitioned_ij_scan<lower_bound_type>();
 template __global__ void partitioned_ij_scan<radix_spline_type>();
 template __global__ void partitioned_ij_scan<no_op_type>();
-
+*/
 
 
 /*
@@ -373,7 +450,7 @@ __device__ unsigned output_index = 0;
 
 template<class IndexStructureType>
 //__global__ void partitioned_ij_lookup(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
-__global__ void partitioned_ij_lookup(partitioned_index_join_args& args) {
+__global__ void partitioned_ij_lookup(partitioned_index_join_args args) {
     int64_t numerator = 0;
     int64_t denominator = 0;
 
@@ -381,6 +458,7 @@ __global__ void partitioned_ij_lookup(partitioned_index_join_args& args) {
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
+/*
     for (int i = index; i < args.lineitem_size + 31; i += stride) {
         payload_t payload = invalid_tid;
 
@@ -389,25 +467,6 @@ __global__ void partitioned_ij_lookup(partitioned_index_join_args& args) {
         }
 
         int match = payload != invalid_tid;
-        unsigned mask = __ballot_sync(FULL_MASK, match);
-        unsigned my_lane = lane_id();
-        unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
-//        printf("right %u\n", right);
-        unsigned offset = __popc(mask & right);
-
-        unsigned base = 0;
-        int leader = __ffs(mask) - 1;
-        if (my_lane == leader) {
-            base = atomicAdd(&output_index, __popc(mask));
-        }
-        base = __shfl_sync(FULL_MASK, base, leader);
-
-        if (match) {
-//            printf("lane %u store to: %u\n", my_lane, base + offset);
-            auto& join_entry = join_entries[base + offset];
-            join_entry.lineitem_tid = i;
-            join_entry.part_tid = payload;
-        }
     }
 
 
@@ -425,16 +484,22 @@ __global__ void partitioned_ij_lookup(partitioned_index_join_args& args) {
                 sum1 += summand;
             }
         }
-    }
+    }*/
 
     // reduce both sums
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        sum1 += __shfl_down_sync(FULL_MASK, numerator, offset);
-        sum2 += __shfl_down_sync(FULL_MASK, denomiator, offset);
+        numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
+        denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
     }
     if (lane_id() == 0) {
         atomicAdd((unsigned long long int*)args.global_numerator, (unsigned long long int)numerator);
-        atomicAdd((unsigned long long int*)args.global_denominator, (unsigned long long int)denomiator);
+        atomicAdd((unsigned long long int*)args.global_denominator, (unsigned long long int)denominator);
     }
 }
+
+template __global__ void partitioned_ij_lookup<btree_type>(partitioned_index_join_args args);
+template __global__ void partitioned_ij_lookup<harmonia_type>(partitioned_index_join_args args);
+template __global__ void partitioned_ij_lookup<lower_bound_type>(partitioned_index_join_args args);
+template __global__ void partitioned_ij_lookup<radix_spline_type>(partitioned_index_join_args args);
+template __global__ void partitioned_ij_lookup<no_op_type>(partitioned_index_join_args args);
