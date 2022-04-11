@@ -303,10 +303,10 @@ template __global__ void test_kernel<no_op_type>();
 
 
 struct materialized_tuple {
-    decltype(lineitem_table_plain_t::l_extendedprice) summand;
-    //decltype(lineitem_table_plain_t::l_extendedprice) l_extendedprice;
-    //decltype(lineitem_table_plain_t::l_discount) l_discount;
-    decltype(lineitem_table_plain_t::l_partkey) l_partkey;
+    decltype(*lineitem_table_plain_t::l_extendedprice) summand;
+    //decltype(*lineitem_table_plain_t::l_extendedprice) l_extendedprice;
+    //decltype(*lineitem_table_plain_t::l_discount) l_discount;
+    decltype(*lineitem_table_plain_t::l_partkey) l_partkey;
 };
 
 struct partitioned_index_join_args {
@@ -321,11 +321,13 @@ struct partitioned_index_join_args {
     uint32_t const radix_bits;
     uint32_t const ignore_bits;
     // State
+    /*
     std::tuple<
         decltype(lineitem.l_extendedprice),
         decltype(lineitem.l_discount),
         decltype(lineitem.l_partkey)
-        >* materialized;
+        >* __restrict__ materialized;*/
+    materialized_tuple* __restrict__ materialized;
     uint32_t* materialized_size;
 
     ScanState<unsigned long long> *const prefix_scan_state;
@@ -370,7 +372,7 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args args) {
 
         // update global buffer index
         const uint32_t right = __funnelshift_l(FULL_MASK, 0, my_lane);
-        const unsigned offset = __popc(mask & right);
+        const unsigned thread_offset = __popc(mask & right);
         uint32_t base = 0;
         if (my_lane == 0) {
             base = atomicAdd(args.materialized_size, count);
@@ -379,9 +381,13 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args args) {
 
         if (active) {
 //            printf("lane %u store to: %u\n", my_lane, base + offset);
-            auto& tuple = args.materialized[base + offset];
+            auto& tuple = args.materialized[base + thread_offset];
+/*
             std::get<0>(tuple) = summand; // FIXME
             std::get<1>(tuple) = partkey; // FIXME
+*/
+            tuple.summand = summand;
+            tuple.l_partkey = partkey;
         }
     }
 
@@ -454,14 +460,14 @@ __global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
         const unsigned thread_offset = __popc(mask & right_mask);
         uint32_t base = warp_id * per_warp_buffer_size;
         if (my_lane == 0) {
-            base += atomicAdd(buffer_count, count);
+            base += atomicAdd(&buffer_count, count);
         }
         base = __shfl_sync(FULL_MASK, base, 0);
 
         if (active) {
             auto& tuple = tuple_buffer[base + thread_offset];
             tuple.summand = summand;
-            tuple.l_partkey = l_partkey;
+            tuple.l_partkey = partkey;
         }
     }
 
@@ -477,15 +483,16 @@ __global__ void partitioned_ij_lookup(partitioned_index_join_args args) {
     int64_t denominator = 0;
 
     const auto* __restrict__ p_type = args.part.p_type;
-
+/*
     const auto* __restrict__ l_partkey = args.materialized.l_partkey; // TODO
     const auto* __restrict__ summand = args.materialized.l_partkey; // TODO
-
+*/
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
 
-    for (int i = index; i < args.materialized_size + 31; i += stride) {
+    const auto materialized_size = *args.materialized_size;
+    for (int i = index; i < materialized_size + 31; i += stride) {
         bool active = i < args.lineitem_size;
 
         payload_t part_tid = args.index_structure.cooperative_lookup(l_partkey[i]);
@@ -498,9 +505,11 @@ __global__ void partitioned_ij_lookup(partitioned_index_join_args args) {
 
             const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
             if (device_strcmp(type, prefix, 5) == 0) {
-                sum1 += summand;
+                numerator += summand;
             }
-        } else 
+        } else {
+            assert(false);
+        }
     }
 
     // reduce both sums
