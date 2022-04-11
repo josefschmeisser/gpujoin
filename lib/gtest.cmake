@@ -21,9 +21,9 @@ ExternalProject_Add(
     PREFIX "google/gtm"
     SOURCE_DIR "google/gtm/src/googletest/googletest"
     CMAKE_ARGS
-        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
+        "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+        "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS} -Wno-error=maybe-uninitialized"
     DOWNLOAD_COMMAND ""
     UPDATE_COMMAND ""
     INSTALL_COMMAND ""
@@ -35,9 +35,9 @@ ExternalProject_Add(
     PREFIX "google/gtm"
     SOURCE_DIR "google/gtm/src/googletest/googlemock"
     CMAKE_ARGS
-        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
-        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}
+        "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+        "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS} -Wno-error=maybe-uninitialized"
     DOWNLOAD_COMMAND ""
     UPDATE_COMMAND ""
     INSTALL_COMMAND ""
