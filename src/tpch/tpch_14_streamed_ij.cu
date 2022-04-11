@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "config.hpp"
 
 #if 0
 #include <algorithm>
@@ -301,7 +302,12 @@ template __global__ void test_kernel<radix_spline_type>();
 template __global__ void test_kernel<no_op_type>();
 
 
-
+struct materialized_tuple {
+    decltype(lineitem_table_plain_t::l_extendedprice) summand;
+    //decltype(lineitem_table_plain_t::l_extendedprice) l_extendedprice;
+    //decltype(lineitem_table_plain_t::l_discount) l_discount;
+    decltype(lineitem_table_plain_t::l_partkey) l_partkey;
+};
 
 struct partitioned_index_join_args {
     // Input
@@ -382,8 +388,12 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args args) {
     // TODO compute prefix sum
 }
 
-#if 0
-__global__ void partitioned_ij_scan(partitioned_index_join_args& args) {
+__global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
+    static constexpr unsigned tuples_per_thread = 2;
+    //static constexpr unsigned per_warp_buffer_size = 32 * (tuples_per_thread + 1);
+    static constexpr unsigned per_warp_buffer_size = 32 * tuples_per_thread;
+
+    extern __shared__ uint32_t shared_mem[];
 
     const auto* __restrict__ l_shipdate = args.lineitem.l_shipdate;
     const auto* __restrict__ l_extendedprice = args.lineitem.l_extendedprice;
@@ -391,6 +401,13 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args& args) {
     const auto* __restrict__ l_partkey = args.lineitem.l_partkey;
 
     const unsigned my_lane = lane_id();
+
+    const unsigned warp_id = (threadIdx.x / 32);
+
+    //static constexpr 
+    //decltype(args.lineitem.l_partkey)* partkey_buffer = reinterpret_cast<decltype(args.lineitem.l_partkey)*>(shared_mem) + (warp_id * 32);
+    materialized_tuple* tuple_buffer = reinterpret_cast<materialized_tuple*>(shared_mem) + (warp_id * per_warp_buffer_size);
+    unsigned buffer_count = 0;
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -410,81 +427,81 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args& args) {
         const auto count = __popc(mask);
         if (count < 1) continue;
 
-        // update global buffer index
-        const uint32_t right = __funnelshift_l(FULL_MASK, 0, my_lane);
-        const unsigned offset = __popc(mask & right);
-        uint32_t base = 0;
+        // flush buffer
+        if (count + buffer_count > per_warp_buffer_size) {
+            // reserve space in global materialization buffer
+            uint32_t base;
+            if (my_lane == 0) {
+                base = atomicAdd(args.materialized_size, buffer_count);
+            }
+            base = __shfl_sync(FULL_MASK, base, 0);
+
+            // materialize into global buffer
+            for (unsigned j = 0; j < tuples_per_thread; ++j) {
+                unsigned thread_offset = j * (tuples_per_thread * 32) + my_lane;
+                const auto& src_tuple = tuple_buffer[thread_offset];
+                auto& dst_tuple = args.materialized[base + thread_offset];
+                dst_tuple.summand = src_tuple.summand;
+                dst_tuple.l_partkey = src_tuple.summand;
+            }
+
+            // reset buffer count
+            buffer_count = 0;
+        }
+
+        // update warp buffer index
+        const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, my_lane);
+        const unsigned thread_offset = __popc(mask & right_mask);
+        uint32_t base = warp_id * per_warp_buffer_size;
         if (my_lane == 0) {
-            base = atomicAdd(args.materialized_size, count);
+            base += atomicAdd(buffer_count, count);
         }
         base = __shfl_sync(FULL_MASK, base, 0);
 
         if (active) {
-//            printf("lane %u store to: %u\n", my_lane, base + offset);
-            auto& join_entry = join_entries[base + offset];
-            join_entry.lineitem_tid = i;
-            join_entry.part_tid = payload;
+            auto& tuple = tuple_buffer[base + thread_offset];
+            tuple.summand = summand;
+            tuple.l_partkey = l_partkey;
         }
     }
 
     // TODO compute prefix sum
 }
-#endif
-
-/*
-template __global__ void partitioned_ij_scan<btree_type>();
-template __global__ void partitioned_ij_scan<harmonia_type>();
-template __global__ void partitioned_ij_scan<lower_bound_type>();
-template __global__ void partitioned_ij_scan<radix_spline_type>();
-template __global__ void partitioned_ij_scan<no_op_type>();
-*/
-
-
-/*
-struct JoinEntry {
-    unsigned lineitem_tid;
-    unsigned part_tid;
-};
-__device__ unsigned output_index = 0;
-*/
 
 template<class IndexStructureType>
 //__global__ void partitioned_ij_lookup(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
 __global__ void partitioned_ij_lookup(partitioned_index_join_args args) {
+    const char* prefix = "PROMO";
+
     int64_t numerator = 0;
     int64_t denominator = 0;
 
     const auto* __restrict__ p_type = args.part.p_type;
 
+    const auto* __restrict__ l_partkey = args.materialized.l_partkey; // TODO
+    const auto* __restrict__ summand = args.materialized.l_partkey; // TODO
+
+
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-/*
-    for (int i = index; i < args.lineitem_size + 31; i += stride) {
-        payload_t payload = invalid_tid;
 
-        if (...) {
-            payload = index_structure.lookup(lineitem->l_partkey[i]);
-        }
+    for (int i = index; i < args.materialized_size + 31; i += stride) {
+        bool active = i < args.lineitem_size;
 
-        int match = payload != invalid_tid;
-    }
+        payload_t part_tid = args.index_structure.cooperative_lookup(l_partkey[i]);
 
-
-        size_t part_tid;
-        bool match = ht.lookup(lineitem->l_partkey[i], part_tid);
-        // TODO use lane refill
-        if (match) {
+        if (part_tid != invalid_tid) {/*
             const auto extendedprice = lineitem->l_extendedprice[i];
             const auto discount = lineitem->l_discount[i];
-            const auto summand = extendedprice * (100 - discount);
-            sum2 += summand;
+            const auto summand = extendedprice * (100 - discount);*/
+            denominator += summand[i];
 
-            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
+            const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
             if (device_strcmp(type, prefix, 5) == 0) {
                 sum1 += summand;
             }
-        }
-    }*/
+        } else 
+    }
 
     // reduce both sums
     #pragma unroll
