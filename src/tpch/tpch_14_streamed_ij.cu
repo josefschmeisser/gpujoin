@@ -35,6 +35,8 @@
 #include <prefix_scan_state.h>
 
 #include "cuda_utils.cuh"
+//#include "cuda_utils.cu" // FIXME
+
 
 /*
 TODO
@@ -303,10 +305,10 @@ template __global__ void test_kernel<no_op_type>();
 
 
 struct materialized_tuple {
-    decltype(*lineitem_table_plain_t::l_extendedprice) summand;
+    std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>::type summand;
     //decltype(*lineitem_table_plain_t::l_extendedprice) l_extendedprice;
     //decltype(*lineitem_table_plain_t::l_discount) l_discount;
-    decltype(*lineitem_table_plain_t::l_partkey) l_partkey;
+    std::remove_pointer<decltype(lineitem_table_plain_t::l_partkey)>::type l_partkey;
 };
 
 struct partitioned_index_join_args {
@@ -475,8 +477,7 @@ __global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
 }
 
 template<class IndexStructureType>
-//__global__ void partitioned_ij_lookup(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, JoinEntry* __restrict__ join_entries) {
-__global__ void partitioned_ij_lookup(partitioned_index_join_args args) {
+__global__ void partitioned_ij_lookup(const partitioned_index_join_args args, const IndexStructureType index_structure) {
     const char* prefix = "PROMO";
 
     int64_t numerator = 0;
@@ -495,13 +496,21 @@ __global__ void partitioned_ij_lookup(partitioned_index_join_args args) {
     for (int i = index; i < materialized_size + 31; i += stride) {
         bool active = i < args.lineitem_size;
 
-        payload_t part_tid = args.index_structure.cooperative_lookup(l_partkey[i]);
+        decltype(materialized_tuple::l_partkey) partkey;
+        decltype(materialized_tuple::summand) summand;
+        if (active) {
+            const auto& tuple = args.materialized[i];
+            partkey = tuple.l_partkey;
+            summand = tuple.summand;
+        }
+
+        payload_t part_tid = index_structure.cooperative_lookup(active, partkey);
 
         if (part_tid != invalid_tid) {/*
             const auto extendedprice = lineitem->l_extendedprice[i];
             const auto discount = lineitem->l_discount[i];
             const auto summand = extendedprice * (100 - discount);*/
-            denominator += summand[i];
+            denominator += summand;
 
             const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
             if (device_strcmp(type, prefix, 5) == 0) {
@@ -524,8 +533,8 @@ __global__ void partitioned_ij_lookup(partitioned_index_join_args args) {
     }
 }
 
-template __global__ void partitioned_ij_lookup<btree_type>(partitioned_index_join_args args);
-template __global__ void partitioned_ij_lookup<harmonia_type>(partitioned_index_join_args args);
-template __global__ void partitioned_ij_lookup<lower_bound_type>(partitioned_index_join_args args);
-template __global__ void partitioned_ij_lookup<radix_spline_type>(partitioned_index_join_args args);
-template __global__ void partitioned_ij_lookup<no_op_type>(partitioned_index_join_args args);
+template __global__ void partitioned_ij_lookup<btree_type::device_index_t>(const partitioned_index_join_args args, const btree_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<harmonia_type::device_index_t>(const partitioned_index_join_args args, const harmonia_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<lower_bound_type::device_index_t>(const partitioned_index_join_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<radix_spline_type::device_index_t>(const partitioned_index_join_args args, const radix_spline_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<no_op_type::device_index_t>(const partitioned_index_join_args args, const no_op_type::device_index_t index_structure);
