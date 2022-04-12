@@ -35,8 +35,6 @@
 #include <prefix_scan_state.h>
 
 #include "cuda_utils.cuh"
-//#include "cuda_utils.cu" // FIXME
-
 
 /*
 TODO

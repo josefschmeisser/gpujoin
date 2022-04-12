@@ -4,8 +4,6 @@
 #include "cuda_utils.cuh"
 #include "LinearProbingHashTable.cuh"
 
-#include "cuda_utils.cu" // FIXME use relocatable compilation
-
 __device__ unsigned int count = 0;
 __managed__ int tupleCount;
 
