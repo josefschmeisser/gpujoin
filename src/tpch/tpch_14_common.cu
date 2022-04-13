@@ -183,6 +183,107 @@ __global__ void test_kernel();
 
 template<class IndexType>
 struct streamed_ij_approach {
+    static constexpr unsigned num_streams = 2;
+
+    struct stream_state {
+        cudaStream_t stream;
+/*
+        device_array_wrapper<int32_t> d_payloads;
+        device_array_wrapper<index_key_t> d_dst_partition_attr;
+        device_array_wrapper<int32_t> d_dst_payload_attrs;
+        device_array_wrapper<value_t> d_dst_tids;
+        device_array_wrapper<uint32_t> d_task_assignment;
+*/
+        device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
+
+        partition_offsets partition_offsets_inst;
+        partitioned_relation<Tuple<index_key_t, int32_t>> partitioned_relation_inst;
+
+        std::unique_ptr<PrefixSumArgs> prefix_sum_and_copy_args;
+        std::unique_ptr<RadixPartitionArgs> radix_partition_args;
+        std::unique_ptr<PartitionedLookupArgs> partitioned_lookup_args;
+    } stream_states[num_streams];
+
+    streamed_ij_approach() {
+        device_allocator_t<int> device_allocator;
+        auto state = std::make_unique<stream_state>();
+        CubDebugExit(cudaStreamCreate(&state->stream));
+
+        state->num_lookups = num_lookups;
+
+        // dummy payloads
+        //state->d_payloads = create_device_array<int32_t>(num_lookups);
+
+        // initialize payloads
+        {
+            std::vector<int32_t> payloads;
+            payloads.resize(num_lookups);
+            std::iota(payloads.begin(), payloads.end(), 0);
+            state->d_payloads = create_device_array_from(payloads, device_allocator);
+        }
+
+        // allocate output arrays
+        state->d_dst_partition_attr = create_device_array<index_key_t>(num_lookups);
+        state->d_dst_payload_attrs = create_device_array<int32_t>(num_lookups);
+        //state->d_dst_tids = create_device_array<value_t>(num_lookups);
+        state->d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
+
+        // see: device_exclusive_prefix_sum_initialize
+        const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, block_size);
+        state->d_prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
+
+        state->partition_offsets_inst = partition_offsets(grid_size, radix_bits, device_allocator);
+        state->partitioned_relation_inst = partitioned_relation<Tuple<index_key_t, int32_t>>(num_lookups, grid_size, radix_bits, device_allocator);
+
+        state->prefix_sum_and_copy_args = std::unique_ptr<PrefixSumArgs>(new PrefixSumArgs {
+            // Inputs
+            d_lookup_keys,
+            num_lookups,
+            0, // not used
+            state->partitioned_relation_inst.padding_length(),
+            radix_bits,
+            ignore_bits,
+            // State
+            state->d_prefix_scan_state.data(),
+            state->partition_offsets_inst.local_offsets.data(),
+            // Outputs
+            state->partition_offsets_inst.offsets.data()
+        });
+
+        state->radix_partition_args = std::unique_ptr<RadixPartitionArgs>(new RadixPartitionArgs {
+            // Inputs
+            d_lookup_keys,
+            state->d_payloads.data(),
+            num_lookups,
+            state->partitioned_relation_inst.padding_length(),
+            radix_bits,
+            ignore_bits,
+            state->partition_offsets_inst.local_offsets.data(),
+            //state->partition_offsets_inst.offsets.data(),
+            // State
+            nullptr, // tmp_partition_offsets - used by gpu_chunked_sswwc_radix_partition_v2
+            nullptr, // l2_cache_buffers - only used by gpu_chunked_sswwc_radix_partition_v2g
+            nullptr, // device_memory_buffers - only used by gpu_chunked_hsswwc_* kernels
+            0, // device_memory_buffer_bytes - only used by gpu_chunked_hsswwc_* kernels
+            // Outputs
+            state->partitioned_relation_inst.relation.data()
+        });
+
+        state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
+            state->partitioned_relation_inst.relation.data(),
+            static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
+            state->partitioned_relation_inst.padding_length(),
+            state->partition_offsets_inst.offsets.data(),
+            state->d_task_assignment.data(),
+            radix_bits,
+            ignore_bits,
+            //state->d_dst_tids.data()
+            d_dst_tids
+        });
+
+        return state;
+    }
+
     void operator()(query_data& d) {
         using namespace std;
 
@@ -209,9 +310,61 @@ struct streamed_ij_approach {
         std::cout << "kernel time: " << kernelTime << " ms\n";
 #endif
 
+/*
         //ij_join_streamed_btree<<<1, 32>>>(d.index_structure->device_index);
         test_kernel<IndexType><<<1, 32>>>();
+        cudaDeviceSynchronize();*/
+
+        //////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+        // calculate prefix sum kernel shared memory requirement
+        const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
+#ifdef DEBUG_INTERMEDIATE_STATE
+        printf("required_shared_mem_bytes %lu\n", required_shared_mem_bytes);
+#endif
+        assert(required_shared_mem_bytes <= device_properties.sharedMemPerBlock);
+
+        // prepare kernel arguments
+        void* args[1];
+        args[0] = state.prefix_sum_and_copy_args.get();
+
+        // calculate prefix sum
+        CubDebugExit(cudaLaunchCooperativeKernel(
+            (void*)gpu_contiguous_prefix_sum_int32,
+            dim3(grid_size),
+            dim3(block_size),
+            args,
+            required_shared_mem_bytes,
+            state.stream
+        ));
+#ifdef DEBUG_INTERMEDIATE_STATE
         cudaDeviceSynchronize();
+        auto r = state.partition_offsets_inst.offsets.to_host_accessible();
+        std::cout << "offsets: " << stringify(r.data(), r.data() + state.partition_offsets_inst.local_offsets.size()) << std::endl;
+#endif
+
+        // calculate radix partition kernel shared memory requirement
+        const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
+
+        //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
+        //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+
+#ifdef DEBUG_INTERMEDIATE_STATE
+        cudaDeviceSynchronize();
+        auto r2 = state.partitioned_relation_inst.relation.to_host_accessible();
+        std::cout << "result: " << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
+        dump_partitions(state);
+#endif
+
+        partitioned_lookup_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_lookup_args);
+#ifdef DEBUG_INTERMEDIATE_STATE
+        cudaDeviceSynchronize();
+        dump_task_assignment(state);
+#endif
+
+        partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
     }
 };
 
@@ -222,7 +375,7 @@ static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>
     { "streamed_ij", std::make_shared<approach_dispatcher<streamed_ij_approach>>() }
 };
 
-void execute_approach(std::string approach) {
+void execute_approach(std::string approach_name) {
     auto& config = get_experiment_config();
 
     query_data qd;
@@ -234,6 +387,6 @@ void execute_approach(std::string approach) {
     const auto experiment_desc = create_experiment_description();
     index_type_enum index_type = parse_index_type(config.index_type);
     measure(experiment_desc, [&]() {
-        approaches.at(approach)->run(qd, index_type);
+        approaches.at(approach_name)->run(qd, index_type);
     });
 }
