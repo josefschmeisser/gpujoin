@@ -30,67 +30,19 @@
 
 using namespace cub;
 
+/*
 static const uint32_t lower_shipdate = 2449962; // 1995-09-01
 static const uint32_t upper_shipdate = 2449992; // 1995-10-01
 static const uint32_t invalid_tid __attribute__((unused)) = std::numeric_limits<uint32_t>::max();
+*/
 
 __device__ unsigned int count = 0;
 __managed__ int tupleCount;
 
-using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
-
-__global__ void hj_build_kernel(size_t n, const part_table_plain_t* part, device_ht_t ht) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-    for (size_t i = index; i < n; i += stride) {
-        ht.insert(part->p_partkey[i], i);
-    }
-}
 
 __managed__ int64_t globalSum1 = 0;
 __managed__ int64_t globalSum2 = 0;
 
-__global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__ part, const lineitem_table_plain_t* __restrict__ lineitem, device_ht_t ht) {
-    const char* prefix = "PROMO";
-
-    int64_t sum1 = 0;
-    int64_t sum2 = 0;
-
-    const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < n; i += stride) {
-        if (lineitem->l_shipdate[i] < lower_shipdate ||
-            lineitem->l_shipdate[i] >= upper_shipdate) {
-            continue;
-        }
-
-        size_t part_tid;
-        bool match = ht.lookup(lineitem->l_partkey[i], part_tid);
-        // TODO use lane refill
-        if (match) {
-            const auto extendedprice = lineitem->l_extendedprice[i];
-            const auto discount = lineitem->l_discount[i];
-            const auto summand = extendedprice * (100 - discount);
-            sum2 += summand;
-
-            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
-            if (device_strcmp(type, prefix, 5) == 0) {
-                sum1 += summand;
-            }
-        }
-    }
-
-    // reduce both sums
-    #pragma unroll
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
-        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
-    }
-    if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
-        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
-    }
-}
 
 template<class IndexStructureType>
 __global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
@@ -135,6 +87,14 @@ __global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ linei
     }
 }
 
+template __global__ void ij_plain_kernel<btree_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const btree_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<harmonia_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const harmonia_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<lower_bound_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<radix_spline_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const radix_spline_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<no_op_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const no_op_type::device_index_t index_structure);
+
+// TODO port
+#if 0
 struct JoinEntry {
     unsigned lineitem_tid;
     unsigned part_tid;
@@ -1231,11 +1191,4 @@ __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineit
         atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
     }
 }
-
-/*
-// Exports the vanilla index join kernel for 8-byte keys.
-extern "C" __launch_bounds__(1024, 2) __global__ void gpu_chunked_prefix_sum_int32(PrefixSumArgs args) {
-  gpu_chunked_prefix_sum<int>(args);
-}
-*/
-
+#endif

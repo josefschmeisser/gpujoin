@@ -14,7 +14,12 @@ add_executable(cuda_tpch_1 tpch_1.cu)
 target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 
 # index join executable
-add_executable(cuda_tpch_14 tpch_14_new.cu tpch_14_common.cu tpch_14_hj.cu tpch_14_streamed_ij.cu) # ../cuda_utils.cu)
+add_executable(cuda_tpch_14 tpch_14_new.cu tpch_14_common.cu tpch_14_hj.cu tpch_14_ij.cu tpch_14_streamed_ij.cu)# ../cuda_utils.cu)
+target_include_directories(cuda_tpch_14 PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
+)
 target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
 # additional nvcc flags
 if(true)
