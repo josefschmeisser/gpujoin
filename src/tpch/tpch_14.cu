@@ -1,12 +1,6 @@
 #include <iostream>
 
 
-
-
-#ifdef USE_HJ
-
-#endif
-
     void run_ij() {
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 

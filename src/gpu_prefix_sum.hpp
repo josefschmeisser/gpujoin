@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <cuda_runtime.h>
+#include <cub/util_debug.cuh>
 
 namespace gpu_prefix_sum {
 

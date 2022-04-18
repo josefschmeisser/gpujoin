@@ -1,32 +1,9 @@
-#include <__clang_cuda_builtin_vars.h>
+#include "tpch_14_streamed_ij.cuh"
+
 #include "common.hpp"
 #include "config.hpp"
 
-#if 0
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <cstdio>
-#include <device_atomic_functions.h>
-#include <driver_types.h>
-#include <iostream>
-#include <iomanip>
-#include <limits>
-#include <cassert>
-#include <cstring>
-#include <chrono>
-#include <sys/types.h>
-#include <unordered_map>
 
-#include <cub/block/block_load.cuh>
-#include <cub/block/block_radix_sort.cuh>
-#include <vector>
-
-#include "cuda_utils.cuh"
-#include "cuda_allocator.hpp"
-#include "numa_allocator.hpp"
-#include "mmap_allocator.hpp"
-#endif
 #include "indexes.cuh"
 //#include "device_array.hpp"
 
@@ -35,9 +12,15 @@
 //#include "prefix_scan_state.h"
 #include <prefix_scan_state.h>
 
+
+//#include <numa-gpu/sql-ops/include/prefix_scan.h>
+
+
 #include <gpu_radix_partition.h>
 
 #include "cuda_utils.cuh"
+
+
 
 /*
 TODO
@@ -64,7 +47,7 @@ template __global__ void test_kernel<lower_bound_type>();
 template __global__ void test_kernel<radix_spline_type>();
 template __global__ void test_kernel<no_op_type>();
 
-
+#if 0
 struct materialized_tuple {
     std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>::type summand;
     //decltype(*lineitem_table_plain_t::l_extendedprice) l_extendedprice;
@@ -102,7 +85,7 @@ struct partitioned_index_join_args {
     int64_t* global_numerator;
     int64_t* global_denominator;
 };
-
+#endif
 
 //template<class IndexStructureType>
 //__global__ void partitioned_ij_scan(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
@@ -144,13 +127,12 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args args) {
 
         if (active) {
 //            printf("lane %u store to: %u\n", my_lane, base + offset);
-            auto& tuple = args.materialized[base + thread_offset];
 /*
-            std::get<0>(tuple) = summand; // FIXME
-            std::get<1>(tuple) = partkey; // FIXME
-*/
+            auto& tuple = args.materialized[base + thread_offset];
             tuple.summand = summand;
-            tuple.l_partkey = partkey;
+            tuple.l_partkey = partkey;*/
+            args.materialized.l_partkey[base + thread_offset] = partkey;
+            args.materialized.summand[base + thread_offset] = summand;
         }
     }
 
@@ -208,10 +190,12 @@ __global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
             // materialize into global buffer
             for (unsigned j = 0; j < tuples_per_thread; ++j) {
                 unsigned thread_offset = j * (tuples_per_thread * 32) + my_lane;
-                const auto& src_tuple = tuple_buffer[thread_offset];
+                const auto& src_tuple = tuple_buffer[thread_offset];/*
                 auto& dst_tuple = args.materialized[base + thread_offset];
                 dst_tuple.summand = src_tuple.summand;
-                dst_tuple.l_partkey = src_tuple.summand;
+                dst_tuple.l_partkey = src_tuple.summand;*/
+				args.materialized.l_partkey[base + thread_offset] = src_tuple.l_partkey;
+				args.materialized.summand[base + thread_offset] = src_tuple.summand;
             }
 
             // reset buffer count
@@ -259,10 +243,12 @@ __global__ void partitioned_ij_lookup(const partitioned_index_join_args args, co
 
         decltype(materialized_tuple::l_partkey) partkey;
         decltype(materialized_tuple::summand) summand;
-        if (active) {
+        if (active) {/*
             const auto& tuple = args.materialized[i];
             partkey = tuple.l_partkey;
-            summand = tuple.summand;
+            summand = tuple.summand;*/
+            partkey = args.materialized.l_partkey[i];
+            summand = args.materialized.summand[i];
         }
 
         payload_t part_tid = index_structure.cooperative_lookup(active, partkey);
@@ -300,18 +286,14 @@ template __global__ void partitioned_ij_lookup<lower_bound_type::device_index_t>
 template __global__ void partitioned_ij_lookup<radix_spline_type::device_index_t>(const partitioned_index_join_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void partitioned_ij_lookup<no_op_type::device_index_t>(const partitioned_index_join_args args, const no_op_type::device_index_t index_structure);
 
-
-
-/*
-// Exports the histogram function for 8-byte keys.
+#if 0
 extern "C" __launch_bounds__(1024, 2) __global__
-    void gpu_contiguous_prefix_sum_int32(PrefixSumArgs args) {
-  gpu_contiguous_prefix_sum<int>(args);
-}
-*/
+    void gpu_contiguous_prefix_sum_int32(PrefixSumArgs args);
+
 extern "C" __launch_bounds__(1024, 2) __global__ void intermediate_prefix_sum_int32(partitioned_index_join_args args) {
     // We keep the PrefixSumArgs in shared memory in order to avoid costly global memory derefenciations.
     // The only reason why we do not directly pass this struct during kernel invocation is that we have to derefence the size field of partitioned_index_join_args.
+ /*
     __shared__ PrefixSumArgs prefix_sum_args;
     if (threadIdx.x == 0) {
         prefix_sum_args.partition_attr = args.materialized->l_partkey;
@@ -323,8 +305,27 @@ extern "C" __launch_bounds__(1024, 2) __global__ void intermediate_prefix_sum_in
         prefix_sum_args.prefix_scan_state = args.prefix_scan_state;
         prefix_sum_args.tmp_partition_offsets = args.tmp_partition_offsets;
         prefix_sum_args.partition_offsets = args.partition_offsets;
-    }
+    }*/
+    
 
-    __syncthreads();
-    gpu_contiguous_prefix_sum<int>(prefix_sum_args);
+	//extern __shared__ uint8_t shared_mem[];
+	__shared__ uint8_t prefix_sum_args_mem[sizeof(PrefixSumArgs)];
+	const PrefixSumArgs& prefix_sum_args = *reinterpret_cast<PrefixSumArgs*>(prefix_sum_args_mem);
+    if (threadIdx.x == 0) {
+		new (reinterpret_cast<PrefixSumArgs*>(prefix_sum_args_mem)) PrefixSumArgs {
+			args.materialized.l_partkey,
+			*args.materialized_size,
+			args.canonical_chunk_length,
+			args.padding_length,
+			args.radix_bits,
+			args.ignore_bits,
+			args.prefix_scan_state,
+			args.tmp_partition_offsets,
+			args.partition_offsets
+		};
+	}
+
+    __syncthreads(); // FIXME use gridsync
+    gpu_contiguous_prefix_sum_int32<<<gridDim.x, blockDim.x>>>(prefix_sum_args);
 }
+#endif

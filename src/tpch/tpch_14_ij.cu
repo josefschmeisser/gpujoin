@@ -93,7 +93,7 @@ __global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__
 }
 
 template<class IndexStructureType>
-__global__ void ij_full_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
+__global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
     const char* prefix = "PROMO";
 
     int64_t sum1 = 0;
@@ -1232,7 +1232,10 @@ __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineit
     }
 }
 
+/*
 // Exports the vanilla index join kernel for 8-byte keys.
 extern "C" __launch_bounds__(1024, 2) __global__ void gpu_chunked_prefix_sum_int32(PrefixSumArgs args) {
   gpu_chunked_prefix_sum<int>(args);
 }
+*/
+

@@ -6,6 +6,10 @@
 #include <string>
 #include <memory>
 
+#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
+#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
+#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
+
 #include "config.hpp"
 #include "common.hpp"
 #include "device_properties.hpp"
@@ -13,6 +17,9 @@
 #include "utils.hpp"
 #include "LinearProbingHashTable.cuh"
 #include "measuring.hpp"
+
+#include "tpch_14_streamed_ij.cuh"
+#include "partitioned_relation.hpp"
 
 index_type_enum parse_index_type(const std::string& index_name) {
     if (index_name == "btree") {
@@ -179,11 +186,41 @@ struct hj_approach {
 };
 
 template<class IndexStructureType>
-__global__ void test_kernel();
+__global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure);
 
 template<class IndexType>
-struct streamed_ij_approach {
+struct ij_plain_approach {
+    void operator()(query_data& d) {
+        const auto& config = get_experiment_config();
+
+        const int num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
+        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+        ij_plain_kernel<<<num_blocks, config.block_size>>>(d.lineitem_device, d.lineitem_size, d.part_device, index_structure.device_index);
+        cudaDeviceSynchronize();
+    }
+};
+
+
+template<class IndexStructureType>
+__global__ void test_kernel();
+
+__global__ void partitioned_ij_scan_refill(partitioned_index_join_args args);
+/*
+template __global__ void partitioned_ij_lookup<btree_type::device_index_t>(const partitioned_index_join_args args, const btree_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<harmonia_type::device_index_t>(const partitioned_index_join_args args, const harmonia_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<lower_bound_type::device_index_t>(const partitioned_index_join_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<radix_spline_type::device_index_t>(const partitioned_index_join_args args, const radix_spline_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<no_op_type::device_index_t>(const partitioned_index_join_args args, const no_op_type::device_index_t index_structure);
+*/
+template<class IndexStructureType>
+__global__ void partitioned_ij_lookup(const partitioned_index_join_args args, const IndexStructureType index_structure);
+
+extern "C" __launch_bounds__(1024, 2) __global__ void intermediate_prefix_sum_int32(partitioned_index_join_args args);
+
+template<class IndexType>
+struct ij_streamed_approach {
     static constexpr unsigned num_streams = 2;
+    static constexpr double selectivity_est = 0.1; // FIXME
 
     struct stream_state {
         cudaStream_t stream;
@@ -197,30 +234,27 @@ struct streamed_ij_approach {
         device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
         partition_offsets partition_offsets_inst;
-        partitioned_relation<Tuple<index_key_t, int32_t>> partitioned_relation_inst;
+        // FIXME: partitioned_relation<Tuple<index_key_t, int32_t>> partitioned_relation_inst;
 
         std::unique_ptr<PrefixSumArgs> prefix_sum_and_copy_args;
-        std::unique_ptr<RadixPartitionArgs> radix_partition_args;
-        std::unique_ptr<PartitionedLookupArgs> partitioned_lookup_args;
+        //std::unique_ptr<RadixPartitionArgs> radix_partition_args;
+        //std::unique_ptr<PartitionedLookupArgs> partitioned_lookup_args;
     } stream_states[num_streams];
 
-    streamed_ij_approach() {
+    ij_streamed_approach() {
+#if 0
         device_allocator_t<int> device_allocator;
         auto state = std::make_unique<stream_state>();
         CubDebugExit(cudaStreamCreate(&state->stream));
-
-        state->num_lookups = num_lookups;
-
-        // dummy payloads
-        //state->d_payloads = create_device_array<int32_t>(num_lookups);
-
+/*
         // initialize payloads
         {
             std::vector<int32_t> payloads;
             payloads.resize(num_lookups);
             std::iota(payloads.begin(), payloads.end(), 0);
             state->d_payloads = create_device_array_from(payloads, device_allocator);
-        }
+        }*/
+        //state->d_payloads
 
         // allocate output arrays
         state->d_dst_partition_attr = create_device_array<index_key_t>(num_lookups);
@@ -280,44 +314,14 @@ struct streamed_ij_approach {
             //state->d_dst_tids.data()
             d_dst_tids
         });
+#endif
+    }
 
-        return state;
+    size_t buffer_size_upper_bound() const {
     }
 
     void operator()(query_data& d) {
-        using namespace std;
-
-        enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
-
 #if 0
-        int num_sms;
-        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-        int num_blocks = num_sms*4; // TODO
-
-        auto left = left_pipeline(db);
-
-        uint32_t* d_l_partkey_buffer = left.l_partkey_buffer_guard.data();
-        int64_t* d_l_extendedprice_buffer = left.l_extendedprice_buffer_guard.data();
-        int64_t* d_l_discount_buffer = left.l_discount_buffer_guard.data();
-
-        const auto kernelStart = std::chrono::high_resolution_clock::now();
-
-        ij_join_finalization_kernel<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(d_l_partkey_buffer, d_l_extendedprice_buffer, d_l_discount_buffer, left.size, part_device, part_size, index_structure.device_index);
-        cudaDeviceSynchronize();
-
-        const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "kernel time: " << kernelTime << " ms\n";
-#endif
-
-/*
-        //ij_join_streamed_btree<<<1, 32>>>(d.index_structure->device_index);
-        test_kernel<IndexType><<<1, 32>>>();
-        cudaDeviceSynchronize();*/
-
-        //////////////////////////////////////////////////////////////////////////////////////////////////
-
-
         // calculate prefix sum kernel shared memory requirement
         const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
 #ifdef DEBUG_INTERMEDIATE_STATE
@@ -365,14 +369,16 @@ struct streamed_ij_approach {
 #endif
 
         partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
+#endif
     }
 };
 
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
-    { "option1", std::make_shared<approach_dispatcher<my_approach>>() },
+    //{ "option1", std::make_shared<approach_dispatcher<my_approach>>() },
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
-    { "streamed_ij", std::make_shared<approach_dispatcher<streamed_ij_approach>>() }
+    { "ij_plain", std::make_shared<approach_dispatcher<ij_plain_approach>>() },
+    { "ij_streamed", std::make_shared<approach_dispatcher<ij_streamed_approach>>() }
 };
 
 void execute_approach(std::string approach_name) {
