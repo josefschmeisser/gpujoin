@@ -42,8 +42,10 @@ materialized allows us to omit the lane refill logic, which is applied in
 
 using namespace cub;
 
+/*
 using indexed_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_partkey)>;
 using payload_t = uint32_t;
+*/
 
 // host allocator
 //template<class T> using host_allocator = mmap_allocator<T, huge_2mb, 1>;

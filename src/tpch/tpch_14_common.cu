@@ -7,8 +7,9 @@
 #include <memory>
 
 #include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
-#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
-#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
+#include <numa-gpu/sql-ops/include/gpu_common.h>
+//#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
+//#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
 
 #include "config.hpp"
 #include "common.hpp"
@@ -220,32 +221,46 @@ extern "C" __launch_bounds__(1024, 2) __global__ void intermediate_prefix_sum_in
 template<class IndexType>
 struct ij_streamed_approach {
     static constexpr unsigned num_streams = 2;
+    static constexpr unsigned radix_bits = 10; // TODO
+    static constexpr unsigned ignore_bits = 4; // TODO
     static constexpr double selectivity_est = 0.1; // FIXME
+    
+    size_t buffer_size;
+    int grid_size;
+
+	using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
+	using tuple_type = Tuple<indexed_t, payload_type>;
 
     struct stream_state {
         cudaStream_t stream;
-/*
-        device_array_wrapper<int32_t> d_payloads;
-        device_array_wrapper<index_key_t> d_dst_partition_attr;
-        device_array_wrapper<int32_t> d_dst_payload_attrs;
-        device_array_wrapper<value_t> d_dst_tids;
+
+        //device_array_wrapper<int32_t> d_payloads;
+        device_array_wrapper<indexed_t> d_dst_partition_attr;
+        device_array_wrapper<payload_type> d_dst_payload_attrs;
+        //device_array_wrapper<value_t> d_dst_tids;
         device_array_wrapper<uint32_t> d_task_assignment;
-*/
+
         device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
         partition_offsets partition_offsets_inst;
-        // FIXME: partitioned_relation<Tuple<index_key_t, int32_t>> partitioned_relation_inst;
+        partitioned_relation<tuple_type> partitioned_relation_inst;
 
         std::unique_ptr<PrefixSumArgs> prefix_sum_and_copy_args;
-        //std::unique_ptr<RadixPartitionArgs> radix_partition_args;
-        //std::unique_ptr<PartitionedLookupArgs> partitioned_lookup_args;
+        std::unique_ptr<RadixPartitionArgs> radix_partition_args;
+        std::unique_ptr<partitioned_index_join_args> partitioned_lookup_args;
     } stream_states[num_streams];
 
     ij_streamed_approach() {
-#if 0
-        device_allocator_t<int> device_allocator;
+		const auto& config = get_experiment_config();
+
+		buffer_size = buffer_size_upper_bound();
+        grid_size = 2 * get_device_properties(0).multiProcessorCount;
+
+#if 1
+        device_table_allocator<int> device_allocator;
         auto state = std::make_unique<stream_state>();
         CubDebugExit(cudaStreamCreate(&state->stream));
+
 /*
         // initialize payloads
         {
@@ -257,18 +272,18 @@ struct ij_streamed_approach {
         //state->d_payloads
 
         // allocate output arrays
-        state->d_dst_partition_attr = create_device_array<index_key_t>(num_lookups);
-        state->d_dst_payload_attrs = create_device_array<int32_t>(num_lookups);
+        state->d_dst_partition_attr = create_device_array<indexed_t>(buffer_size);
+        state->d_dst_payload_attrs = create_device_array<payload_type>(buffer_size);
         //state->d_dst_tids = create_device_array<value_t>(num_lookups);
         state->d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
         // see: device_exclusive_prefix_sum_initialize
-        const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, block_size);
+        const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, config.block_size);
         state->d_prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
         state->partition_offsets_inst = partition_offsets(grid_size, radix_bits, device_allocator);
-        state->partitioned_relation_inst = partitioned_relation<Tuple<index_key_t, int32_t>>(num_lookups, grid_size, radix_bits, device_allocator);
-
+        state->partitioned_relation_inst = partitioned_relation<tuple_type>(buffer_size, grid_size, radix_bits, device_allocator);
+/*
         state->prefix_sum_and_copy_args = std::unique_ptr<PrefixSumArgs>(new PrefixSumArgs {
             // Inputs
             d_lookup_keys,
@@ -282,7 +297,7 @@ struct ij_streamed_approach {
             state->partition_offsets_inst.local_offsets.data(),
             // Outputs
             state->partition_offsets_inst.offsets.data()
-        });
+        });*/
 
         state->radix_partition_args = std::unique_ptr<RadixPartitionArgs>(new RadixPartitionArgs {
             // Inputs
@@ -302,7 +317,7 @@ struct ij_streamed_approach {
             // Outputs
             state->partitioned_relation_inst.relation.data()
         });
-
+/*
         state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
             state->partitioned_relation_inst.relation.data(),
             static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
@@ -313,7 +328,7 @@ struct ij_streamed_approach {
             ignore_bits,
             //state->d_dst_tids.data()
             d_dst_tids
-        });
+        });*/
 #endif
     }
 
