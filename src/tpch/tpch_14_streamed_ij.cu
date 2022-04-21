@@ -121,7 +121,7 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args args) {
         const unsigned thread_offset = __popc(mask & right);
         uint32_t base = 0;
         if (my_lane == 0) {
-            base = atomicAdd(args.materialized_size, count);
+            base = atomicAdd(&args.state->materialized_size, count);
         }
         base = __shfl_sync(FULL_MASK, base, 0);
 
@@ -131,8 +131,8 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args args) {
             auto& tuple = args.materialized[base + thread_offset];
             tuple.summand = summand;
             tuple.l_partkey = partkey;*/
-            args.materialized.l_partkey[base + thread_offset] = partkey;
-            args.materialized.summand[base + thread_offset] = summand;
+            args.state->l_partkey[base + thread_offset] = partkey;
+            args.state->summand[base + thread_offset] = summand;
         }
     }
 
@@ -183,7 +183,7 @@ __global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
             // reserve space in global materialization buffer
             uint32_t base;
             if (my_lane == 0) {
-                base = atomicAdd(args.materialized_size, buffer_count);
+                base = atomicAdd(&args.state->materialized_size, buffer_count);
             }
             base = __shfl_sync(FULL_MASK, base, 0);
 
@@ -194,8 +194,8 @@ __global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
                 auto& dst_tuple = args.materialized[base + thread_offset];
                 dst_tuple.summand = src_tuple.summand;
                 dst_tuple.l_partkey = src_tuple.summand;*/
-				args.materialized.l_partkey[base + thread_offset] = src_tuple.l_partkey;
-				args.materialized.summand[base + thread_offset] = src_tuple.summand;
+				args.state->l_partkey[base + thread_offset] = src_tuple.l_partkey;
+				args.state->summand[base + thread_offset] = src_tuple.summand;
             }
 
             // reset buffer count
@@ -237,7 +237,7 @@ __global__ void partitioned_ij_lookup(const partitioned_index_join_args args, co
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
 
-    const auto materialized_size = *args.materialized_size;
+    const auto materialized_size = args.state->materialized_size;
     for (int i = index; i < materialized_size + 31; i += stride) {
         bool active = i < args.lineitem_size;
 
@@ -247,8 +247,8 @@ __global__ void partitioned_ij_lookup(const partitioned_index_join_args args, co
             const auto& tuple = args.materialized[i];
             partkey = tuple.l_partkey;
             summand = tuple.summand;*/
-            partkey = args.materialized.l_partkey[i];
-            summand = args.materialized.summand[i];
+            partkey = args.state->l_partkey[i];
+            summand = args.state->summand[i];
         }
 
         payload_t part_tid = index_structure.cooperative_lookup(active, partkey);
@@ -275,8 +275,8 @@ __global__ void partitioned_ij_lookup(const partitioned_index_join_args args, co
         denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
     }
     if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)args.global_numerator, (unsigned long long int)numerator);
-        atomicAdd((unsigned long long int*)args.global_denominator, (unsigned long long int)denominator);
+        atomicAdd((unsigned long long int*)&args.state->global_numerator, (unsigned long long int)numerator);
+        atomicAdd((unsigned long long int*)&args.state->global_denominator, (unsigned long long int)denominator);
     }
 }
 
