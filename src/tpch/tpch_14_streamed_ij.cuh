@@ -11,22 +11,22 @@
 
 struct materialized_tuple {
     std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>::type summand;
-    //decltype(*lineitem_table_plain_t::l_extendedprice) l_extendedprice;
-    //decltype(*lineitem_table_plain_t::l_discount) l_discount;
     std::remove_pointer<decltype(lineitem_table_plain_t::l_partkey)>::type l_partkey;
 };
 
+/*
 struct materialization_buffer {
     decltype(lineitem_table_plain_t::l_extendedprice) __restrict__ summand;
     decltype(lineitem_table_plain_t::l_partkey) __restrict__ l_partkey;
-};
+};*/
 
+#if 0
 struct partitioned_index_join_args {
-    // Input
+    // Inputs
     const lineitem_table_plain_t lineitem;
     const size_t lineitem_size;
     const part_table_plain_t part;
-    const void* index_structure;
+    //const void* index_structure;
 
     std::size_t const canonical_chunk_length; // TODO needed?
     uint32_t const padding_length;
@@ -48,7 +48,27 @@ struct partitioned_index_join_args {
 	unsigned long long *const __restrict__ partition_offsets;
 
 
-    // Output
+    // Outputs
     int64_t* global_numerator;
     int64_t* global_denominator;
+};
+#endif
+
+struct partitioned_index_join_mutable_state {
+	// State
+    decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
+    decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
+    uint32_t materialized_size;
+    // Outputs
+    int64_t global_numerator;
+    int64_t global_denominator;
+};
+
+struct partitioned_index_join_args {
+    // Inputs
+    const lineitem_table_plain_t lineitem;
+    const size_t lineitem_size;
+    const part_table_plain_t part;
+    // State and outputs
+	partitioned_index_join_mutable_state* const state;
 };
