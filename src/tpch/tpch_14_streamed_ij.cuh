@@ -54,6 +54,7 @@ struct partitioned_index_join_args {
 };
 #endif
 
+/*
 struct partitioned_index_join_mutable_state {
 	// State
     decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
@@ -71,4 +72,42 @@ struct partitioned_index_join_args {
     const part_table_plain_t part;
     // State and outputs
 	partitioned_index_join_mutable_state* const state;
+};*/
+
+struct partitioned_ij_scan_mutable_state {
+	// State
+    decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
+    decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
+    uint32_t materialized_size;
 };
+
+struct partitioned_ij_scan_args {
+    // Inputs
+    const lineitem_table_plain_t lineitem;
+    const size_t lineitem_size;
+    // State and outputs
+	partitioned_ij_scan_mutable_state* const state;
+};
+
+struct partitioned_ij_lookup_mutable_state {
+    // Outputs
+    int64_t global_numerator;
+    int64_t global_denominator;
+};
+
+struct partitioned_ij_lookup_args {
+    // Inputs
+    const part_table_plain_t part;
+    decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
+    decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
+    const uint32_t materialized_size;
+    // State and outputs
+	partitioned_ij_lookup_mutable_state* const state;
+};
+
+__global__ void partitioned_ij_scan(partitioned_ij_scan_args args);
+
+__global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args);
+
+template<class IndexStructureType>
+__global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, const IndexStructureType index_structure);

@@ -55,7 +55,7 @@ struct materialized_tuple {
     std::remove_pointer<decltype(lineitem_table_plain_t::l_partkey)>::type l_partkey;
 };
 
-struct partitioned_index_join_args {
+struct partitioned_ij_scan_args {
     // Input
     const lineitem_table_plain_t lineitem;
     const size_t lineitem_size;
@@ -89,7 +89,7 @@ struct partitioned_index_join_args {
 
 //template<class IndexStructureType>
 //__global__ void partitioned_ij_scan(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
-__global__ void partitioned_ij_scan(partitioned_index_join_args args) {
+__global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
 
     const auto* __restrict__ l_shipdate = args.lineitem.l_shipdate;
     const auto* __restrict__ l_extendedprice = args.lineitem.l_extendedprice;
@@ -139,7 +139,7 @@ __global__ void partitioned_ij_scan(partitioned_index_join_args args) {
     // TODO compute prefix sum
 }
 
-__global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
+__global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
     static constexpr unsigned tuples_per_thread = 2;
     //static constexpr unsigned per_warp_buffer_size = 32 * (tuples_per_thread + 1);
     static constexpr unsigned per_warp_buffer_size = 32 * tuples_per_thread;
@@ -222,7 +222,7 @@ __global__ void partitioned_ij_scan_refill(partitioned_index_join_args args) {
 }
 
 template<class IndexStructureType>
-__global__ void partitioned_ij_lookup(const partitioned_index_join_args args, const IndexStructureType index_structure) {
+__global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, const IndexStructureType index_structure) {
     const char* prefix = "PROMO";
 
     int64_t numerator = 0;
@@ -237,9 +237,9 @@ __global__ void partitioned_ij_lookup(const partitioned_index_join_args args, co
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
 
-    const auto materialized_size = args.state->materialized_size;
+    const auto materialized_size = args.materialized_size;
     for (int i = index; i < materialized_size + 31; i += stride) {
-        bool active = i < args.lineitem_size;
+        bool active = i < materialized_size;
 
         decltype(materialized_tuple::l_partkey) partkey;
         decltype(materialized_tuple::summand) summand;
@@ -247,8 +247,8 @@ __global__ void partitioned_ij_lookup(const partitioned_index_join_args args, co
             const auto& tuple = args.materialized[i];
             partkey = tuple.l_partkey;
             summand = tuple.summand;*/
-            partkey = args.state->l_partkey[i];
-            summand = args.state->summand[i];
+            partkey = args.l_partkey[i];
+            summand = args.summand[i];
         }
 
         payload_t part_tid = index_structure.cooperative_lookup(active, partkey);
@@ -280,19 +280,19 @@ __global__ void partitioned_ij_lookup(const partitioned_index_join_args args, co
     }
 }
 
-template __global__ void partitioned_ij_lookup<btree_type::device_index_t>(const partitioned_index_join_args args, const btree_type::device_index_t index_structure);
-template __global__ void partitioned_ij_lookup<harmonia_type::device_index_t>(const partitioned_index_join_args args, const harmonia_type::device_index_t index_structure);
-template __global__ void partitioned_ij_lookup<lower_bound_type::device_index_t>(const partitioned_index_join_args args, const lower_bound_type::device_index_t index_structure);
-template __global__ void partitioned_ij_lookup<radix_spline_type::device_index_t>(const partitioned_index_join_args args, const radix_spline_type::device_index_t index_structure);
-template __global__ void partitioned_ij_lookup<no_op_type::device_index_t>(const partitioned_index_join_args args, const no_op_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<btree_type::device_index_t>(const partitioned_ij_lookup_args args, const btree_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<harmonia_type::device_index_t>(const partitioned_ij_lookup_args args, const harmonia_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<lower_bound_type::device_index_t>(const partitioned_ij_lookup_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<radix_spline_type::device_index_t>(const partitioned_ij_lookup_args args, const radix_spline_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<no_op_type::device_index_t>(const partitioned_ij_lookup_args args, const no_op_type::device_index_t index_structure);
 
 #if 0
 extern "C" __launch_bounds__(1024, 2) __global__
     void gpu_contiguous_prefix_sum_int32(PrefixSumArgs args);
 
-extern "C" __launch_bounds__(1024, 2) __global__ void intermediate_prefix_sum_int32(partitioned_index_join_args args) {
+extern "C" __launch_bounds__(1024, 2) __global__ void intermediate_prefix_sum_int32(partitioned_ij_scan_args args) {
     // We keep the PrefixSumArgs in shared memory in order to avoid costly global memory derefenciations.
-    // The only reason why we do not directly pass this struct during kernel invocation is that we have to derefence the size field of partitioned_index_join_args.
+    // The only reason why we do not directly pass this struct during kernel invocation is that we have to derefence the size field of partitioned_ij_scan_args.
  /*
     __shared__ PrefixSumArgs prefix_sum_args;
     if (threadIdx.x == 0) {
