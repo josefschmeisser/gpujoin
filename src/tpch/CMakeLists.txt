@@ -14,7 +14,15 @@ add_executable(cuda_tpch_1 tpch_1.cu)
 target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
 
 # index join executable
-add_executable(cuda_tpch_14 tpch_14_new.cu tpch_14_common.cu tpch_14_hj.cu tpch_14_ij.cu tpch_14_streamed_ij.cu)# ../cuda_utils.cu)
+add_executable(cuda_tpch_14 "")
+target_sources(cuda_tpch_14 PRIVATE
+    tpch_14_new.cu
+    tpch_14_common.cu
+    tpch_14_hj.cu
+    tpch_14_ij.cu
+    tpch_14_streamed_ij.cu
+    ../gpu_radix_partition.cu
+)
 target_include_directories(cuda_tpch_14 PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
@@ -29,6 +37,7 @@ if(true)
                         #--generate-line-info
                         -lineinfo
                         -Xptxas="-v" # print register usage
+                        #-rdc=true
                         >)
 endif()
 
