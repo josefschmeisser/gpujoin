@@ -7,7 +7,7 @@
 #include <memory>
 
 #include <numa-gpu/sql-ops/include/gpu_common.h>
-#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
+//#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
 #include "gpu_radix_partition.cuh"
 
 #include "config.hpp"
@@ -234,6 +234,7 @@ struct ij_streamed_approach {
 		// Kernel arguments
         std::unique_ptr<PrefixSumArgs> prefix_sum_args;
         std::unique_ptr<RadixPartitionArgs> radix_partition_args;
+        std::unique_ptr<partitioned_consumer_assign_tasks_args> partitioned_consumer_assign_tasks_args_inst;
 		std::unique_ptr<partitioned_ij_lookup_args> partitioned_ij_lookup_args_inst;
 		device_array_wrapper<partitioned_ij_lookup_mutable_state> d_mutable_state;
     } stream_states[num_streams];
@@ -322,8 +323,8 @@ struct ij_streamed_approach {
         CubDebugExit(cudaStreamCreate(&state.stream));
 
         // allocate output arrays
-        state.d_dst_partition_attr = create_device_array<indexed_t>(buffer_size);
-        state.d_dst_payload_attrs = create_device_array<payload_type>(buffer_size);
+        state.d_dst_partition_attr = create_device_array<indexed_t>(stream_portion);
+        state.d_dst_payload_attrs = create_device_array<payload_type>(stream_portion);
         state.d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
         // see: device_exclusive_prefix_sum_initialize
@@ -331,7 +332,7 @@ struct ij_streamed_approach {
         state.d_prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
         state.partition_offsets_inst = partition_offsets(grid_size, radix_bits, device_allocator);
-        state.partitioned_relation_inst = partitioned_relation<tuple_type>(buffer_size, grid_size, radix_bits, device_allocator);
+        state.partitioned_relation_inst = partitioned_relation<tuple_type>(stream_portion, grid_size, radix_bits, device_allocator);
 
         state.prefix_sum_args = std::unique_ptr<PrefixSumArgs>(new PrefixSumArgs {
             // Inputs
@@ -375,7 +376,40 @@ struct ij_streamed_approach {
 		};
 		state.d_mutable_state = create_device_array<partitioned_ij_lookup_mutable_state>(1);
 		target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_lookup_mutable_state));
+/*
+    state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
+        state->partitioned_relation_inst.relation.data(),
+        static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
+        state->partitioned_relation_inst.padding_length(),
+        state->partition_offsets_inst.offsets.data(),
+        state->d_task_assignment.data(),
+        radix_bits,
+        ignore_bits,
+        //state->d_dst_tids.data()
+        d_dst_tids
+    });
+struct partitioned_consumer_assign_tasks_args {
+	// Input
+    uint32_t rel_length;
+    uint32_t rel_padding_length;
+    unsigned long long* rel_partition_offsets;
+    uint32_t radix_bits;
+    // Output
+    uint32_t* task_assignment;
+};
 
+*/
+
+		state.partitioned_consumer_assign_tasks_args_inst = std::unique_ptr<partitioned_consumer_assign_tasks_args>(new partitioned_consumer_assign_tasks_args {
+			// Inputs
+			static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
+			state.partitioned_relation_inst.padding_length(),
+			state.partition_offsets_inst.offsets.data(),
+			radix_bits,
+            // Outputs
+            state.d_task_assignment.data()
+		});
+ 
 		state.partitioned_ij_lookup_args_inst = std::unique_ptr<partitioned_ij_lookup_args>(new partitioned_ij_lookup_args {
 			// Inputs
 			*d.part_device,

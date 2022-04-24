@@ -95,6 +95,21 @@ struct partitioned_ij_lookup_mutable_state {
     int64_t global_denominator;
 };
 
+/*
+ * struct PartitionedLookupArgs {
+    // Input
+    void* rel;
+    uint32_t rel_length;
+    uint32_t rel_padding_length;
+    //uint64_t* rel_partition_offsets;
+    unsigned long long* rel_partition_offsets;
+    uint32_t* task_assignment;
+    uint32_t radix_bits;
+    uint32_t ignore_bits;
+    // Output
+    value_t* __restrict__ tids;
+};*/
+
 struct partitioned_ij_lookup_args {
     // Inputs
     const part_table_plain_t part;
