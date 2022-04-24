@@ -14,7 +14,7 @@
 
 
 //#include <numa-gpu/sql-ops/include/prefix_scan.h>
-
+#include <numa-gpu/sql-ops/include/gpu_common.h>
 
 #include <gpu_radix_partition.h>
 
@@ -221,50 +221,82 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
     // TODO compute prefix sum
 }
 
+/*
+template<class TupleType, class IndexStructureType>
+__global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
+    const auto fanout = 1U << args.radix_bits;
+
+    for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
+        const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel) + args.rel_partition_offsets[p];
+
+        const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
+        const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
+
+#if 0
+        // standard lookup implementation
+        for (uint32_t i = threadIdx.x; i < partition_size; i += blockDim.x) {
+            const TupleType tuple = relation[i];
+            const auto tid = index_structure.lookup(tuple.key);
+            args.tids[tuple.value] = tid;
+        }
+#else
+        // cooperative lookup implementation
+        for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
+            const bool active = i < partition_size;
+            const TupleType tuple = active ? relation[i] : TupleType();
+            const auto tid = index_structure.cooperative_lookup(active, tuple.key);
+            if (active) {
+                args.tids[tuple.value] = tid;
+            }
+        }
+#endif
+    }
+}
+struct partitioned_ij_lookup_args {
+    // Inputs
+    const part_table_plain_t part;
+    decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
+    decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
+    const uint32_t materialized_size;
+    // State and outputs
+	partitioned_ij_lookup_mutable_state* const state;
+};*/
+
 template<class IndexStructureType>
 __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, const IndexStructureType index_structure) {
+	using tuple_type = Tuple<indexed_t, payload_t>;
+
     const char* prefix = "PROMO";
+    const auto fanout = 1U << args.radix_bits;
 
     int64_t numerator = 0;
     int64_t denominator = 0;
 
     const auto* __restrict__ p_type = args.part.p_type;
-/*
-    const auto* __restrict__ l_partkey = args.materialized.l_partkey; // TODO
-    const auto* __restrict__ summand = args.materialized.l_partkey; // TODO
-*/
 
-    const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int stride = blockDim.x * gridDim.x;
+    for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
+        const tuple_type* __restrict__ relation = reinterpret_cast<const tuple_type*>(args.rel) + args.rel_partition_offsets[p];
 
-    const auto materialized_size = args.materialized_size;
-    for (int i = index; i < materialized_size + 31; i += stride) {
-        bool active = i < materialized_size;
+        const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
+        const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
 
-        decltype(materialized_tuple::l_partkey) partkey;
-        decltype(materialized_tuple::summand) summand;
-        if (active) {/*
-            const auto& tuple = args.materialized[i];
-            partkey = tuple.l_partkey;
-            summand = tuple.summand;*/
-            partkey = args.l_partkey[i];
-            summand = args.summand[i];
-        }
+        // cooperative lookup implementation
+        for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
+            const bool active = i < partition_size;
+            const tuple_type tuple = active ? relation[i] : tuple_type();
+            const auto part_tid = index_structure.cooperative_lookup(active, tuple.key);
 
-        payload_t part_tid = index_structure.cooperative_lookup(active, partkey);
+			decltype(materialized_tuple::summand) summand = tuple.value;
+			if (part_tid != invalid_tid) {
+				denominator += summand;
 
-        if (part_tid != invalid_tid) {/*
-            const auto extendedprice = lineitem->l_extendedprice[i];
-            const auto discount = lineitem->l_discount[i];
-            const auto summand = extendedprice * (100 - discount);*/
-            denominator += summand;
-
-            const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
-            if (device_strcmp(type, prefix, 5) == 0) {
-                numerator += summand;
-            }
-        } else {
-            assert(false);
+				const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
+				if (device_strcmp(type, prefix, 5) == 0) {
+					numerator += summand;
+				}
+			} else {
+				assert(false);
+			}
         }
     }
 

@@ -19,6 +19,11 @@ struct materialization_buffer {
     decltype(lineitem_table_plain_t::l_extendedprice) __restrict__ summand;
     decltype(lineitem_table_plain_t::l_partkey) __restrict__ l_partkey;
 };*/
+/*
+using tuple_type = Tuple<
+    std::remove_pointer<decltype(lineitem_table_plain_t::l_partkey)>,
+	std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>
+    >;*/
 
 #if 0
 struct partitioned_index_join_args {
@@ -113,9 +118,12 @@ struct partitioned_ij_lookup_mutable_state {
 struct partitioned_ij_lookup_args {
     // Inputs
     const part_table_plain_t part;
-    decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
-    decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
-    const uint32_t materialized_size;
+	void* rel;
+    uint32_t rel_length;
+    uint32_t rel_padding_length;
+    unsigned long long* rel_partition_offsets;
+    uint32_t* task_assignment;
+    uint32_t radix_bits;
     // State and outputs
 	partitioned_ij_lookup_mutable_state* const state;
 };

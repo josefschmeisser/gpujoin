@@ -410,12 +410,42 @@ struct partitioned_consumer_assign_tasks_args {
             state.d_task_assignment.data()
 		});
  
+ /*
+ struct partitioned_ij_lookup_args {
+    // Inputs
+    const part_table_plain_t part;
+	tuple_type* rel;
+    uint32_t rel_length;
+    uint32_t rel_padding_length;
+    unsigned long long* rel_partition_offsets;
+    uint32_t* task_assignment;
+    uint32_t radix_bits;
+    // State and outputs
+	partitioned_ij_lookup_mutable_state* const state;
+};
+
+    state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
+        state->partitioned_relation_inst.relation.data(),
+        static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
+        state->partitioned_relation_inst.padding_length(),
+        state->partition_offsets_inst.offsets.data(),
+        state->d_task_assignment.data(),
+        radix_bits,
+        ignore_bits,
+        //state->d_dst_tids.data()
+        d_dst_tids
+    });
+
+*/
 		state.partitioned_ij_lookup_args_inst = std::unique_ptr<partitioned_ij_lookup_args>(new partitioned_ij_lookup_args {
 			// Inputs
 			*d.part_device,
-			d_indexed,
-			d_payloads,
-			stream_portion,
+			state.partitioned_relation_inst.relation.data(),
+			static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
+			state.partitioned_relation_inst.padding_length(),
+			state.partition_offsets_inst.offsets.data(),
+			state.d_task_assignment.data(),
+			radix_bits,
             // State and outputs
             state.d_mutable_state.data()
 		});
@@ -424,7 +454,6 @@ struct partitioned_consumer_assign_tasks_args {
 	void run_on_stream(const stream_state& state, IndexType& index_structure, const cudaDeviceProp& device_properties) {
         const auto& config = get_experiment_config();
 
-#if 1
         // calculate prefix sum kernel shared memory requirement
         const auto required_shared_mem_bytes = ((config.block_size + (config.block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
 #ifdef DEBUG_INTERMEDIATE_STATE
@@ -465,14 +494,13 @@ struct partitioned_consumer_assign_tasks_args {
         dump_partitions(state);
 #endif
 
-        // TODO: partitioned_lookup_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_lookup_args);
+        partitioned_consumer_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_consumer_assign_tasks_args_inst);
 #ifdef DEBUG_INTERMEDIATE_STATE
         cudaDeviceSynchronize();
         dump_task_assignment(state);
 #endif
 
-        // TODO: partitioned_lookup_kernel<Tuple<indexed_t, payload_type>><<<grid_size, config.block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
-#endif
+        partitioned_ij_lookup<<<grid_size, config.block_size, 0, state.stream>>>(*state.partitioned_ij_lookup_args_inst, index_structure.device_index);
 	}
 
     void operator()(query_data& d) {

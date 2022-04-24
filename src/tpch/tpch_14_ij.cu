@@ -107,7 +107,7 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (int i = index; i < lineitem_size + 31; i += stride) {
-        payload_t payload = invalid_tid;
+        tid_t payload = invalid_tid;
         if (i < lineitem_size &&
             lineitem->l_shipdate[i] >= lower_shipdate &&
             lineitem->l_shipdate[i] < upper_shipdate) {
@@ -197,7 +197,7 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
             }
 
             // next operator
-            payload_t payload = index_structure.cooperative_lookup(active, l_partkey);
+            tid_t payload = index_structure.cooperative_lookup(active, l_partkey);
 
             const int match = payload != invalid_tid;
             const uint32_t mask = __ballot_sync(FULL_MASK, active && match);
@@ -523,7 +523,7 @@ __global__ void ij_lookup_kernel_3(
         #pragma unroll
         for (unsigned j = 0; j < ITEMS_PER_THREAD; ++j) {
             // sort_buffer::produce
-            payload_t payload = invalid_tid;
+            tid_t payload = invalid_tid;
             unsigned lineitem_tid = tid_begin + threadIdx.x*ITEMS_PER_THREAD + j;
             if (lineitem_tid < lineitem_size &&
                 lineitem->l_shipdate[lineitem_tid] >= lower_shipdate &&
@@ -814,7 +814,7 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 //printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
-            payload_t tid_b = index_structure.cooperative_lookup(active, element);
+            tid_t tid_b = index_structure.cooperative_lookup(active, element);
 
             active = active && (tid_b != invalid_tid);
 
@@ -1084,7 +1084,7 @@ uint32_t max_partkey = 0;
 #ifdef MEASURE_CYCLES
             const auto lookup_t1 = clock64();
 #endif
-            payload_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
+            tid_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
 #ifdef MEASURE_CYCLES
             __syncwarp();
             const auto lookup_t2 = clock64();
