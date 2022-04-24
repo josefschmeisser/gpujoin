@@ -1,13 +1,10 @@
 #pragma once
 
-#include "common.hpp"
-
-#include "tpch_14_common.cuh"
-
+#include <gpu_radix_partition.h>
 #include <prefix_scan_state.h>
 
-#include <gpu_radix_partition.h>
-
+#include "common.hpp"
+#include "tpch_14_common.cuh"
 
 struct materialized_tuple {
     std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>::type summand;

@@ -208,7 +208,7 @@ struct ij_streamed_approach {
     static constexpr unsigned num_streams = 2;
     static constexpr unsigned radix_bits = 10; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
-    static constexpr double selectivity_est = 0.1; // FIXME
+    static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
     
     size_t buffer_size;
     int grid_size;
@@ -239,21 +239,20 @@ struct ij_streamed_approach {
 		device_array_wrapper<partitioned_ij_lookup_mutable_state> d_mutable_state;
     } stream_states[num_streams];
 
-    size_t buffer_size_upper_bound() const {
-		// TODO
-		throw 0;
+    size_t buffer_size_upper_bound(const query_data& d) const {
+		const size_t lineitem_size = d.db.lineitem.l_partkey.size();
+		return static_cast<size_t>(std::ceil(selectivity_est * lineitem_size));
     }
 
 	size_t fetch_materialized_size() {
-		// TODO
-		throw 0;
-		return 0;
+		const auto r = d_mutable_state.to_host_accessible();
+		return r.data()[0].materialized_size;
 	}
 
     void init(query_data& d) {
 		cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
 
-		buffer_size = buffer_size_upper_bound();
+		buffer_size = buffer_size_upper_bound(d);
 
 		d_l_partkey_materialized = create_device_array<indexed_t>(buffer_size);
 		d_summand_materialized = create_device_array<payload_type>(buffer_size);
@@ -376,29 +375,6 @@ struct ij_streamed_approach {
 		};
 		state.d_mutable_state = create_device_array<partitioned_ij_lookup_mutable_state>(1);
 		target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_lookup_mutable_state));
-/*
-    state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
-        state->partitioned_relation_inst.relation.data(),
-        static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
-        state->partitioned_relation_inst.padding_length(),
-        state->partition_offsets_inst.offsets.data(),
-        state->d_task_assignment.data(),
-        radix_bits,
-        ignore_bits,
-        //state->d_dst_tids.data()
-        d_dst_tids
-    });
-struct partitioned_consumer_assign_tasks_args {
-	// Input
-    uint32_t rel_length;
-    uint32_t rel_padding_length;
-    unsigned long long* rel_partition_offsets;
-    uint32_t radix_bits;
-    // Output
-    uint32_t* task_assignment;
-};
-
-*/
 
 		state.partitioned_consumer_assign_tasks_args_inst = std::unique_ptr<partitioned_consumer_assign_tasks_args>(new partitioned_consumer_assign_tasks_args {
 			// Inputs
@@ -410,33 +386,6 @@ struct partitioned_consumer_assign_tasks_args {
             state.d_task_assignment.data()
 		});
  
- /*
- struct partitioned_ij_lookup_args {
-    // Inputs
-    const part_table_plain_t part;
-	tuple_type* rel;
-    uint32_t rel_length;
-    uint32_t rel_padding_length;
-    unsigned long long* rel_partition_offsets;
-    uint32_t* task_assignment;
-    uint32_t radix_bits;
-    // State and outputs
-	partitioned_ij_lookup_mutable_state* const state;
-};
-
-    state->partitioned_lookup_args = std::unique_ptr<PartitionedLookupArgs>(new PartitionedLookupArgs {
-        state->partitioned_relation_inst.relation.data(),
-        static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
-        state->partitioned_relation_inst.padding_length(),
-        state->partition_offsets_inst.offsets.data(),
-        state->d_task_assignment.data(),
-        radix_bits,
-        ignore_bits,
-        //state->d_dst_tids.data()
-        d_dst_tids
-    });
-
-*/
 		state.partitioned_ij_lookup_args_inst = std::unique_ptr<partitioned_ij_lookup_args>(new partitioned_ij_lookup_args {
 			// Inputs
 			*d.part_device,
