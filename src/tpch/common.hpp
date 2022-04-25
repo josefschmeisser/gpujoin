@@ -33,32 +33,51 @@ struct date {
 static_assert(sizeof(date) == sizeof(date::raw_type));
 
 template<class T>
+struct to_raw_type {
+	using type = T;
+};
+
+template<unsigned Precision, unsigned Scale>
+struct to_raw_type<numeric<Precision, Scale>> {
+	using type = typename numeric<Precision, Scale>::raw_type;
+};
+
+template<>
+struct to_raw_type<date> {
+	using type = date::raw_type;
+};
+
+template<class T>
 struct column {
-    using type = std::vector<T, table_allocator<T>>;
+	using value_type = T;
+	using plain_array_type = typename to_raw_type<T>::type *;
+    using vector_type = std::vector<T, table_allocator<T>>;
 };
 
 struct lineitem_table_t {
-    column<uint32_t>::type l_orderkey;
-    column<uint32_t>::type l_partkey;
-    column<uint32_t>::type l_suppkey;
-    column<uint32_t>::type l_linenumber;
-    column<numeric<15, 2>>::type l_quantity;
-    column<numeric<15, 2>>::type l_extendedprice;
-    column<numeric<15, 2>>::type l_discount;
-    column<numeric<15, 2>>::type l_tax;
-    column<char>::type l_returnflag;
-    column<char>::type l_linestatus;
-    column<date>::type l_shipdate;
-    column<date>::type l_commitdate;
-    column<date>::type l_receiptdate;
-    column<std::array<char, 25>>::type l_shipinstruct;
-    column<std::array<char, 10>>::type l_shipmode;
-    column<std::array<char, 44>>::type l_comment;
+    column<uint32_t>::vector_type l_orderkey;
+    //column<uint32_t>::vector_type l_partkey;
+    column<uint64_t>::vector_type l_partkey;
+    column<uint32_t>::vector_type l_suppkey;
+    column<uint32_t>::vector_type l_linenumber;
+    column<numeric<15, 2>>::vector_type l_quantity;
+    column<numeric<15, 2>>::vector_type l_extendedprice;
+    column<numeric<15, 2>>::vector_type l_discount;
+    column<numeric<15, 2>>::vector_type l_tax;
+    column<char>::vector_type l_returnflag;
+    column<char>::vector_type l_linestatus;
+    column<date>::vector_type l_shipdate;
+    column<date>::vector_type l_commitdate;
+    column<date>::vector_type l_receiptdate;
+    column<std::array<char, 25>>::vector_type l_shipinstruct;
+    column<std::array<char, 10>>::vector_type l_shipmode;
+    column<std::array<char, 44>>::vector_type l_comment;
 };
-
+/*
 struct lineitem_table_plain_t {
     uint32_t* l_orderkey;
-    uint32_t* l_partkey;
+    //uint32_t* l_partkey;
+    uint64_t* l_partkey;
     uint32_t* l_suppkey;
     uint32_t* l_linenumber;
     int64_t* l_quantity;
@@ -73,6 +92,24 @@ struct lineitem_table_plain_t {
     std::array<char, 25>* l_shipinstruct;
     std::array<char, 10>* l_shipmode;
     std::array<char, 44>* l_comment;
+};*/
+struct lineitem_table_plain_t {
+	column<decltype(lineitem_table_t::l_orderkey)::value_type>::plain_array_type l_orderkey;
+	column<decltype(lineitem_table_t::l_partkey)::value_type>::plain_array_type l_partkey;
+	column<decltype(lineitem_table_t::l_suppkey)::value_type>::plain_array_type l_suppkey;
+	column<decltype(lineitem_table_t::l_linenumber)::value_type>::plain_array_type l_linenumber;
+	column<decltype(lineitem_table_t::l_quantity)::value_type>::plain_array_type l_quantity;
+	column<decltype(lineitem_table_t::l_extendedprice)::value_type>::plain_array_type l_extendedprice;
+	column<decltype(lineitem_table_t::l_discount)::value_type>::plain_array_type l_discount;
+	column<decltype(lineitem_table_t::l_tax)::value_type>::plain_array_type l_tax;
+	column<decltype(lineitem_table_t::l_returnflag)::value_type>::plain_array_type l_returnflag;
+	column<decltype(lineitem_table_t::l_linestatus)::value_type>::plain_array_type l_linestatus;
+	column<decltype(lineitem_table_t::l_shipdate)::value_type>::plain_array_type l_shipdate;
+	column<decltype(lineitem_table_t::l_commitdate)::value_type>::plain_array_type l_commitdate;
+	column<decltype(lineitem_table_t::l_receiptdate)::value_type>::plain_array_type l_receiptdate;
+	column<decltype(lineitem_table_t::l_shipinstruct)::value_type>::plain_array_type l_shipinstruct;
+	column<decltype(lineitem_table_t::l_shipmode)::value_type>::plain_array_type l_shipmode;
+	column<decltype(lineitem_table_t::l_comment)::value_type>::plain_array_type l_comment;
 };
 
 /*
@@ -90,19 +127,21 @@ create table part
   );*/
 
 struct part_table_t {
-    column<uint32_t>::type p_partkey;
-    column<std::array<char, 55>>::type p_name;
-    column<std::array<char, 25>>::type p_mfgr;
-    column<std::array<char, 10>>::type p_brand;
-    column<std::array<char, 25>>::type p_type;
-    column<int32_t>::type p_size;
-    column<std::array<char, 10>>::type p_container;
-    column<numeric<15, 2>>::type p_retailprice;
-    column<std::array<char, 23>>::type p_comment;
+    //column<uint32_t>::vector_type p_partkey;
+    column<uint64_t>::vector_type p_partkey;
+    column<std::array<char, 55>>::vector_type p_name;
+    column<std::array<char, 25>>::vector_type p_mfgr;
+    column<std::array<char, 10>>::vector_type p_brand;
+    column<std::array<char, 25>>::vector_type p_type;
+    column<int32_t>::vector_type p_size;
+    column<std::array<char, 10>>::vector_type p_container;
+    column<numeric<15, 2>>::vector_type p_retailprice;
+    column<std::array<char, 23>>::vector_type p_comment;
 };
-
+/*
 struct part_table_plain_t {
-    uint32_t* p_partkey;
+    //uint32_t* p_partkey;
+    uint64_t* p_partkey;
     std::array<char, 55>* p_name;
     std::array<char, 25>* p_mfgr;
     std::array<char, 10>* p_brand;
@@ -111,6 +150,17 @@ struct part_table_plain_t {
     std::array<char, 10>* p_container;
     int64_t* p_retailprice;
     std::array<char, 23>* p_comment;
+};*/
+struct part_table_plain_t {
+	column<decltype(part_table_t::p_partkey)::value_type>::plain_array_type p_partkey;
+	column<decltype(part_table_t::p_name)::value_type>::plain_array_type p_name;
+	column<decltype(part_table_t::p_mfgr)::value_type>::plain_array_type p_mfgr;
+	column<decltype(part_table_t::p_brand)::value_type>::plain_array_type p_brand;
+	column<decltype(part_table_t::p_type)::value_type>::plain_array_type p_type;
+	column<decltype(part_table_t::p_size)::value_type>::plain_array_type p_size;
+	column<decltype(part_table_t::p_container)::value_type>::plain_array_type p_container;
+	column<decltype(part_table_t::p_retailprice)::value_type>::plain_array_type p_retailprice;
+	column<decltype(part_table_t::p_comment)::value_type>::plain_array_type p_comment;
 };
 
 struct Database {
@@ -166,7 +216,6 @@ auto copy_relation(const lineitem_table_t& src) {
     return std::make_pair(dst, std::move(plain));
 }
 
-//template<class VectorAllocator, class TargetAllocator>
 template<class TargetAllocator>
 auto migrate_relation(lineitem_table_t& src, TargetAllocator& target_allocator) {
     const auto N = src.l_orderkey.size();
@@ -217,7 +266,6 @@ auto copy_relation(const part_table_t& src) {
     return std::make_pair(dst, std::move(plain));
 }
 
-//template<class VectorAllocator, class TargetAllocator>
 template<class TargetAllocator>
 auto migrate_relation(part_table_t& src, TargetAllocator& target_allocator) {
     const auto N = src.p_partkey.size();

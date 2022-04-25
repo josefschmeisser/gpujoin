@@ -80,6 +80,8 @@ static date to_date(const std::string& date_str) {
 }
 
 static void load_lineitem_table_with_aria_parser(const std::string& file_name, lineitem_table_t& table) {
+	throw "fixme";
+
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
 
@@ -112,22 +114,22 @@ static void load_lineitem_table_with_aria_parser(const std::string& file_name, l
 
 static void load_lineitem_table(const std::string& file_name, lineitem_table_t& table) {
     using lineitem_tuple = std::tuple<
-        uint32_t, // l_orderkey
-        uint32_t,
-        uint32_t,
-        uint32_t,
-        numeric<15, 2>, // l_quantity
-        numeric<15, 2>,
-        numeric<15, 2>,
-        numeric<15, 2>,
-        char, // l_returnflag
-        char,
-        date, // l_shipdate
-        date,
-        date,
-        std::array<char, 25>, // l_shipinstruct
-        std::array<char, 10>, // l_shipmode
-        std::array<char, 44>  // l_comment
+        decltype(lineitem_table_t::l_orderkey)::value_type, // l_orderkey
+        decltype(lineitem_table_t::l_partkey)::value_type,
+        decltype(lineitem_table_t::l_suppkey)::value_type,
+        decltype(lineitem_table_t::l_linenumber)::value_type,
+        decltype(lineitem_table_t::l_quantity)::value_type, // l_quantity
+        decltype(lineitem_table_t::l_extendedprice)::value_type,
+        decltype(lineitem_table_t::l_discount)::value_type,
+        decltype(lineitem_table_t::l_tax)::value_type,
+        decltype(lineitem_table_t::l_returnflag)::value_type, // l_returnflag
+        decltype(lineitem_table_t::l_linestatus)::value_type,
+        decltype(lineitem_table_t::l_shipdate)::value_type, // l_shipdate
+        decltype(lineitem_table_t::l_commitdate)::value_type,
+        decltype(lineitem_table_t::l_receiptdate)::value_type,
+        decltype(lineitem_table_t::l_shipinstruct)::value_type, // l_shipinstruct
+        decltype(lineitem_table_t::l_shipmode)::value_type, // l_shipmode
+        decltype(lineitem_table_t::l_comment)::value_type  // l_comment
         >;
     auto result = parse<lineitem_tuple, table_allocator>(file_name);
     table.l_orderkey.swap(*std::get<0>(result));
@@ -149,6 +151,8 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
 }
 
 static void load_part_table_with_aria_parser(const std::string& file_name, part_table_t& table) {
+	throw "fixme";
+
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
 
@@ -184,15 +188,15 @@ static void load_part_table_with_aria_parser(const std::string& file_name, part_
 
 static void load_part_table(const std::string& file_name, part_table_t& table) {
     using part_tuple = std::tuple<
-        uint32_t, // p_partkey
-        std::array<char, 55>,
-        std::array<char, 25>,
-        std::array<char, 10>,
-        std::array<char, 25>,
-        int32_t,
-        std::array<char, 10>,
-        numeric<15, 2>,
-        std::array<char, 23>
+        decltype(part_table_t::p_partkey)::value_type, // p_partkey
+        decltype(part_table_t::p_name)::value_type,
+        decltype(part_table_t::p_mfgr)::value_type,
+        decltype(part_table_t::p_brand)::value_type,
+        decltype(part_table_t::p_type)::value_type,
+        decltype(part_table_t::p_size)::value_type,
+        decltype(part_table_t::p_container)::value_type,
+        decltype(part_table_t::p_retailprice)::value_type,
+        decltype(part_table_t::p_comment)::value_type
         >;
     auto result = parse<part_tuple, table_allocator>(file_name);
     table.p_partkey.swap(*std::get<0>(result));
@@ -215,141 +219,6 @@ void load_tables_with_aria_parser(Database& db, const std::string& path) {
     load_lineitem_table_with_aria_parser(path + "lineitem.tbl", db.lineitem);
     load_part_table_with_aria_parser(path + "part.tbl", db.part);
 }
-
-#if false
-void prepareManaged(lineitem_table_t& src, lineitem_table_plain_t& dst) {
-    const auto N = src.l_commitdate.size();
-
-    size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);
-    cudaMallocManaged(&dst.l_orderkey, columnSize);
-    std::memcpy(dst.l_orderkey, src.l_orderkey.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_partkey)::value_type);
-    cudaMallocManaged(&dst.l_partkey, columnSize);
-    std::memcpy(dst.l_partkey, src.l_partkey.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_suppkey)::value_type);
-    cudaMallocManaged(&dst.l_suppkey, columnSize);
-    std::memcpy(dst.l_suppkey, src.l_suppkey.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_linenumber)::value_type);
-    cudaMallocManaged(&dst.l_linenumber, columnSize);
-    std::memcpy(dst.l_linenumber, src.l_linenumber.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_quantity)::value_type);
-    cudaMallocManaged(&dst.l_quantity, columnSize);
-    std::memcpy(dst.l_quantity, src.l_quantity.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_extendedprice)::value_type);
-    cudaMallocManaged(&dst.l_extendedprice, columnSize);
-    std::memcpy(dst.l_extendedprice, src.l_extendedprice.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_discount)::value_type);
-    cudaMallocManaged(&dst.l_discount, columnSize);
-    std::memcpy(dst.l_discount, src.l_discount.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_tax)::value_type);
-    cudaMallocManaged(&dst.l_tax, columnSize);
-    std::memcpy(dst.l_tax, src.l_tax.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_returnflag)::value_type);
-    cudaMallocManaged(&dst.l_returnflag, columnSize);
-    std::memcpy(dst.l_returnflag, src.l_returnflag.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_linestatus)::value_type);
-    cudaMallocManaged(&dst.l_linestatus, columnSize);
-    std::memcpy(dst.l_linestatus, src.l_linestatus.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_shipdate)::value_type);
-    cudaMallocManaged(&dst.l_shipdate, columnSize);
-    std::memcpy(dst.l_shipdate, src.l_shipdate.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_commitdate)::value_type);
-    cudaMallocManaged(&dst.l_commitdate, columnSize);
-    std::memcpy(dst.l_commitdate, src.l_commitdate.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_receiptdate)::value_type);
-    cudaMallocManaged(&dst.l_receiptdate, columnSize);
-    std::memcpy(dst.l_receiptdate, src.l_receiptdate.data(), columnSize);
-/*
-    columnSize = N*sizeof(decltype(src.l_shipinstruct)::value_type);
-    cudaMallocManaged(&dst.l_shipinstruct, columnSize);
-    std::memcpy(dst.l_shipinstruct, src.l_shipinstruct.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_shipmode)::value_type);
-    cudaMallocManaged(&dst.l_shipmode, columnSize);
-    std::memcpy(dst.l_shipmode, src.l_shipmode.data(), columnSize);
-
-    columnSize = N*sizeof(decltype(src.l_comment)::value_type);
-    cudaMallocManaged(&dst.l_comment, columnSize);
-    std::memcpy(dst.l_comment, src.l_comment.data(), columnSize);
-*/
-}
-
-void prepareDeviceResident(lineitem_table_t& src, lineitem_table_plain_t& dst) {
-    const auto N = src.l_commitdate.size();
-
-    size_t columnSize = N*sizeof(decltype(src.l_orderkey)::value_type);
-    cudaMalloc((void**)&dst.l_orderkey, columnSize);
-    cudaMemcpy(dst.l_orderkey, src.l_orderkey.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_partkey)::value_type);
-    cudaMalloc((void**)&dst.l_partkey, columnSize);
-    cudaMemcpy(dst.l_partkey, src.l_partkey.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_suppkey)::value_type);
-    cudaMalloc((void**)&dst.l_suppkey, columnSize);
-    cudaMemcpy(dst.l_suppkey, src.l_suppkey.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_linenumber)::value_type);
-    cudaMalloc((void**)&dst.l_linenumber, columnSize);
-    cudaMemcpy(dst.l_linenumber, src.l_linenumber.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_quantity)::value_type);
-    cudaMalloc((void**)&dst.l_quantity, columnSize);
-    cudaMemcpy(dst.l_quantity, src.l_quantity.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_extendedprice)::value_type);
-    cudaMalloc((void**)&dst.l_extendedprice, columnSize);
-    cudaMemcpy(dst.l_extendedprice, src.l_extendedprice.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_discount)::value_type);
-    cudaMalloc((void**)&dst.l_discount, columnSize);
-    cudaMemcpy(dst.l_discount, src.l_discount.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_tax)::value_type);
-    cudaMalloc((void**)&dst.l_tax, columnSize);
-    cudaMemcpy(dst.l_tax, src.l_tax.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_returnflag)::value_type);
-    cudaMalloc((void**)&dst.l_returnflag, columnSize);
-    cudaMemcpy(dst.l_returnflag, src.l_returnflag.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_linestatus)::value_type);
-    cudaMalloc((void**)&dst.l_linestatus, columnSize);
-    cudaMemcpy(dst.l_linestatus, src.l_linestatus.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_shipdate)::value_type);
-    cudaMalloc((void**)&dst.l_shipdate, columnSize);
-    cudaMemcpy(dst.l_shipdate, src.l_shipdate.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_commitdate)::value_type);
-    cudaMalloc((void**)&dst.l_commitdate, columnSize);
-    cudaMemcpy(dst.l_commitdate, src.l_commitdate.data(), columnSize, cudaMemcpyHostToDevice);
-
-    columnSize = N*sizeof(decltype(src.l_receiptdate)::value_type);
-    cudaMalloc((void**)&dst.l_receiptdate, columnSize);
-    cudaMemcpy(dst.l_receiptdate, src.l_receiptdate.data(), columnSize, cudaMemcpyHostToDevice);
-
-/*
-    columnSize = N*sizeof(decltype(src.l_shipinstruct)::value_type);
-
-    columnSize = N*sizeof(decltype(src.l_shipmode)::value_type);
-
-    columnSize = N*sizeof(decltype(src.l_comment)::value_type);
-*/
-}
-#endif
 
 void sort_relation(part_table_t& part) {
     auto permutation = compute_permutation(part.p_partkey.begin(), part.p_partkey.end(), std::less<>{});

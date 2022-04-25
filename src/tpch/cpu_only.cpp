@@ -245,18 +245,18 @@ void query_14_lineitem_build(Database& db) {
 */
     auto& part = db.part;
     auto& lineitem = db.lineitem;
-uint32_t min_partkey = 0xffffffff, max_partkey = 0;
+//uint32_t min_partkey = 0xffffffff, max_partkey = 0;
     std::unordered_multimap<uint32_t, size_t> ht(part.p_partkey.size());// lineitem.l_partkey.size());
     for (size_t i = 0; i < lineitem.l_partkey.size(); ++i) {
         if (lineitem.l_shipdate[i].raw < lower_shipdate ||
             lineitem.l_shipdate[i].raw >= upper_shipdate) {
             continue;
         }
-        ht.emplace(lineitem.l_partkey[i], i);
+        ht.emplace(lineitem.l_partkey[i], i);/*
         max_partkey = std::max(max_partkey, lineitem.l_partkey[i]);
-        min_partkey = std::min(min_partkey, lineitem.l_partkey[i]);
+        min_partkey = std::min(min_partkey, lineitem.l_partkey[i]);*/
     }
-std::cout << "min_partkey: " << min_partkey << " max_partkey: " << max_partkey << std::endl;
+//std::cout << "min_partkey: " << min_partkey << " max_partkey: " << max_partkey << std::endl;
     // aggregation loop
     for (size_t i = 0; i < part.p_partkey.size(); ++i) {
         // probe

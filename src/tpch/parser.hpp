@@ -81,6 +81,20 @@ struct input_parser<int64_t> {
     }
 };
 
+template<>
+struct input_parser<uint64_t> {
+    static bool parse(const char* begin, size_t len, uint64_t& result) {
+        bool invalid = (len < 1);
+        result = 0;
+        for (size_t i = 0; i < len; ++i) {
+            char c = begin[i];
+            invalid |= (c < '0' || c > '9');
+            result = result * 10 + (begin[i] - '0');
+        }
+        return !invalid;
+    }
+};
+
 template<unsigned Precision, unsigned Scale>
 struct input_parser<numeric<Precision, Scale>> {
     static bool parse(const char* begin, size_t len, numeric<Precision, Scale>& result) {
