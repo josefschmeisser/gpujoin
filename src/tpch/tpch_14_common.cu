@@ -456,6 +456,17 @@ struct ij_streamed_approach {
 		init(d);
 		phase1(d);
 		phase2(d);
+		cudaDeviceSynchronize();
+		// collect results
+		int64_t numerator = 0;
+		int64_t denominator = 0;
+		for (const auto& stream_state : stream_states) {
+			const auto r = stream_state.d_mutable_state.to_host_accessible();
+			const auto& state = r.data()[0];
+			numerator += state.global_numerator;
+			denominator += state.global_denominator;
+		}
+		printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
     }
 };
 
