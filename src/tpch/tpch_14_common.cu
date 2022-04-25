@@ -203,7 +203,7 @@ struct ij_plain_approach {
 template<class IndexType>
 struct ij_streamed_approach {
 	using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
-	using tuple_type = Tuple<indexed_t, payload_type>;
+	//using tuple_type = Tuple<indexed_t, payload_type>;
 
     static constexpr unsigned num_streams = 2;
     static constexpr unsigned radix_bits = 10; // TODO
@@ -229,7 +229,7 @@ struct ij_streamed_approach {
         device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
         partition_offsets partition_offsets_inst;
-        partitioned_relation<tuple_type> partitioned_relation_inst;
+        partitioned_relation<partitioned_tuple_type> partitioned_relation_inst;
 
 		// Kernel arguments
         std::unique_ptr<PrefixSumArgs> prefix_sum_args;
@@ -268,7 +268,7 @@ struct ij_streamed_approach {
 
 		partitioned_ij_scan_args_inst = std::unique_ptr<partitioned_ij_scan_args>(new partitioned_ij_scan_args {
 			// Inputs
-			*d.lineitem_device,
+			d.lineitem_device,
 			d.lineitem_size,
             // State and outputs
             d_mutable_state.data()
@@ -331,7 +331,7 @@ struct ij_streamed_approach {
         state.d_prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
         state.partition_offsets_inst = partition_offsets(grid_size, radix_bits, device_allocator);
-        state.partitioned_relation_inst = partitioned_relation<tuple_type>(stream_portion, grid_size, radix_bits, device_allocator);
+        state.partitioned_relation_inst = partitioned_relation<partitioned_tuple_type>(stream_portion, grid_size, radix_bits, device_allocator);
 
         state.prefix_sum_args = std::unique_ptr<PrefixSumArgs>(new PrefixSumArgs {
             // Inputs
@@ -388,7 +388,7 @@ struct ij_streamed_approach {
  
 		state.partitioned_ij_lookup_args_inst = std::unique_ptr<partitioned_ij_lookup_args>(new partitioned_ij_lookup_args {
 			// Inputs
-			*d.part_device,
+			d.part_device,
 			state.partitioned_relation_inst.relation.data(),
 			static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
 			state.partitioned_relation_inst.padding_length(),
@@ -432,9 +432,9 @@ struct ij_streamed_approach {
         // calculate radix partition kernel shared memory requirement
         const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
-        //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
-        //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
-        gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        //gpu_chunked_radix_partition_int64_int64<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
+        //gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        gpu_chunked_sswwc_radix_partition_v2_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 #ifdef DEBUG_INTERMEDIATE_STATE
         cudaDeviceSynchronize();

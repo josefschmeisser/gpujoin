@@ -1,7 +1,8 @@
 #pragma once
 
-#include <gpu_radix_partition.h>
-#include <prefix_scan_state.h>
+#include <numa-gpu/sql-ops/include/gpu_common.h>
+#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
+#include <numa-gpu/sql-ops/include/prefix_scan_state.h>
 
 #include "common.hpp"
 #include "tpch_14_common.cuh"
@@ -21,6 +22,8 @@ using tuple_type = Tuple<
     std::remove_pointer<decltype(lineitem_table_plain_t::l_partkey)>,
 	std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>
     >;*/
+
+using partitioned_tuple_type = Tuple<uint64_t, uint64_t>;
 
 #if 0
 struct partitioned_index_join_args {
@@ -85,7 +88,7 @@ struct partitioned_ij_scan_mutable_state {
 
 struct partitioned_ij_scan_args {
     // Inputs
-    const lineitem_table_plain_t lineitem;
+    const lineitem_table_plain_t* const lineitem;
     const size_t lineitem_size;
     // State and outputs
 	partitioned_ij_scan_mutable_state* const state;
@@ -114,7 +117,7 @@ struct partitioned_ij_lookup_mutable_state {
 
 struct partitioned_ij_lookup_args {
     // Inputs
-    const part_table_plain_t part;
+    const part_table_plain_t* const part;
 	void* rel;
     uint32_t rel_length;
     uint32_t rel_padding_length;

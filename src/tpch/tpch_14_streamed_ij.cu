@@ -91,10 +91,10 @@ struct partitioned_ij_scan_args {
 //__global__ void partitioned_ij_scan(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
 __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
 
-    const auto* __restrict__ l_shipdate = args.lineitem.l_shipdate;
-    const auto* __restrict__ l_extendedprice = args.lineitem.l_extendedprice;
-    const auto* __restrict__ l_discount = args.lineitem.l_discount;
-    const auto* __restrict__ l_partkey = args.lineitem.l_partkey;
+    const auto* __restrict__ l_shipdate = args.lineitem->l_shipdate;
+    const auto* __restrict__ l_extendedprice = args.lineitem->l_extendedprice;
+    const auto* __restrict__ l_discount = args.lineitem->l_discount;
+    const auto* __restrict__ l_partkey = args.lineitem->l_partkey;
 
     const unsigned my_lane = lane_id();
 
@@ -146,10 +146,10 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
 
     extern __shared__ uint32_t shared_mem[];
 
-    const auto* __restrict__ l_shipdate = args.lineitem.l_shipdate;
-    const auto* __restrict__ l_extendedprice = args.lineitem.l_extendedprice;
-    const auto* __restrict__ l_discount = args.lineitem.l_discount;
-    const auto* __restrict__ l_partkey = args.lineitem.l_partkey;
+    const auto* __restrict__ l_shipdate = args.lineitem->l_shipdate;
+    const auto* __restrict__ l_extendedprice = args.lineitem->l_extendedprice;
+    const auto* __restrict__ l_discount = args.lineitem->l_discount;
+    const auto* __restrict__ l_partkey = args.lineitem->l_partkey;
 
     const unsigned my_lane = lane_id();
 
@@ -264,7 +264,7 @@ struct partitioned_ij_lookup_args {
 
 template<class IndexStructureType>
 __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, const IndexStructureType index_structure) {
-	using tuple_type = Tuple<indexed_t, payload_t>;
+	//using tuple_type = Tuple<indexed_t, payload_t>;
 
     const char* prefix = "PROMO";
     const auto fanout = 1U << args.radix_bits;
@@ -272,10 +272,10 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
     int64_t numerator = 0;
     int64_t denominator = 0;
 
-    const auto* __restrict__ p_type = args.part.p_type;
+    const auto* __restrict__ p_type = args.part->p_type;
 
     for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
-        const tuple_type* __restrict__ relation = reinterpret_cast<const tuple_type*>(args.rel) + args.rel_partition_offsets[p];
+        const partitioned_tuple_type* __restrict__ relation = reinterpret_cast<const partitioned_tuple_type*>(args.rel) + args.rel_partition_offsets[p];
 
         const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
         const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
@@ -283,7 +283,7 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
         // cooperative lookup implementation
         for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
             const bool active = i < partition_size;
-            const tuple_type tuple = active ? relation[i] : tuple_type();
+            const partitioned_tuple_type tuple = active ? relation[i] : partitioned_tuple_type();
             const auto part_tid = index_structure.cooperative_lookup(active, tuple.key);
 
 			decltype(materialized_tuple::summand) summand = tuple.value;

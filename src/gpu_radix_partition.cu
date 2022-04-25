@@ -38,3 +38,25 @@ __global__ void partitioned_consumer_assign_tasks(partitioned_consumer_assign_ta
         }
     }
 }
+
+/*
+// Exports the partitioning function for 8-byte key 16-byte value tuples.
+extern "C" __launch_bounds__(1024, 2) __global__
+    void gpu_chunked_radix_partition_int32_int64(RadixPartitionArgs args) {
+  gpu_chunked_radix_partition<int, long long>(args);
+}
+
+// Exports the partitioning function for 8-byte key 16-byte value tuples.
+extern "C" __launch_bounds__(1024, 1) __global__
+    void gpu_chunked_laswwc_radix_partition_int32_int64(
+        RadixPartitionArgs args, uint32_t shared_mem_bytes) {
+  gpu_chunked_laswwc_radix_partition<int, long long>(args, shared_mem_bytes);
+}
+
+// Exports the partitioning function for 8-byte key 16-byte value tuples.
+extern "C" __launch_bounds__(1024, 1) __global__
+    void gpu_chunked_sswwc_radix_partition_v2_int32_int64(
+        RadixPartitionArgs args, uint32_t shared_mem_bytes) {
+  gpu_chunked_sswwc_radix_partition_v2<int, long long>(args, shared_mem_bytes);
+}
+*/
