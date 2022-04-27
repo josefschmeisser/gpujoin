@@ -416,7 +416,7 @@ struct ij_streamed_approach {
 
         // calculate prefix sum
         CubDebugExit(cudaLaunchCooperativeKernel(
-            (void*)gpu_contiguous_prefix_sum_int32,
+            (void*)gpu_contiguous_prefix_sum_int64,
             dim3(grid_size),
             dim3(config.block_size),
             args,

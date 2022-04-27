@@ -9,6 +9,9 @@ extern "C" __launch_bounds__(1024, 2) __global__
     void gpu_contiguous_prefix_sum_int32(PrefixSumArgs args);
 
 extern "C" __launch_bounds__(1024, 2) __global__
+    void gpu_contiguous_prefix_sum_int64(PrefixSumArgs args);
+
+extern "C" __launch_bounds__(1024, 2) __global__
     void gpu_chunked_radix_partition_int32_int32(RadixPartitionArgs args);
 /*
 extern "C" __launch_bounds__(1024, 2) __global__
