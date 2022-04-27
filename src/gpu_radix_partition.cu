@@ -23,9 +23,9 @@ __global__ void partitioned_consumer_assign_tasks(partitioned_consumer_assign_ta
             if (task_size >= avg_task_size) {
                 args.task_assignment[task_id] = p + 1U;
 #ifdef DEBUG
-        printf("Assigning partitions [%u, %u] to block %d\n",
-               args.task_assignments[task_id - 1],
-               args.task_assignments[task_id], task_id);
+                printf("Assigning partitions [%u, %u] to block %d\n",
+                    args.task_assignments[task_id - 1],
+                    args.task_assignments[task_id], task_id);
 #endif
 
                 task_size = 0U;

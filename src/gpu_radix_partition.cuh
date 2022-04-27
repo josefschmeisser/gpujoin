@@ -45,7 +45,7 @@ extern "C" __launch_bounds__(1024, 1) __global__
         RadixPartitionArgs args, uint32_t shared_mem_bytes);
 
 struct partitioned_consumer_assign_tasks_args {
-	// Input
+    // Input
     uint32_t rel_length;
     uint32_t rel_padding_length;
     unsigned long long* rel_partition_offsets;

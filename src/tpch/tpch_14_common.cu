@@ -20,7 +20,10 @@
 
 #include "tpch_14_streamed_ij.cuh"
 #include "partitioned_relation.hpp"
-
+template<class K, class V>
+std::string tmpl_to_string(const Tuple<K, V>& tuple) {
+    return std::to_string(tuple.key);
+}
 index_type_enum parse_index_type(const std::string& index_name) {
     if (index_name == "btree") {
         return index_type_enum::btree;
@@ -202,10 +205,10 @@ struct ij_plain_approach {
 
 template<class IndexType>
 struct ij_streamed_approach {
-	using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
-	//using tuple_type = Tuple<indexed_t, payload_type>;
+    using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
+    //using tuple_type = Tuple<indexed_t, payload_type>;
 
-    static constexpr unsigned num_streams = 2;
+    static constexpr unsigned num_streams = 1;
     static constexpr unsigned radix_bits = 10; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
     static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
@@ -213,17 +216,17 @@ struct ij_streamed_approach {
     size_t buffer_size;
     int grid_size;
 
-	std::unique_ptr<partitioned_ij_scan_args> partitioned_ij_scan_args_inst;
-	device_array_wrapper<partitioned_ij_scan_mutable_state> d_mutable_state;
-	// materialized attributes
-	device_array_wrapper<indexed_t> d_l_partkey_materialized;
-	device_array_wrapper<payload_type> d_summand_materialized;
+    std::unique_ptr<partitioned_ij_scan_args> partitioned_ij_scan_args_inst;
+    device_array_wrapper<partitioned_ij_scan_mutable_state> d_mutable_state;
+    // materialized attributes
+    device_array_wrapper<indexed_t> d_l_partkey_materialized;
+    device_array_wrapper<payload_type> d_summand_materialized;
 
     struct stream_state {
         cudaStream_t stream;
 
-        device_array_wrapper<indexed_t> d_dst_partition_attr;
-        device_array_wrapper<payload_type> d_dst_payload_attrs;
+        //device_array_wrapper<indexed_t> d_dst_partition_attr;
+        //device_array_wrapper<payload_type> d_dst_payload_attrs;
         device_array_wrapper<uint32_t> d_task_assignment;
 
         device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
@@ -231,99 +234,101 @@ struct ij_streamed_approach {
         partition_offsets partition_offsets_inst;
         partitioned_relation<partitioned_tuple_type> partitioned_relation_inst;
 
-		// Kernel arguments
+        // Kernel arguments
         std::unique_ptr<PrefixSumArgs> prefix_sum_args;
         std::unique_ptr<RadixPartitionArgs> radix_partition_args;
         std::unique_ptr<partitioned_consumer_assign_tasks_args> partitioned_consumer_assign_tasks_args_inst;
-		std::unique_ptr<partitioned_ij_lookup_args> partitioned_ij_lookup_args_inst;
-		device_array_wrapper<partitioned_ij_lookup_mutable_state> d_mutable_state;
+        std::unique_ptr<partitioned_ij_lookup_args> partitioned_ij_lookup_args_inst;
+        device_array_wrapper<partitioned_ij_lookup_mutable_state> d_mutable_state;
     } stream_states[num_streams];
 
     size_t buffer_size_upper_bound(const query_data& d) const {
-		const size_t lineitem_size = d.db.lineitem.l_partkey.size();
-		return static_cast<size_t>(std::ceil(selectivity_est * lineitem_size));
+        const size_t lineitem_size = d.db.lineitem.l_partkey.size();
+        return static_cast<size_t>(std::ceil(selectivity_est * lineitem_size));
     }
 
-	size_t fetch_materialized_size() {
-		const auto r = d_mutable_state.to_host_accessible();
-		return r.data()[0].materialized_size;
-	}
+    size_t fetch_materialized_size() {
+        const auto r = d_mutable_state.to_host_accessible();
+printf("sum: %ld\n", r.data()[0].sum);
+        return r.data()[0].materialized_size;
+    }
 
     void init(query_data& d) {
-		cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
+        cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
 
-		buffer_size = buffer_size_upper_bound(d);
+        buffer_size = buffer_size_upper_bound(d);
 
-		d_l_partkey_materialized = create_device_array<indexed_t>(buffer_size);
-		d_summand_materialized = create_device_array<payload_type>(buffer_size);
+        d_l_partkey_materialized = create_device_array<indexed_t>(buffer_size);
+        d_summand_materialized = create_device_array<payload_type>(buffer_size);
 
-		partitioned_ij_scan_mutable_state mutable_state {
-			// State
-			d_l_partkey_materialized.data(),
-			d_summand_materialized.data(),
-			0u
-		};
-		d_mutable_state = create_device_array<partitioned_ij_scan_mutable_state>(1);
-		target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_scan_mutable_state));
+        const partitioned_ij_scan_mutable_state mutable_state {
+            // State
+            d_l_partkey_materialized.data(),
+            d_summand_materialized.data(),
+            0u,
+            0ll
+        };
+        d_mutable_state = create_device_array<partitioned_ij_scan_mutable_state>(1);
+        target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_scan_mutable_state));
 
-		partitioned_ij_scan_args_inst = std::unique_ptr<partitioned_ij_scan_args>(new partitioned_ij_scan_args {
-			// Inputs
-			d.lineitem_device,
-			d.lineitem_size,
+        partitioned_ij_scan_args_inst = std::unique_ptr<partitioned_ij_scan_args>(new partitioned_ij_scan_args {
+            // Inputs
+            d.lineitem_device,
+            d.lineitem_size,
             // State and outputs
             d_mutable_state.data()
-		});
-	}
+        });
+    }
 
-	void phase1(query_data& d) {
+    void phase1(query_data& d) {
         const auto& config = get_experiment_config();
 
         const int num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
         partitioned_ij_scan<<<num_blocks, config.block_size>>>(*partitioned_ij_scan_args_inst);
         cudaDeviceSynchronize();
-	}
+    }
 
-	void phase2(query_data& d) {
+    void phase2(query_data& d) {
         const auto materialized_size = fetch_materialized_size();
+printf("materialized_size: %lu\n", materialized_size);
+        size_t remaining = materialized_size;
+        size_t max_stream_portion = (materialized_size + num_streams) / num_streams;
+        indexed_t* d_indexed = d_l_partkey_materialized.data();
+        payload_type* d_payloads = d_summand_materialized.data();
 
-		size_t remaining = materialized_size;
-		size_t max_stream_portion = materialized_size / num_streams;
-		indexed_t* d_indexed = d_l_partkey_materialized.data();
-		payload_type* d_payloads = d_summand_materialized.data();
+        // create streams
+        for (unsigned i = 0; i < num_streams; ++i) {
+            size_t stream_portion = std::min(remaining, max_stream_portion);
+            remaining -= stream_portion;
+            printf("stream portion: %lu\n", stream_portion);
+            init_stream_state(i, d, d_indexed, stream_portion, d_payloads);
 
-		// create streams
-		for (unsigned i = 0; i < num_streams; ++i) {
-			size_t stream_portion = std::min(remaining, max_stream_portion);
-			remaining -= stream_portion;
-			printf("stream portion: %lu\n", stream_portion);
-			init_stream_state(i, d, d_indexed, stream_portion, d_payloads);
+            d_indexed += stream_portion;
+            d_payloads += stream_portion;
+        }
 
-			d_indexed += stream_portion;
-			d_payloads += stream_portion;
-		}
+        const auto& device_properties = get_device_properties(0);
+        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+        for (const auto& state : stream_states) {
+            //void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties)
 
-		const auto& device_properties = get_device_properties(0);
-		IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
-		for (const auto& state : stream_states) {
-			//void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties)
-			
-			run_on_stream(state, index_structure, device_properties);
-		}
-		cudaDeviceSynchronize();
-	}
+            run_on_stream(state, index_structure, device_properties);
+        }
+        cudaDeviceSynchronize();
+    }
 
-	void init_stream_state(const unsigned state_num, const query_data& d, indexed_t* d_indexed, const uint32_t stream_portion, payload_type* d_payloads) {
-		const auto& config = get_experiment_config();
-		cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
+    void init_stream_state(const unsigned state_num, const query_data& d, indexed_t* d_indexed, const uint32_t stream_portion, payload_type* d_payloads) {
+        const auto& config = get_experiment_config();
+        cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
 
-        grid_size = 2 * get_device_properties(0).multiProcessorCount;
+        grid_size = get_device_properties(0).multiProcessorCount; // TODO
 
         auto& state = stream_states[state_num];
         CubDebugExit(cudaStreamCreate(&state.stream));
 
         // allocate output arrays
-        state.d_dst_partition_attr = create_device_array<indexed_t>(stream_portion);
-        state.d_dst_payload_attrs = create_device_array<payload_type>(stream_portion);
+        //state.d_dst_partition_attr = create_device_array<indexed_t>(stream_portion);
+        //state.d_dst_payload_attrs = create_device_array<payload_type>(stream_portion);
         state.d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
         // see: device_exclusive_prefix_sum_initialize
@@ -367,40 +372,40 @@ struct ij_streamed_approach {
             state.partitioned_relation_inst.relation.data()
         });
 
-		// Initialize lookup-kernel arguments
-		partitioned_ij_lookup_mutable_state mutable_state {
-			// Outputs
-			0l,
-			0l
-		};
-		state.d_mutable_state = create_device_array<partitioned_ij_lookup_mutable_state>(1);
-		target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_lookup_mutable_state));
-
-		state.partitioned_consumer_assign_tasks_args_inst = std::unique_ptr<partitioned_consumer_assign_tasks_args>(new partitioned_consumer_assign_tasks_args {
-			// Inputs
-			static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
-			state.partitioned_relation_inst.padding_length(),
-			state.partition_offsets_inst.offsets.data(),
-			radix_bits,
+        state.partitioned_consumer_assign_tasks_args_inst = std::unique_ptr<partitioned_consumer_assign_tasks_args>(new partitioned_consumer_assign_tasks_args {
+            // Inputs
+            static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
+            state.partitioned_relation_inst.padding_length(),
+            state.partition_offsets_inst.offsets.data(),
+            radix_bits,
             // Outputs
             state.d_task_assignment.data()
-		});
- 
-		state.partitioned_ij_lookup_args_inst = std::unique_ptr<partitioned_ij_lookup_args>(new partitioned_ij_lookup_args {
-			// Inputs
-			d.part_device,
-			state.partitioned_relation_inst.relation.data(),
-			static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
-			state.partitioned_relation_inst.padding_length(),
-			state.partition_offsets_inst.offsets.data(),
-			state.d_task_assignment.data(),
-			radix_bits,
+        });
+
+        // Initialize lookup-kernel arguments
+        const partitioned_ij_lookup_mutable_state mutable_state {
+            // Outputs
+            0l,
+            0l
+        };
+        state.d_mutable_state = create_device_array<partitioned_ij_lookup_mutable_state>(1);
+        //target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_lookup_mutable_state));
+cudaMemset (d_mutable_state.data(), 0, sizeof(partitioned_ij_lookup_mutable_state));
+        state.partitioned_ij_lookup_args_inst = std::unique_ptr<partitioned_ij_lookup_args>(new partitioned_ij_lookup_args {
+            // Inputs
+            d.part_device,
+            state.partitioned_relation_inst.relation.data(),
+            static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
+            state.partitioned_relation_inst.padding_length(),
+            state.partition_offsets_inst.offsets.data(),
+            state.d_task_assignment.data(),
+            radix_bits,
             // State and outputs
             state.d_mutable_state.data()
-		});
+        });
     }
-
-	void run_on_stream(const stream_state& state, IndexType& index_structure, const cudaDeviceProp& device_properties) {
+//#define DEBUG_INTERMEDIATE_STATE
+    void run_on_stream(const stream_state& state, IndexType& index_structure, const cudaDeviceProp& device_properties) {
         const auto& config = get_experiment_config();
 
         // calculate prefix sum kernel shared memory requirement
@@ -432,41 +437,46 @@ struct ij_streamed_approach {
         // calculate radix partition kernel shared memory requirement
         const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
-        //gpu_chunked_radix_partition_int64_int64<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
+        gpu_chunked_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
         //gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
-        gpu_chunked_sswwc_radix_partition_v2_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        //gpu_chunked_sswwc_radix_partition_v2_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 #ifdef DEBUG_INTERMEDIATE_STATE
         cudaDeviceSynchronize();
         auto r2 = state.partitioned_relation_inst.relation.to_host_accessible();
         std::cout << "result: " << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
-        dump_partitions(state);
+     //   dump_partitions(state);
 #endif
 
         partitioned_consumer_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_consumer_assign_tasks_args_inst);
 #ifdef DEBUG_INTERMEDIATE_STATE
         cudaDeviceSynchronize();
-        dump_task_assignment(state);
+ //       dump_task_assignment(state);
 #endif
 
         partitioned_ij_lookup<<<grid_size, config.block_size, 0, state.stream>>>(*state.partitioned_ij_lookup_args_inst, index_structure.device_index);
-	}
+    }
 
     void operator()(query_data& d) {
-		init(d);
-		phase1(d);
-		phase2(d);
-		cudaDeviceSynchronize();
-		// collect results
-		int64_t numerator = 0;
-		int64_t denominator = 0;
-		for (const auto& stream_state : stream_states) {
-			const auto r = stream_state.d_mutable_state.to_host_accessible();
-			const auto& state = r.data()[0];
-			numerator += state.global_numerator;
-			denominator += state.global_denominator;
-		}
-		printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
+        init(d);
+        phase1(d);
+        phase2(d);
+        cudaDeviceSynchronize();
+        // collect results
+        int64_t numerator = 0;
+        int64_t denominator = 0;
+        for (const auto& stream_state : stream_states) {
+            const auto r = stream_state.d_mutable_state.to_host_accessible();
+            const auto& state = r.data()[0];
+            numerator += state.global_numerator;
+            denominator += state.global_denominator;
+        }
+        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
+
+        numerator *= 1'000;
+        denominator /= 1'000;
+        int64_t result = 100*numerator/denominator;
+        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
     }
 };
 

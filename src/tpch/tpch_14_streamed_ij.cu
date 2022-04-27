@@ -2,38 +2,18 @@
 
 #include "common.hpp"
 #include "config.hpp"
-
-
 #include "indexes.cuh"
-//#include "device_array.hpp"
-
 #include "tpch_14_common.cuh"
-
-//#include "prefix_scan_state.h"
-#include <prefix_scan_state.h>
-
-
-//#include <numa-gpu/sql-ops/include/prefix_scan.h>
-#include <numa-gpu/sql-ops/include/gpu_common.h>
-
-#include <gpu_radix_partition.h>
-
 #include "cuda_utils.cuh"
 
-
-
-/*
-TODO
-*/
-
+#include <prefix_scan_state.h>
+#include <gpu_radix_partition.h>
 
 
 // Exports the vanilla index join kernel for 8-byte keys.
 extern "C" __launch_bounds__(1024, 1) __global__ void ij_join_streamed_btree(const btree_type::device_index_t index) {
     printf("from gpu\n");
 }
-
-
 
 
 template<class IndexStructureType>
@@ -109,8 +89,6 @@ __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
         const auto summand = l_extendedprice[i] * (100 - l_discount[i]);
         const auto partkey = l_partkey[i];
 
-        // TODO materialize
-
         // determine all threads with matching tuples
         uint32_t mask = __ballot_sync(FULL_MASK, active);
         const auto count = __popc(mask);
@@ -133,10 +111,10 @@ __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
             tuple.l_partkey = partkey;*/
             args.state->l_partkey[base + thread_offset] = partkey;
             args.state->summand[base + thread_offset] = summand;
+
+            atomicAdd((unsigned long long*)&args.state->sum, (unsigned long long)summand);
         }
     }
-
-    // TODO compute prefix sum
 }
 
 __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
@@ -171,8 +149,6 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
         const auto summand = l_extendedprice[i] * (100 - l_discount[i]);
         const auto partkey = l_partkey[i];
 
-        // TODO materialize
-
         // determine all threads with matching tuples
         uint32_t mask = __ballot_sync(FULL_MASK, active);
         const auto count = __popc(mask);
@@ -194,8 +170,8 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
                 auto& dst_tuple = args.materialized[base + thread_offset];
                 dst_tuple.summand = src_tuple.summand;
                 dst_tuple.l_partkey = src_tuple.summand;*/
-				args.state->l_partkey[base + thread_offset] = src_tuple.l_partkey;
-				args.state->summand[base + thread_offset] = src_tuple.summand;
+                args.state->l_partkey[base + thread_offset] = src_tuple.l_partkey;
+                args.state->summand[base + thread_offset] = src_tuple.summand;
             }
 
             // reset buffer count
@@ -217,8 +193,6 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
             tuple.l_partkey = partkey;
         }
     }
-
-    // TODO compute prefix sum
 }
 
 /*
@@ -259,12 +233,12 @@ struct partitioned_ij_lookup_args {
     decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
     const uint32_t materialized_size;
     // State and outputs
-	partitioned_ij_lookup_mutable_state* const state;
+    partitioned_ij_lookup_mutable_state* const state;
 };*/
 
 template<class IndexStructureType>
 __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, const IndexStructureType index_structure) {
-	//using tuple_type = Tuple<indexed_t, payload_t>;
+    //using tuple_type = Tuple<indexed_t, payload_t>;
 
     const char* prefix = "PROMO";
     const auto fanout = 1U << args.radix_bits;
@@ -286,17 +260,17 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
             const partitioned_tuple_type tuple = active ? relation[i] : partitioned_tuple_type();
             const auto part_tid = index_structure.cooperative_lookup(active, tuple.key);
 
-			decltype(materialized_tuple::summand) summand = tuple.value;
-			if (part_tid != invalid_tid) {
-				denominator += summand;
+            decltype(materialized_tuple::summand) summand = tuple.value;
+            if (part_tid != invalid_tid) {
+                denominator += summand;
 
-				const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
-				if (device_strcmp(type, prefix, 5) == 0) {
-					numerator += summand;
-				}
-			} else {
-				assert(false);
-			}
+                const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
+                if (device_strcmp(type, prefix, 5) == 0) {
+                    numerator += summand;
+                }
+            } else {
+                assert(false);
+            }
         }
     }
 
@@ -340,22 +314,22 @@ extern "C" __launch_bounds__(1024, 2) __global__ void intermediate_prefix_sum_in
     }*/
     
 
-	//extern __shared__ uint8_t shared_mem[];
-	__shared__ uint8_t prefix_sum_args_mem[sizeof(PrefixSumArgs)];
-	const PrefixSumArgs& prefix_sum_args = *reinterpret_cast<PrefixSumArgs*>(prefix_sum_args_mem);
+    //extern __shared__ uint8_t shared_mem[];
+    __shared__ uint8_t prefix_sum_args_mem[sizeof(PrefixSumArgs)];
+    const PrefixSumArgs& prefix_sum_args = *reinterpret_cast<PrefixSumArgs*>(prefix_sum_args_mem);
     if (threadIdx.x == 0) {
-		new (reinterpret_cast<PrefixSumArgs*>(prefix_sum_args_mem)) PrefixSumArgs {
-			args.materialized.l_partkey,
-			*args.materialized_size,
-			args.canonical_chunk_length,
-			args.padding_length,
-			args.radix_bits,
-			args.ignore_bits,
-			args.prefix_scan_state,
-			args.tmp_partition_offsets,
-			args.partition_offsets
-		};
-	}
+        new (reinterpret_cast<PrefixSumArgs*>(prefix_sum_args_mem)) PrefixSumArgs {
+            args.materialized.l_partkey,
+            *args.materialized_size,
+            args.canonical_chunk_length,
+            args.padding_length,
+            args.radix_bits,
+            args.ignore_bits,
+            args.prefix_scan_state,
+            args.tmp_partition_offsets,
+            args.partition_offsets
+        };
+    }
 
     __syncthreads(); // FIXME use gridsync
     gpu_contiguous_prefix_sum_int32<<<gridDim.x, blockDim.x>>>(prefix_sum_args);
