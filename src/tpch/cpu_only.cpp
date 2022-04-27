@@ -275,7 +275,7 @@ void query_14_lineitem_build(Database& db) {
             }
         }
     }
-
+printf("numerator: %ld denominator: %ld\n", (long)sum1, (long)sum2);
     sum1 *= 1'000;
     sum2 /= 1'000;
     int64_t result = 100*sum1/sum2;

@@ -80,7 +80,7 @@ static date to_date(const std::string& date_str) {
 }
 
 static void load_lineitem_table_with_aria_parser(const std::string& file_name, lineitem_table_t& table) {
-	throw "fixme";
+    throw "fixme";
 
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');
@@ -151,7 +151,7 @@ static void load_lineitem_table(const std::string& file_name, lineitem_table_t& 
 }
 
 static void load_part_table_with_aria_parser(const std::string& file_name, part_table_t& table) {
-	throw "fixme";
+    throw "fixme";
 
     std::ifstream f(file_name);
     CsvParser lineitem = CsvParser(f).delimiter('|');

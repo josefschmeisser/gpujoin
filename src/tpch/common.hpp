@@ -34,23 +34,23 @@ static_assert(sizeof(date) == sizeof(date::raw_type));
 
 template<class T>
 struct to_raw_type {
-	using type = T;
+    using type = T;
 };
 
 template<unsigned Precision, unsigned Scale>
 struct to_raw_type<numeric<Precision, Scale>> {
-	using type = typename numeric<Precision, Scale>::raw_type;
+    using type = typename numeric<Precision, Scale>::raw_type;
 };
 
 template<>
 struct to_raw_type<date> {
-	using type = date::raw_type;
+    using type = date::raw_type;
 };
 
 template<class T>
 struct column {
-	using value_type = T;
-	using plain_array_type = typename to_raw_type<T>::type *;
+    using value_type = T;
+    using plain_array_type = typename to_raw_type<T>::type *;
     using vector_type = std::vector<T, table_allocator<T>>;
 };
 
@@ -94,22 +94,22 @@ struct lineitem_table_plain_t {
     std::array<char, 44>* l_comment;
 };*/
 struct lineitem_table_plain_t {
-	column<decltype(lineitem_table_t::l_orderkey)::value_type>::plain_array_type l_orderkey;
-	column<decltype(lineitem_table_t::l_partkey)::value_type>::plain_array_type l_partkey;
-	column<decltype(lineitem_table_t::l_suppkey)::value_type>::plain_array_type l_suppkey;
-	column<decltype(lineitem_table_t::l_linenumber)::value_type>::plain_array_type l_linenumber;
-	column<decltype(lineitem_table_t::l_quantity)::value_type>::plain_array_type l_quantity;
-	column<decltype(lineitem_table_t::l_extendedprice)::value_type>::plain_array_type l_extendedprice;
-	column<decltype(lineitem_table_t::l_discount)::value_type>::plain_array_type l_discount;
-	column<decltype(lineitem_table_t::l_tax)::value_type>::plain_array_type l_tax;
-	column<decltype(lineitem_table_t::l_returnflag)::value_type>::plain_array_type l_returnflag;
-	column<decltype(lineitem_table_t::l_linestatus)::value_type>::plain_array_type l_linestatus;
-	column<decltype(lineitem_table_t::l_shipdate)::value_type>::plain_array_type l_shipdate;
-	column<decltype(lineitem_table_t::l_commitdate)::value_type>::plain_array_type l_commitdate;
-	column<decltype(lineitem_table_t::l_receiptdate)::value_type>::plain_array_type l_receiptdate;
-	column<decltype(lineitem_table_t::l_shipinstruct)::value_type>::plain_array_type l_shipinstruct;
-	column<decltype(lineitem_table_t::l_shipmode)::value_type>::plain_array_type l_shipmode;
-	column<decltype(lineitem_table_t::l_comment)::value_type>::plain_array_type l_comment;
+    column<decltype(lineitem_table_t::l_orderkey)::value_type>::plain_array_type l_orderkey;
+    column<decltype(lineitem_table_t::l_partkey)::value_type>::plain_array_type l_partkey;
+    column<decltype(lineitem_table_t::l_suppkey)::value_type>::plain_array_type l_suppkey;
+    column<decltype(lineitem_table_t::l_linenumber)::value_type>::plain_array_type l_linenumber;
+    column<decltype(lineitem_table_t::l_quantity)::value_type>::plain_array_type l_quantity;
+    column<decltype(lineitem_table_t::l_extendedprice)::value_type>::plain_array_type l_extendedprice;
+    column<decltype(lineitem_table_t::l_discount)::value_type>::plain_array_type l_discount;
+    column<decltype(lineitem_table_t::l_tax)::value_type>::plain_array_type l_tax;
+    column<decltype(lineitem_table_t::l_returnflag)::value_type>::plain_array_type l_returnflag;
+    column<decltype(lineitem_table_t::l_linestatus)::value_type>::plain_array_type l_linestatus;
+    column<decltype(lineitem_table_t::l_shipdate)::value_type>::plain_array_type l_shipdate;
+    column<decltype(lineitem_table_t::l_commitdate)::value_type>::plain_array_type l_commitdate;
+    column<decltype(lineitem_table_t::l_receiptdate)::value_type>::plain_array_type l_receiptdate;
+    column<decltype(lineitem_table_t::l_shipinstruct)::value_type>::plain_array_type l_shipinstruct;
+    column<decltype(lineitem_table_t::l_shipmode)::value_type>::plain_array_type l_shipmode;
+    column<decltype(lineitem_table_t::l_comment)::value_type>::plain_array_type l_comment;
 };
 
 /*
@@ -152,15 +152,15 @@ struct part_table_plain_t {
     std::array<char, 23>* p_comment;
 };*/
 struct part_table_plain_t {
-	column<decltype(part_table_t::p_partkey)::value_type>::plain_array_type p_partkey;
-	column<decltype(part_table_t::p_name)::value_type>::plain_array_type p_name;
-	column<decltype(part_table_t::p_mfgr)::value_type>::plain_array_type p_mfgr;
-	column<decltype(part_table_t::p_brand)::value_type>::plain_array_type p_brand;
-	column<decltype(part_table_t::p_type)::value_type>::plain_array_type p_type;
-	column<decltype(part_table_t::p_size)::value_type>::plain_array_type p_size;
-	column<decltype(part_table_t::p_container)::value_type>::plain_array_type p_container;
-	column<decltype(part_table_t::p_retailprice)::value_type>::plain_array_type p_retailprice;
-	column<decltype(part_table_t::p_comment)::value_type>::plain_array_type p_comment;
+    column<decltype(part_table_t::p_partkey)::value_type>::plain_array_type p_partkey;
+    column<decltype(part_table_t::p_name)::value_type>::plain_array_type p_name;
+    column<decltype(part_table_t::p_mfgr)::value_type>::plain_array_type p_mfgr;
+    column<decltype(part_table_t::p_brand)::value_type>::plain_array_type p_brand;
+    column<decltype(part_table_t::p_type)::value_type>::plain_array_type p_type;
+    column<decltype(part_table_t::p_size)::value_type>::plain_array_type p_size;
+    column<decltype(part_table_t::p_container)::value_type>::plain_array_type p_container;
+    column<decltype(part_table_t::p_retailprice)::value_type>::plain_array_type p_retailprice;
+    column<decltype(part_table_t::p_comment)::value_type>::plain_array_type p_comment;
 };
 
 struct Database {
