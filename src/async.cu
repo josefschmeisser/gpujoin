@@ -1,16 +1,13 @@
-#include <sys/types.h>
 #include <cassert>
-#include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <iostream>
-#include <chrono>
 #include <memory>
+#include <string>
 
 #include <cub/util_debug.cuh>
-#include <string>
+
+#include <numa-gpu/sql-ops/include/gpu_common.h>
 
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"
@@ -26,12 +23,8 @@
 #include "index_lookup_common.cuh"
 
 #include "gpu_prefix_sum.hpp"
+#include "gpu_radix_partition.cuh"
 #include "partitioned_relation.hpp"
-
-#undef GPU_CACHE_LINE_SIZE
-#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
-#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
-#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
 
 using namespace measuring;
 
@@ -88,8 +81,6 @@ struct stream_state {
     size_t num_lookups;
 
     device_array_wrapper<int32_t> d_payloads;
-    device_array_wrapper<index_key_t> d_dst_partition_attr;
-    device_array_wrapper<int32_t> d_dst_payload_attrs;
     device_array_wrapper<value_t> d_dst_tids;
     device_array_wrapper<uint32_t> d_task_assignment;
 
@@ -110,9 +101,6 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
 
     state->num_lookups = num_lookups;
 
-    // dummy payloads
-    //state->d_payloads = create_device_array<int32_t>(num_lookups);
-
     // initialize payloads
     {
         std::vector<int32_t> payloads;
@@ -122,9 +110,6 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
     }
 
     // allocate output arrays
-    state->d_dst_partition_attr = create_device_array<index_key_t>(num_lookups);
-    state->d_dst_payload_attrs = create_device_array<int32_t>(num_lookups);
-    //state->d_dst_tids = create_device_array<value_t>(num_lookups);
     state->d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
     // see: device_exclusive_prefix_sum_initialize
@@ -192,11 +177,9 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
     while (active_lanes) {
         bool active = i < n;
-//printf("lookup %u\n", relation[i].key);
         auto tid = index_structure.cooperative_lookup(active, relation[i].key);
         if (active) {
             tids[i] = tid;
-//            printf("tid %u\n", tid);
         }
 
         i += stride;
@@ -204,6 +187,7 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     }
 }
 
+// TODO replace
 __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
     const auto fanout = 1U << args.radix_bits;
 
@@ -236,7 +220,6 @@ __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
 template<class TupleType, class IndexStructureType>
 __global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
     const auto fanout = 1U << args.radix_bits;
-
 
     for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
         const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel) + args.rel_partition_offsets[p];
@@ -368,16 +351,6 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 }
 
 int main(int argc, char** argv) {
-/*
-    auto num_elements = default_num_elements;
-    size_t num_lookups = default_num_lookups;
-    double zipf_factor = default_zipf_factor;
-    if (argc > 1) {
-        std::string::size_type sz;
-        num_elements = std::stod(argv[1], &sz);
-    }
-    std::cout << "index size: " << num_elements << std::endl;
-*/
     parse_options(argc, argv);
     const auto& config = get_experiment_config();
 
@@ -398,7 +371,6 @@ int main(int argc, char** argv) {
     indexed.resize(config.num_elements);
     lookup_keys.resize(config.num_lookups);
     generate_datasets<index_key_t>(dataset_type::sparse, config.max_bits, indexed, lookup_pattern_type::uniform, config.zipf_factor, lookup_keys);
-    //std::cout << stringify(lookup_keys.begin(), lookup_keys.end());
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
@@ -408,17 +380,8 @@ int main(int argc, char** argv) {
     auto index = build_index<index_key_t, index_type>(indexed, d_indexed.data());
     auto d_dst_tids = create_device_array<value_t>(config.num_lookups);
 
-/*
-    // fetch device properties
-    cudaDeviceProp device_properties;
-    CubDebugExit(cudaGetDeviceProperties(&device_properties, 0));
-    std::cout << "sharedMemPerBlock: " << device_properties.sharedMemPerBlock << std::endl;
-    std::cout << "name: " << device_properties.name << std::endl;
-*/
-
-
     size_t remaining = config.num_lookups;
-    size_t max_stream_portion = config.num_lookups / num_streams;
+    size_t max_stream_portion = config.num_lookups / num_streams; // FIXME
     const index_key_t* d_stream_lookup_keys = d_lookup_keys.data();
     value_t* d_stream_tids = d_dst_tids.data();
 
@@ -435,17 +398,6 @@ int main(int argc, char** argv) {
         d_stream_lookup_keys += stream_portion;
         d_stream_tids += stream_portion;
     }
-
-/*
-    auto start_ts = std::chrono::high_resolution_clock::now();
-    for (const auto& state : stream_states) {
-        run_on_stream(*state, *index, device_properties);
-    }
-    cudaDeviceSynchronize();
-    const auto stop_ts = std::chrono::high_resolution_clock::now();
-    const auto rt = std::chrono::duration_cast<std::chrono::microseconds>(stop_ts - start_ts).count()/1000.;
-    std::cout << "Kernel time: " << rt << " ms\n";
-    std::cout << "GPU MOps: " << (num_lookups/1e6)/(rt/1e3) << std::endl;*/
 
     const auto& device_properties = get_device_properties(0);
     measure(experiment_desc, [&]() {
