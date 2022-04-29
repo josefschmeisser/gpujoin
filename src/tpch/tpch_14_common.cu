@@ -206,9 +206,8 @@ struct ij_plain_approach {
 template<class IndexType>
 struct ij_streamed_approach {
     using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
-    //using tuple_type = Tuple<indexed_t, payload_type>;
 
-    static constexpr unsigned num_streams = 1;
+    static constexpr unsigned num_streams = 2;
     static constexpr unsigned radix_bits = 10; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
     static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
@@ -225,10 +224,7 @@ struct ij_streamed_approach {
     struct stream_state {
         cudaStream_t stream;
 
-        //device_array_wrapper<indexed_t> d_dst_partition_attr;
-        //device_array_wrapper<payload_type> d_dst_payload_attrs;
         device_array_wrapper<uint32_t> d_task_assignment;
-
         device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
         partition_offsets partition_offsets_inst;
@@ -249,7 +245,6 @@ struct ij_streamed_approach {
 
     size_t fetch_materialized_size() {
         const auto r = d_mutable_state.to_host_accessible();
-printf("sum: %ld\n", r.data()[0].sum);
         return r.data()[0].materialized_size;
     }
 
@@ -265,8 +260,7 @@ printf("sum: %ld\n", r.data()[0].sum);
             // State
             d_l_partkey_materialized.data(),
             d_summand_materialized.data(),
-            0u,
-            0ll
+            0u
         };
         d_mutable_state = create_device_array<partitioned_ij_scan_mutable_state>(1);
         target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_scan_mutable_state));
@@ -282,10 +276,13 @@ printf("sum: %ld\n", r.data()[0].sum);
 
     void phase1(query_data& d) {
         const auto& config = get_experiment_config();
+        const auto& device_properties = get_device_properties(0);
 
         const int num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
-        partitioned_ij_scan<<<num_blocks, config.block_size>>>(*partitioned_ij_scan_args_inst);
+        //partitioned_ij_scan<<<num_blocks, config.block_size>>>(*partitioned_ij_scan_args_inst);
+        partitioned_ij_scan_refill<<<num_blocks, config.block_size, device_properties.sharedMemPerBlock>>>(*partitioned_ij_scan_args_inst);
         cudaDeviceSynchronize();
+        printf("phase1 done\n");
     }
 
     void phase2(query_data& d) {
@@ -327,8 +324,6 @@ printf("materialized_size: %lu\n", materialized_size);
         CubDebugExit(cudaStreamCreate(&state.stream));
 
         // allocate output arrays
-        //state.d_dst_partition_attr = create_device_array<indexed_t>(stream_portion);
-        //state.d_dst_payload_attrs = create_device_array<payload_type>(stream_portion);
         state.d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
         // see: device_exclusive_prefix_sum_initialize
@@ -389,8 +384,8 @@ printf("materialized_size: %lu\n", materialized_size);
             0l
         };
         state.d_mutable_state = create_device_array<partitioned_ij_lookup_mutable_state>(1);
-        //target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_lookup_mutable_state));
-cudaMemset (d_mutable_state.data(), 0, sizeof(partitioned_ij_lookup_mutable_state));
+        target_memcpy<decltype(device_allocator)>()(d_mutable_state.data(), &mutable_state, sizeof(partitioned_ij_lookup_mutable_state));
+
         state.partitioned_ij_lookup_args_inst = std::unique_ptr<partitioned_ij_lookup_args>(new partitioned_ij_lookup_args {
             // Inputs
             d.part_device,

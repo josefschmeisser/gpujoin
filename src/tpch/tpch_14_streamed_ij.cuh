@@ -84,7 +84,6 @@ struct partitioned_ij_scan_mutable_state {
     decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
     decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
     uint32_t materialized_size;
-    int64_t sum;
 };
 
 struct partitioned_ij_scan_args {

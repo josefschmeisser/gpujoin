@@ -84,10 +84,14 @@ __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
         bool active = i < args.lineitem_size;
 
         // evaluate predicate
-        active = (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
+        active &= (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
 
-        const auto summand = l_extendedprice[i] * (100 - l_discount[i]);
-        const auto partkey = l_partkey[i];
+        indexed_t partkey;
+        payload_t summand;
+        if (active) {
+            partkey = l_partkey[i];
+            summand = l_extendedprice[i] * (100 - l_discount[i]);
+        }
 
         // determine all threads with matching tuples
         uint32_t mask = __ballot_sync(FULL_MASK, active);
@@ -104,25 +108,20 @@ __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
         base = __shfl_sync(FULL_MASK, base, 0);
 
         if (active) {
-//            printf("lane %u store to: %u\n", my_lane, base + offset);
-/*
-            auto& tuple = args.materialized[base + thread_offset];
-            tuple.summand = summand;
-            tuple.l_partkey = partkey;*/
             args.state->l_partkey[base + thread_offset] = partkey;
             args.state->summand[base + thread_offset] = summand;
-
-            atomicAdd((unsigned long long*)&args.state->sum, (unsigned long long)summand);
         }
     }
 }
 
 __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
-    static constexpr unsigned tuples_per_thread = 2;
-    //static constexpr unsigned per_warp_buffer_size = 32 * (tuples_per_thread + 1);
+    static constexpr unsigned tuples_per_thread = 12;
     static constexpr unsigned per_warp_buffer_size = 32 * tuples_per_thread;
 
     extern __shared__ uint32_t shared_mem[];
+
+    assert(tuples_per_thread * blockDim.x * sizeof(materialized_tuple) <= 48*1024);
+    //if (blockIdx.x == 0 && threadIdx.x == 0) printf("buffer_size %u\n", tuples_per_thread * blockDim.x * sizeof(materialized_tuple));
 
     const auto* __restrict__ l_shipdate = args.lineitem->l_shipdate;
     const auto* __restrict__ l_extendedprice = args.lineitem->l_extendedprice;
@@ -130,11 +129,9 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
     const auto* __restrict__ l_partkey = args.lineitem->l_partkey;
 
     const unsigned my_lane = lane_id();
-
     const unsigned warp_id = (threadIdx.x / 32);
 
-    //static constexpr 
-    //decltype(args.lineitem.l_partkey)* partkey_buffer = reinterpret_cast<decltype(args.lineitem.l_partkey)*>(shared_mem) + (warp_id * 32);
+    //static constexpr
     materialized_tuple* tuple_buffer = reinterpret_cast<materialized_tuple*>(shared_mem) + (warp_id * per_warp_buffer_size);
     unsigned buffer_count = 0;
 
@@ -144,10 +141,14 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
         bool active = i < args.lineitem_size;
 
         // evaluate predicate
-        active = (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
+        active &= (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
 
-        const auto summand = l_extendedprice[i] * (100 - l_discount[i]);
-        const auto partkey = l_partkey[i];
+        indexed_t partkey;
+        payload_t summand;
+        if (active) {
+            partkey = l_partkey[i];
+            summand = l_extendedprice[i] * (100 - l_discount[i]);
+        }
 
         // determine all threads with matching tuples
         uint32_t mask = __ballot_sync(FULL_MASK, active);
@@ -164,34 +165,61 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
             base = __shfl_sync(FULL_MASK, base, 0);
 
             // materialize into global buffer
-            for (unsigned j = 0; j < tuples_per_thread; ++j) {
-                unsigned thread_offset = j * (tuples_per_thread * 32) + my_lane;
-                const auto& src_tuple = tuple_buffer[thread_offset];/*
-                auto& dst_tuple = args.materialized[base + thread_offset];
-                dst_tuple.summand = src_tuple.summand;
-                dst_tuple.l_partkey = src_tuple.summand;*/
-                args.state->l_partkey[base + thread_offset] = src_tuple.l_partkey;
-                args.state->summand[base + thread_offset] = src_tuple.summand;
-            }
+            do {
+                const auto flush_count = min(warpSize, buffer_count);
+                const bool participate = my_lane < buffer_count;
+                if (participate) {
+                    const auto& src_tuple = tuple_buffer[buffer_count - 1 - my_lane];
+                    args.state->l_partkey[base + my_lane] = src_tuple.l_partkey;
+                    args.state->summand[base + my_lane] = src_tuple.summand;
+                }
 
-            // reset buffer count
-            buffer_count = 0;
+                // decrease buffer_count
+                buffer_count -= flush_count;
+                base += flush_count;
+            } while (buffer_count > 0);
+
+            assert(buffer_count == 0);
         }
 
         // update warp buffer index
         const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, my_lane);
         const unsigned thread_offset = __popc(mask & right_mask);
-        uint32_t base = warp_id * per_warp_buffer_size;
-        if (my_lane == 0) {
-            base += atomicAdd(&buffer_count, count);
-        }
-        base = __shfl_sync(FULL_MASK, base, 0);
+        uint32_t base = buffer_count;
+        buffer_count += count;
 
         if (active) {
             auto& tuple = tuple_buffer[base + thread_offset];
             tuple.summand = summand;
             tuple.l_partkey = partkey;
         }
+    }
+
+    // flush buffer
+    if (buffer_count > 0) {
+        // reserve space in global materialization buffer
+        uint32_t base;
+        if (my_lane == 0) {
+            base = atomicAdd(&args.state->materialized_size, buffer_count);
+        }
+        base = __shfl_sync(FULL_MASK, base, 0);
+
+        // materialize into global buffer
+        do {
+            const auto flush_count = min(warpSize, buffer_count);
+            const bool participate = my_lane < buffer_count;
+            if (participate) {
+                const auto& src_tuple = tuple_buffer[buffer_count - 1 - my_lane];
+                args.state->l_partkey[base + my_lane] = src_tuple.l_partkey;
+                args.state->summand[base + my_lane] = src_tuple.summand;
+            }
+
+            // decrease buffer_count
+            buffer_count -= flush_count;
+            base += flush_count;
+        } while (buffer_count > 0);
+
+        assert(buffer_count == 0);
     }
 }
 
