@@ -35,8 +35,8 @@ if(true)
     # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
     target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                         #--generate-line-info
-                        -lineinfo
-                        -Xptxas="-v" # print register usage
+                        #-lineinfo
+                        #-Xptxas="-v" # print register usage
                         #-rdc=true
                         >)
 endif()

@@ -7,7 +7,6 @@
 #include <memory>
 
 #include <numa-gpu/sql-ops/include/gpu_common.h>
-//#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
 #include "gpu_radix_partition.cuh"
 
 #include "config.hpp"
@@ -17,7 +16,6 @@
 #include "utils.hpp"
 #include "LinearProbingHashTable.cuh"
 #include "measuring.hpp"
-
 #include "tpch_14_streamed_ij.cuh"
 #include "partitioned_relation.hpp"
 
@@ -284,7 +282,7 @@ struct ij_streamed_approach {
 
     void phase2(query_data& d) {
         const auto materialized_size = fetch_materialized_size();
-printf("materialized_size: %lu\n", materialized_size);
+
         size_t remaining = materialized_size;
         size_t max_stream_portion = (materialized_size + num_streams) / num_streams;
         indexed_t* d_indexed = d_l_partkey_materialized.data();
@@ -396,7 +394,7 @@ printf("materialized_size: %lu\n", materialized_size);
             state.d_mutable_state.data()
         });
     }
-//#define DEBUG_INTERMEDIATE_STATE
+
     void run_on_stream(const stream_state& state, IndexType& index_structure, const cudaDeviceProp& device_properties) {
         const auto& config = get_experiment_config();
 
@@ -437,13 +435,13 @@ printf("materialized_size: %lu\n", materialized_size);
         cudaDeviceSynchronize();
         auto r2 = state.partitioned_relation_inst.relation.to_host_accessible();
         std::cout << "result: " << stringify(r2.data(), r2.data() + state.partitioned_relation_inst.relation.size()) << std::endl;
-     //   dump_partitions(state);
+        dump_partitions(state);
 #endif
 
         partitioned_consumer_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_consumer_assign_tasks_args_inst);
 #ifdef DEBUG_INTERMEDIATE_STATE
         cudaDeviceSynchronize();
- //       dump_task_assignment(state);
+        dump_task_assignment(state);
 #endif
 
         partitioned_ij_lookup<<<grid_size, config.block_size, 0, state.stream>>>(*state.partitioned_ij_lookup_args_inst, index_structure.device_index);
@@ -474,7 +472,6 @@ printf("materialized_size: %lu\n", materialized_size);
 
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
-    //{ "option1", std::make_shared<approach_dispatcher<my_approach>>() },
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
     { "ij_plain", std::make_shared<approach_dispatcher<ij_plain_approach>>() },
     { "ij_streamed", std::make_shared<approach_dispatcher<ij_streamed_approach>>() }
