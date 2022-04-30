@@ -20,7 +20,7 @@ target_sources(cuda_tpch_14 PRIVATE
     tpch_14_common.cu
     tpch_14_hj.cu
     tpch_14_ij.cu
-    tpch_14_streamed_ij.cu
+    tpch_14_ij_partitioning.cu
     ../gpu_radix_partition.cu
 )
 target_include_directories(cuda_tpch_14 PUBLIC

@@ -90,25 +90,24 @@ add_subdirectory(src/tpch)
 add_subdirectory(test)
 
 
-add_executable(async
-    #contrib/numa-gpu/sql-ops/cudautils/gpu_common.cu
-    #contrib/numa-gpu/sql-ops/cpputils/gpu_common.cpp
-    src/async.cu
+add_executable(index_lookup_partitioning
     src/measuring.cpp
     src/device_properties.cpp
     src/index_lookup_config.cpp
+    src/index_lookup_partitioning.cu
+    src/gpu_radix_partition.cu
 )
-target_include_directories(async PUBLIC
+target_include_directories(index_lookup_partitioning PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
 )
-target_link_libraries(async ${CUDART_LIBRARY} numa cub radixspline)
+target_link_libraries(index_lookup_partitioning ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
 if(true)
     # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
     # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
-    target_compile_options(async PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+    target_compile_options(index_lookup_partitioning PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
                         #--generate-line-info
                         #-lineinfo
                         #-G

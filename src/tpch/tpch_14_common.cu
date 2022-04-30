@@ -16,7 +16,7 @@
 #include "utils.hpp"
 #include "LinearProbingHashTable.cuh"
 #include "measuring.hpp"
-#include "tpch_14_streamed_ij.cuh"
+#include "tpch_14_ij_partitioning.cuh"
 #include "partitioned_relation.hpp"
 
 index_type_enum parse_index_type(const std::string& index_name) {
@@ -199,7 +199,7 @@ struct ij_plain_approach {
 };
 
 template<class IndexType>
-struct ij_streamed_approach {
+struct ij_partitioning_approach {
     using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
 
     static constexpr unsigned num_streams = 1;
@@ -474,7 +474,7 @@ struct ij_streamed_approach {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
     { "ij_plain", std::make_shared<approach_dispatcher<ij_plain_approach>>() },
-    { "ij_streamed", std::make_shared<approach_dispatcher<ij_streamed_approach>>() }
+    { "ij_partitioning", std::make_shared<approach_dispatcher<ij_partitioning_approach>>() }
 };
 
 void execute_approach(std::string approach_name) {

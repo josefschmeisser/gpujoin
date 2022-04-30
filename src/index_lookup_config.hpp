@@ -41,9 +41,9 @@ template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocati
 using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
 using lookup_keys_allocator_t = cuda_allocator<index_key_t>;
 
-#define INDEX_TYPE btree_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
+//#define INDEX_TYPE btree_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 //#define INDEX_TYPE lower_bound_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
-//#define INDEX_TYPE harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
+#define INDEX_TYPE harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 //#define INDEX_TYPE radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 
 experiment_config& get_experiment_config();

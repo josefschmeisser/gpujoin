@@ -63,7 +63,7 @@ static experiment_description create_experiment_description() {
 
     experiment_description r;
     r.name = "plain_lookup";
-    r.approach = "streamed";
+    r.approach = "partitioning";
     r.other = create_common_experiment_description_pairs<index_type>();
     return r;
 }

@@ -1,4 +1,4 @@
-#include "tpch_14_streamed_ij.cuh"
+#include "tpch_14_ij_partitioning.cuh"
 
 #include "common.hpp"
 #include "config.hpp"

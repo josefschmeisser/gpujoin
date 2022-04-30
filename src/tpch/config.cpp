@@ -19,7 +19,7 @@ void parse_options(int argc, char** argv) {
     options.add_options()
         // TODO
         ("positional", "Input", cxxopts::value<std::vector<std::string>>())
-        ("a,approach", "Approach to use (hj, ij_plain, ij_streamed)", cxxopts::value<std::string>()->default_value(config.approach))
+        ("a,approach", "Approach to use (hj, ij_plain, ij_partitioning)", cxxopts::value<std::string>()->default_value(config.approach))
         ("i,index", "Index type to use", cxxopts::value<std::string>()->default_value(config.index_type))
         ("h,help", "Print usage")
     ;
