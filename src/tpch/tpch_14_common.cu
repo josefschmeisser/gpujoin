@@ -20,10 +20,7 @@
 
 #include "tpch_14_streamed_ij.cuh"
 #include "partitioned_relation.hpp"
-template<class K, class V>
-std::string tmpl_to_string(const Tuple<K, V>& tuple) {
-    return std::to_string(tuple.key);
-}
+
 index_type_enum parse_index_type(const std::string& index_name) {
     if (index_name == "btree") {
         return index_type_enum::btree;
@@ -207,7 +204,7 @@ template<class IndexType>
 struct ij_streamed_approach {
     using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
 
-    static constexpr unsigned num_streams = 2;
+    static constexpr unsigned num_streams = 1;
     static constexpr unsigned radix_bits = 10; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
     static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
@@ -433,7 +430,7 @@ printf("materialized_size: %lu\n", materialized_size);
         const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
         gpu_chunked_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
-        //gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        //gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
         //gpu_chunked_sswwc_radix_partition_v2_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 #ifdef DEBUG_INTERMEDIATE_STATE
