@@ -92,7 +92,7 @@ struct radix_spline_index : public abstract_index<Key> {
         rs::DeviceRadixSpline<key_t> d_rs_;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            const unsigned estimate = rs::cuda::get_estimate(&d_rs_, key); // FIXME accessing this member by a pointer will result in unached global loads
+            const unsigned estimate = rs::cuda::get_estimate(&d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
             const unsigned begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
             const unsigned end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
 
