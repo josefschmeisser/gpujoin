@@ -101,30 +101,6 @@ struct query_data {
     }
 };
 
-static measuring::experiment_description create_experiment_description() {
-    const auto& config = get_experiment_config();
-
-    measuring::experiment_description r;
-    r.name = "tpch_query14";
-    r.approach = config.approach;
-    std::vector<std::pair<std::string, std::string>> other = {
-        std::make_pair(std::string("device"), std::string(get_device_properties(0).name)),
-        std::make_pair(std::string("index_type"), config.index_type),
-        std::make_pair(std::string("db_path"), config.db_path),
-        std::make_pair(std::string("prefetch_index"), tmpl_to_string(config.prefetch_index)),
-        std::make_pair(std::string("sort_indexed_relation"), tmpl_to_string(config.sort_indexed_relation)),
-        std::make_pair(std::string("block_size"), tmpl_to_string(config.block_size)),
-
-        // allocators:
-        std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator<int>>::value())),
-        std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
-        std::make_pair(std::string("device_table_allocator"), std::string(type_name<device_table_allocator<int>>::value()))
-    };
-    r.other.swap(other);
-
-    return r;
-}
-
 struct abstract_approach_dispatcher {
     virtual void run(query_data& d, index_type_enum index_type) const = 0;
 };
@@ -203,6 +179,7 @@ struct ij_partitioning_approach {
     using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
 
     static constexpr unsigned num_streams = 1;
+    static constexpr unsigned oversubscription_factor = 2;
     static constexpr unsigned radix_bits = 10; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
     static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
@@ -313,7 +290,7 @@ struct ij_partitioning_approach {
         const auto& config = get_experiment_config();
         cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
 
-        grid_size = get_device_properties(0).multiProcessorCount; // TODO
+        grid_size = get_device_properties(0).multiProcessorCount * oversubscription_factor / num_streams;
 
         auto& state = stream_states[state_num];
         CubDebugExit(cudaStreamCreate(&state.stream));
@@ -470,12 +447,52 @@ struct ij_partitioning_approach {
     }
 };
 
+template<class IndexType>
+constexpr unsigned ij_partitioning_approach<IndexType>::num_streams;
+
+template<class IndexType>
+constexpr unsigned ij_partitioning_approach<IndexType>::oversubscription_factor;
+
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
     { "ij_plain", std::make_shared<approach_dispatcher<ij_plain_approach>>() },
     { "ij_partitioning", std::make_shared<approach_dispatcher<ij_partitioning_approach>>() }
 };
+
+static measuring::experiment_description create_experiment_description() {
+    const auto& config = get_experiment_config();
+
+    measuring::experiment_description r;
+    r.name = "tpch_query14";
+    r.approach = config.approach;
+    std::vector<std::pair<std::string, std::string>> other = {
+        std::make_pair(std::string("device"), std::string(get_device_properties(0).name)),
+        std::make_pair(std::string("index_type"), config.index_type),
+        std::make_pair(std::string("db_path"), config.db_path),
+        std::make_pair(std::string("prefetch_index"), tmpl_to_string(config.prefetch_index)),
+        std::make_pair(std::string("sort_indexed_relation"), tmpl_to_string(config.sort_indexed_relation)),
+        std::make_pair(std::string("block_size"), tmpl_to_string(config.block_size)),
+
+        // allocators:
+        std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator<int>>::value())),
+        std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
+        std::make_pair(std::string("device_table_allocator"), std::string(type_name<device_table_allocator<int>>::value()))
+    };
+
+    if (r.approach == "ij_partitioning") {
+        other.emplace_back(std::string("num_stream"), tmpl_to_string(ij_partitioning_approach<no_op_type>::num_streams));
+        other.emplace_back(std::string("oversubscription_factor"), tmpl_to_string(ij_partitioning_approach<no_op_type>::oversubscription_factor));
+        /*
+        const auto& approach = dynamic_cast<const ij_partitioning_approach<no_op_type>&>(*approaches.at(r.approach));
+        other.emplace_back(std::string("num_stream"), tmpl_to_string(approach.num_streams));
+        other.emplace_back(std::string("oversubscription_factor"), tmpl_to_string(approach.oversubscription_factor));*/
+    }
+
+    r.other.swap(other);
+
+    return r;
+}
 
 void execute_approach(std::string approach_name) {
     auto& config = get_experiment_config();
