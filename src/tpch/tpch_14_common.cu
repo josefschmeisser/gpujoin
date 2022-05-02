@@ -447,6 +447,7 @@ struct ij_partitioning_approach {
     }
 };
 
+// see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 template<class IndexType>
 constexpr unsigned ij_partitioning_approach<IndexType>::num_streams;
 
@@ -483,10 +484,6 @@ static measuring::experiment_description create_experiment_description() {
     if (r.approach == "ij_partitioning") {
         other.emplace_back(std::string("num_stream"), tmpl_to_string(ij_partitioning_approach<no_op_type>::num_streams));
         other.emplace_back(std::string("oversubscription_factor"), tmpl_to_string(ij_partitioning_approach<no_op_type>::oversubscription_factor));
-        /*
-        const auto& approach = dynamic_cast<const ij_partitioning_approach<no_op_type>&>(*approaches.at(r.approach));
-        other.emplace_back(std::string("num_stream"), tmpl_to_string(approach.num_streams));
-        other.emplace_back(std::string("oversubscription_factor"), tmpl_to_string(approach.oversubscription_factor));*/
     }
 
     r.other.swap(other);
