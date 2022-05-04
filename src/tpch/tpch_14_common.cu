@@ -174,6 +174,67 @@ struct ij_plain_approach {
     }
 };
 
+/*
+    void run_ij_pbws_buffer() {
+        using namespace std;
+
+        decltype(output_index) matches1 = 0;
+
+        enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
+
+        join_entry* join_entries1;
+        cudaMalloc(&join_entries1, sizeof(join_entry)*lineitem_size);
+
+        int num_sms;
+        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
+        int num_blocks = num_sms*4; // TODO
+
+
+        int buffer_size = num_blocks*BLOCK_THREADS*(ITEMS_PER_THREAD + 1);
+        int64_t* l_extendedprice_buffer;
+        int64_t* l_discount_buffer;
+        cudaMalloc(&l_extendedprice_buffer, sizeof(decltype(*l_extendedprice_buffer))*buffer_size);
+        cudaMalloc(&l_discount_buffer, sizeof(decltype(*l_discount_buffer))*buffer_size);
+
+        const auto kernelStart = std::chrono::high_resolution_clock::now();
+
+        ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, part_device, part_size, index_structure.device_index, l_extendedprice_buffer, l_discount_buffer);
+        cudaDeviceSynchronize();
+
+        const auto kernelStop = std::chrono::high_resolution_clock::now();
+        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+        std::cout << "kernel time: " << kernelTime << " ms\n";
+    }
+*/
+
+
+// Pipelined Blockwise Sorting
+template<class IndexType>
+struct ij_pbws_approach {
+    void operator()(query_data& d) {
+        const auto& config = get_experiment_config();
+
+        const int num_blocks = 4 * get_device_properties(0).multiProcessorCount;
+
+        //decltype(output_index) matches1 = 0;
+        enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
+
+        int buffer_size = num_blocks*BLOCK_THREADS*(ITEMS_PER_THREAD + 1);
+        int64_t* l_extendedprice_buffer;
+        int64_t* l_discount_buffer;
+        cudaMalloc(&l_extendedprice_buffer, sizeof(decltype(*l_extendedprice_buffer))*buffer_size); // TODO free
+        cudaMalloc(&l_discount_buffer, sizeof(decltype(*l_discount_buffer))*buffer_size); // TODO free
+
+
+        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+
+        ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(d.lineitem_device, d.lineitem_size, d.part_device, d.part_size, index_structure.device_index, l_extendedprice_buffer, l_discount_buffer);
+
+        //ij_plain_kernel<<<num_blocks, config.block_size>>>(d.lineitem_device, d.lineitem_size, d.part_device, index_structure.device_index);
+        cudaDeviceSynchronize();
+    }
+};
+
 template<class IndexType>
 struct ij_partitioning_approach {
     using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
@@ -458,6 +519,7 @@ constexpr unsigned ij_partitioning_approach<IndexType>::oversubscription_factor;
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
     { "ij_plain", std::make_shared<approach_dispatcher<ij_plain_approach>>() },
+    { "ij_pbws", std::make_shared<approach_dispatcher<ij_pbws_approach>>() },
     { "ij_partitioning", std::make_shared<approach_dispatcher<ij_partitioning_approach>>() }
 };
 

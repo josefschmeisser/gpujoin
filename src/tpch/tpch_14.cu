@@ -1,52 +1,10 @@
 #include <iostream>
 
 
-    void run_ij() {
-        const auto kernelStart = std::chrono::high_resolution_clock::now();
-
-        int num_blocks = (lineitem_size + block_size - 1) / block_size;
-        ij_full_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, part_device, index_structure.device_index);
-        cudaDeviceSynchronize();
-
-        const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "kernel time: " << kernelTime << " ms\n";
-    }
-
-    void run_ij_buffer() {
-        using namespace std;
-
-        decltype(output_index) matches1 = 0;
-
-        enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
-
-        JoinEntry* join_entries1;
-        cudaMalloc(&join_entries1, sizeof(JoinEntry)*lineitem_size);
-
-        int num_sms;
-        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-        int num_blocks = num_sms*4; // TODO
-
-
-        int buffer_size = num_blocks*BLOCK_THREADS*(ITEMS_PER_THREAD + 1);
-        int64_t* l_extendedprice_buffer;
-        int64_t* l_discount_buffer;
-        cudaMalloc(&l_extendedprice_buffer, sizeof(decltype(*l_extendedprice_buffer))*buffer_size);
-        cudaMalloc(&l_discount_buffer, sizeof(decltype(*l_discount_buffer))*buffer_size);
-
-        const auto kernelStart = std::chrono::high_resolution_clock::now();
-
-        ij_full_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, part_device, part_size, index_structure.device_index, l_extendedprice_buffer, l_discount_buffer);
-        cudaDeviceSynchronize();
-
-        const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "kernel time: " << kernelTime << " ms\n";
-    }
 
     void run_two_phase_ij_plain() {
-        JoinEntry* join_entries;
-        cudaMalloc(&join_entries, sizeof(JoinEntry)*lineitem_size);
+        join_entry* join_entries;
+        cudaMalloc(&join_entries, sizeof(join_entry)*lineitem_size);
 
         const auto kernelStart = std::chrono::high_resolution_clock::now();
 
@@ -68,7 +26,7 @@
         std::cout << "kernel time: " << kernelTime << " ms\n";
     }
 
-    void compare_join_results(JoinEntry* ref, unsigned ref_size, JoinEntry* actual, unsigned actual_size) {
+    void compare_join_results(join_entry* ref, unsigned ref_size, join_entry* actual, unsigned actual_size) {
         std::unordered_map<uint32_t, uint32_t> map;
         for (unsigned i = 0; i < ref_size; ++i) {
             if (map.count(ref[i].lineitem_tid) > 0) {
@@ -96,8 +54,8 @@
 
         enum { BLOCK_THREADS = 128, ITEMS_PER_THREAD = 8 }; // TODO optimize
 
-        JoinEntry* join_entries1;
-        cudaMallocManaged(&join_entries1, sizeof(JoinEntry)*lineitem_size);
+        join_entry* join_entries1;
+        cudaMallocManaged(&join_entries1, sizeof(join_entry)*lineitem_size);
 
         int num_sms;
         cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
@@ -114,8 +72,8 @@
 
         error = cudaMemcpyToSymbol(output_index, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice);
         assert(error == cudaSuccess);
-        JoinEntry* join_entries2;
-        cudaMallocManaged(&join_entries2, sizeof(JoinEntry)*lineitem_size);
+        join_entry* join_entries2;
+        cudaMallocManaged(&join_entries2, sizeof(join_entry)*lineitem_size);
         num_blocks = (part_size + block_size - 1) / block_size;
         ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries2);
         cudaDeviceSynchronize();
@@ -148,8 +106,8 @@
 
         enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
 
-        JoinEntry* join_entries1;
-        cudaMalloc(&join_entries1, sizeof(JoinEntry)*lineitem_size);
+        join_entry* join_entries1;
+        cudaMalloc(&join_entries1, sizeof(join_entry)*lineitem_size);
 
         int num_sms;
         cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
