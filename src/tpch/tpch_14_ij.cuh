@@ -1,32 +1,31 @@
 #pragma once
 
-#include "tpch_14_common.cuh"
-
 #include <cstdint>
 
 #include "common.hpp"
+#include "tpch_14_common.cuh"
 
 struct join_entry {
-    uint32_t lineitem_tid;
-    uint32_t part_tid;
+    tid_t lineitem_tid;
+    tid_t part_tid;
 };
 
 struct ij_mutable_state {
     // Ephemeral state
-    int64_t* __restrict__ l_extendedprice_buffer,
-    int64_t* __restrict__ l_discount_buffer
-    join_entry* __restrict__ join_entries
-    uint32_t __restrict__ output_index;
+    numeric_raw_t* __restrict__ l_extendedprice_buffer = nullptr;
+    numeric_raw_t* __restrict__ l_discount_buffer = nullptr;
+    join_entry* __restrict__ join_entries = nullptr;
+    unsigned output_index = 0u;
     // Cycle counters
-    unsigned long long lookup_cycles;
-    unsigned long long scan_cycles;
-    unsigned long long sync_cycles;
-    unsigned long long sort_cycles;
-    unsigned long long join_cycles;
-    unsigned long long total_cycles;
+    unsigned long long lookup_cycles = 0ull;
+    unsigned long long scan_cycles = 0ull;
+    unsigned long long sync_cycles = 0ull;
+    unsigned long long sort_cycles = 0ull;
+    unsigned long long join_cycles = 0ull;
+    unsigned long long total_cycles = 0ull;
     // Outputs
-    int64_t global_numerator;
-    int64_t global_denominator;
+    numeric_raw_t global_numerator = 0ll;
+    numeric_raw_t global_denominator = 0ll;
 };
 
 struct ij_args {
@@ -39,33 +38,13 @@ struct ij_args {
 	ij_mutable_state* const state;
 };
 
-/*
-struct partitioned_ij_lookup_args {
-    // Inputs
-    const part_table_plain_t* const part;
-	void* rel;
-    uint32_t rel_length;
-    uint32_t rel_padding_length;
-    unsigned long long* rel_partition_offsets;
-    uint32_t* task_assignment;
-    uint32_t radix_bits;
-    // State and outputs
-	partitioned_ij_lookup_mutable_state* const state;
-};
-*/
-
+// Pipelined Blockwise Sorting index join kernel
 template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
     class    IndexStructureType >
 __launch_bounds__ (BLOCK_THREADS)
 __global__ void ij_pbws (
-    const lineitem_table_plain_t* __restrict__ lineitem,
-    const unsigned lineitem_size,
-    const part_table_plain_t* __restrict__ part,
-    const unsigned part_size,
-    const IndexStructureType index_structure,
-    int64_t* __restrict__ l_extendedprice_buffer,
-    int64_t* __restrict__ l_discount_buffer
+    const ij_args args,
+    const IndexStructureType index_structure
     );
-

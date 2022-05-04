@@ -16,8 +16,9 @@
 #include "utils.hpp"
 #include "LinearProbingHashTable.cuh"
 #include "measuring.hpp"
-#include "tpch_14_ij_partitioning.cuh"
 #include "partitioned_relation.hpp"
+#include "tpch_14_ij.cuh"
+#include "tpch_14_ij_partitioning.cuh"
 
 index_type_enum parse_index_type(const std::string& index_name) {
     if (index_name == "btree") {
@@ -216,22 +217,82 @@ struct ij_pbws_approach {
 
         const int num_blocks = 4 * get_device_properties(0).multiProcessorCount;
 
-        //decltype(output_index) matches1 = 0;
         enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
 
         int buffer_size = num_blocks*BLOCK_THREADS*(ITEMS_PER_THREAD + 1);
+
+        /*
         int64_t* l_extendedprice_buffer;
         int64_t* l_discount_buffer;
         cudaMalloc(&l_extendedprice_buffer, sizeof(decltype(*l_extendedprice_buffer))*buffer_size); // TODO free
         cudaMalloc(&l_discount_buffer, sizeof(decltype(*l_discount_buffer))*buffer_size); // TODO free
+        */
 
+/*
+        struct ij_mutable_state {
+    // Ephemeral state
+    numeric_raw_t* __restrict__ l_extendedprice_buffer;
+    numeric_raw_t* __restrict__ l_discount_buffer;
+    join_entry* __restrict__ join_entries;
+    unsigned output_index;
+    // Cycle counters
+    unsigned long long lookup_cycles;
+    unsigned long long scan_cycles;
+    unsigned long long sync_cycles;
+    unsigned long long sort_cycles;
+    unsigned long long join_cycles;
+    unsigned long long total_cycles;
+    // Outputs
+    numeric_raw_t global_numerator;
+    numeric_raw_t global_denominator;
+};
+
+struct ij_args {
+    // Inputs
+    const lineitem_table_plain_t* const lineitem;
+    const size_t lineitem_size;
+    const part_table_plain_t* const part;
+    const size_t part_size;
+    // State and outputs
+	ij_mutable_state* const state;
+};*/
+        auto d_l_extendedprice_buffer = create_device_array<numeric_raw_t>(buffer_size);
+        auto d_l_discount_buffer = create_device_array<numeric_raw_t>(buffer_size);
+
+        struct ij_mutable_state mutable_state;
+        mutable_state.l_extendedprice_buffer = d_l_extendedprice_buffer.data();
+        mutable_state.l_discount_buffer = d_l_discount_buffer.data();
+
+        auto d_mutable_state = create_device_array<ij_mutable_state>(1);
+        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(ij_mutable_state));
+
+        const ij_args args {
+            // Inputs
+            d.lineitem_device,
+            d.lineitem_size,
+            d.part_device,
+            d.part_size,
+            // State and outputs
+            d_mutable_state.data()
+        };
 
         IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
 
-        ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(d.lineitem_device, d.lineitem_size, d.part_device, d.part_size, index_structure.device_index, l_extendedprice_buffer, l_discount_buffer);
-
-        //ij_plain_kernel<<<num_blocks, config.block_size>>>(d.lineitem_device, d.lineitem_size, d.part_device, index_structure.device_index);
+        //ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(d.lineitem_device, d.lineitem_size, d.part_device, d.part_size, index_structure.device_index, l_extendedprice_buffer, l_discount_buffer);
+        ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(args, index_structure.device_index);
         cudaDeviceSynchronize();
+
+        // Fetch result
+        const auto r = d_mutable_state.to_host_accessible();
+        const auto& state = r.data()[0];
+        auto numerator = state.global_numerator;
+        auto denominator = state.global_denominator;
+        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
+
+        numerator *= 1'000;
+        denominator /= 1'000;
+        int64_t result = 100*numerator/denominator;
+        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
     }
 };
 

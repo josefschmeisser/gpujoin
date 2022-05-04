@@ -8,8 +8,10 @@
 template<class T> using host_allocator = HOST_ALLOCATOR_TYPE;
 template<class T> using device_index_allocator = DEVICE_INDEX_ALLOCATOR_TYPE;
 template<class T> using device_table_allocator = DEVICE_RELATION_ALLOCATOR;
+template<class T> using device_exclusive_allocator = cuda_allocator<uint8_t, cuda_allocation_type::device>;
 
 using indexed_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_partkey)>;
+using numeric_raw_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
 using payload_t = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
 using tid_t = uint32_t;
 

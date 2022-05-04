@@ -1,3 +1,4 @@
+#include "tpch_14_ij.cuh"
 #include "tpch_14_common.cuh"
 
 #include <algorithm>
@@ -36,10 +37,12 @@ static const uint32_t upper_shipdate = 2449992; // 1995-10-01
 static const uint32_t invalid_tid __attribute__((unused)) = std::numeric_limits<uint32_t>::max();
 */
 
+/*
 __device__ unsigned int count = 0;
 __managed__ int tupleCount;
+*/
 
-
+// FIXME remove
 __managed__ int64_t globalSum1 = 0;
 __managed__ int64_t globalSum2 = 0;
 
@@ -48,8 +51,8 @@ template<class IndexStructureType>
 __global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
     const char* prefix = "PROMO";
 
-    int64_t sum1 = 0;
-    int64_t sum2 = 0;
+    int64_t numerator = 0;
+    int64_t denominator = 0;
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
@@ -66,11 +69,11 @@ __global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ linei
             const auto extendedprice = lineitem->l_extendedprice[i];
             const auto discount = lineitem->l_discount[i];
             const auto summand = extendedprice * (100 - discount);
-            sum2 += summand;
+            denominator += summand;
 
             const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
             if (device_strcmp(type, prefix, 5) == 0) {
-                sum1 += summand;
+                numerator += summand;
             }
         }
     }
@@ -78,12 +81,12 @@ __global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ linei
     // reduce both sums
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
-        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
+        numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
+        denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
     }
     if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
-        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
+        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)numerator);
+        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)denominator);
     }
 }
 
@@ -95,13 +98,14 @@ template __global__ void ij_plain_kernel<no_op_type::device_index_t>(const linei
 
 
 
-
+/*
 __managed__ unsigned long long lookup_cycles = 0;
 __managed__ unsigned long long scan_cycles = 0;
 __managed__ unsigned long long sync_cycles = 0;
 __managed__ unsigned long long sort_cycles = 0;
 __managed__ unsigned long long join_cycles = 0;
 __managed__ unsigned long long total_cycles = 0;
+*/
 
 // Pipelined Blockwise Sorting index join kernel
 template<
@@ -109,15 +113,7 @@ template<
     unsigned ITEMS_PER_THREAD,
     class    IndexStructureType >
 __launch_bounds__ (BLOCK_THREADS)
-__global__ void ij_pbws (
-    const lineitem_table_plain_t* __restrict__ lineitem,
-    const unsigned lineitem_size,
-    const part_table_plain_t* __restrict__ part,
-    const unsigned part_size,
-    const IndexStructureType index_structure,
-    int64_t* __restrict__ l_extendedprice_buffer,
-    int64_t* __restrict__ l_discount_buffer
-    )
+__global__ void ij_pbws(const ij_args args, const IndexStructureType index_structure)
 {
     assert(BLOCK_THREADS == blockDim.x);
 
@@ -133,15 +129,23 @@ __global__ void ij_pbws (
         BUFFER_SIZE = BLOCK_THREADS*(ITEMS_PER_THREAD + 1)
     };
 
-    using BlockRadixSortT = cub::BlockRadixSort<uint32_t, BLOCK_THREADS, ITEMS_PER_THREAD, uint32_t>;
-    using key_array_t = uint32_t[ITEMS_PER_THREAD];
-    using value_array_t = uint32_t[ITEMS_PER_THREAD];
+    using BlockRadixSortT = cub::BlockRadixSort<indexed_t, BLOCK_THREADS, ITEMS_PER_THREAD, tid_t>;
+    using key_array_t = indexed_t[ITEMS_PER_THREAD];
+    using value_array_t = tid_t[ITEMS_PER_THREAD];
 
-    l_extendedprice_buffer += blockIdx.x*BUFFER_SIZE;
-    l_discount_buffer += blockIdx.x*BUFFER_SIZE;
+    const auto* __restrict__ l_shipdate_column = args.lineitem->l_shipdate;
+    const auto* __restrict__ l_extendedprice_column = args.lineitem->l_extendedprice;
+    const auto* __restrict__ l_discount_column = args.lineitem->l_discount;
+    const auto* __restrict__ l_partkey_column = args.lineitem->l_partkey;
+    const auto* __restrict__ p_type_column = args.part->p_type;
 
-    __shared__ uint32_t l_partkey_buffer[BUFFER_SIZE];
-    __shared__ uint32_t lineitem_buffer_pos[BUFFER_SIZE];
+    auto* __restrict__ l_extendedprice_buffer = args.state->l_extendedprice_buffer + blockIdx.x*BUFFER_SIZE;
+    auto* __restrict__ l_discount_buffer = args.state->l_discount_buffer + blockIdx.x*BUFFER_SIZE;
+    //l_extendedprice_buffer += blockIdx.x*BUFFER_SIZE;
+    //l_discount_buffer += blockIdx.x*BUFFER_SIZE;
+
+    __shared__ indexed_t l_partkey_buffer[BUFFER_SIZE];
+    __shared__ numeric_raw_t lineitem_buffer_pos[BUFFER_SIZE];
     __shared__ int buffer_idx;
 
     __shared__ uint32_t fully_occupied_warps;
@@ -151,27 +155,27 @@ __global__ void ij_pbws (
         typename BlockRadixSortT::TempStorage temp_storage;
     } temp_union;
 
-uint32_t max_partkey = 0;
+    uint32_t max_partkey = 0;
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
     const int max_reuse = warp_id*ITEMS_PER_WARP;
     const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, lane_id);
 
-    const unsigned tile_size = min(lineitem_size, (lineitem_size + gridDim.x - 1) / gridDim.x);
-    unsigned tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
-    const unsigned tid_limit = min(tid + tile_size, lineitem_size); // marks the end of each tile
+    const unsigned tile_size = min(args.lineitem_size, (args.lineitem_size + gridDim.x - 1) / gridDim.x);
+    tid_t tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
+    const tid_t tid_limit = min(tid + tile_size, args.lineitem_size); // marks the end of each tile
     tid += threadIdx.x; // each thread starts at it's correponding offset
 
 //if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
 
-    uint32_t l_shipdate;
-    uint32_t l_partkey;
-    int64_t l_extendedprice;
-    int64_t l_discount;
+    vector_to_raw_t<decltype(lineitem_table_t::l_shipdate)> l_shipdate;
+    vector_to_raw_t<decltype(lineitem_table_t::l_partkey)> l_partkey;
+    vector_to_raw_t<decltype(lineitem_table_t::l_extendedprice)> l_extendedprice;
+    vector_to_raw_t<decltype(lineitem_table_t::l_discount)> l_discount;
 
-    int64_t sum1 = 0;
-    int64_t sum2 = 0;
+    numeric_raw_t numerator = 0;
+    numeric_raw_t denominator = 0;
 
     // initialize shared variables
     if (warp_id == 0 && lane_id == 0) {
@@ -196,7 +200,7 @@ uint32_t max_partkey = 0;
 
             // fetch attributes
             if (active) {
-                l_shipdate = lineitem->l_shipdate[tid];
+                l_shipdate = l_shipdate_column[tid];
             }
 
             // filter predicate
@@ -204,9 +208,9 @@ uint32_t max_partkey = 0;
 
             // fetch remaining attributes
             if (active) {
-                l_partkey = lineitem->l_partkey[tid];
-                l_extendedprice = lineitem->l_extendedprice[tid];
-                l_discount = lineitem->l_discount[tid];
+                l_partkey = l_partkey_column[tid];
+                l_extendedprice = l_extendedprice_column[tid];
+                l_discount = l_discount_column[tid];
             }
 
             // negotiate buffer target positions among all threads in this warp
@@ -276,8 +280,8 @@ uint32_t max_partkey = 0;
             const unsigned first_offset = max(0, static_cast<int>(buffer_idx) - ITEMS_PER_BLOCK);
 
 //if (warp_id == 0 && lane_id == 0) printf("=== first_offset: %u\n", first_offset);
-            uint32_t* thread_keys_raw = reinterpret_cast<uint32_t*>(&l_partkey_buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
-            uint32_t* thread_values_raw = reinterpret_cast<uint32_t*>(&lineitem_buffer_pos[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
+            indexed_t* thread_keys_raw = reinterpret_cast<indexed_t*>(&l_partkey_buffer[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
+            tid_t* thread_values_raw = reinterpret_cast<tid_t*>(&lineitem_buffer_pos[threadIdx.x*ITEMS_PER_THREAD + first_offset]);
             key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
             value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
 
@@ -294,7 +298,6 @@ uint32_t max_partkey = 0;
         }
 #endif
 
-#if 1
         // empty buffer
         for (unsigned i = 0u; i < ITEMS_PER_THREAD; ++i) {
             unsigned old;
@@ -336,21 +339,17 @@ uint32_t max_partkey = 0;
 
             if (active) {
                 const auto summand = l_extendedprice_buffer[assoc_pos] * (100 - l_discount_buffer[assoc_pos]);
-                sum2 += summand;
+                denominator += summand;
 
-                const char* type = reinterpret_cast<const char*>(&part->p_type[tid_b]); // FIXME relies on undefined behavior
+                const char* type = reinterpret_cast<const char*>(&p_type_column[tid_b]); // FIXME relies on undefined behavior
                 if (device_strcmp(type, "PROMO", 5) == 0) {
-                    sum1 += summand;
+                    numerator += summand;
                 }
             }
 
 //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
 
         }
-#else
-        // discard elements
-        if (lane_id == 0) buffer_idx = 0;
-#endif
 
 #ifdef MEASURE_CYCLES
         __syncwarp();
@@ -372,12 +371,12 @@ uint32_t max_partkey = 0;
     // reduce both sums
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
-        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
+        numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
+        denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
     }
     if (lane_id == 0) {
-        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
-        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
+        atomicAdd((unsigned long long int*)&args.state->global_numerator, (unsigned long long int)numerator);
+        atomicAdd((unsigned long long int*)&args.state->global_denominator, (unsigned long long int)denominator);
     }
 
 #ifdef MEASURE_CYCLES
@@ -389,12 +388,11 @@ uint32_t max_partkey = 0;
 #endif
 }
 
-template __global__ void ij_pbws<256, 10, btree_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const unsigned part_size, const btree_type::device_index_t index_structure, int64_t* __restrict__ l_extendedprice_buffer, int64_t* __restrict__ l_discount_buffer);
-template __global__ void ij_pbws<256, 10, harmonia_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const unsigned part_size, const harmonia_type::device_index_t index_structure, int64_t* __restrict__ l_extendedprice_buffer, int64_t* __restrict__ l_discount_buffer);
-template __global__ void ij_pbws<256, 10, lower_bound_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const unsigned part_size, const lower_bound_type::device_index_t index_structure, int64_t* __restrict__ l_extendedprice_buffer, int64_t* __restrict__ l_discount_buffer);
-template __global__ void ij_pbws<256, 10, radix_spline_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const unsigned part_size, const radix_spline_type::device_index_t index_structure, int64_t* __restrict__ l_extendedprice_buffer, int64_t* __restrict__ l_discount_buffer);
-template __global__ void ij_pbws<256, 10, no_op_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const unsigned part_size, const no_op_type::device_index_t index_structure, int64_t* __restrict__ l_extendedprice_buffer, int64_t* __restrict__ l_discount_buffer);
-
+template __global__ void ij_pbws<256, 10, btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
+template __global__ void ij_pbws<256, 10, harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
+template __global__ void ij_pbws<256, 10, lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_pbws<256, 10, radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
+template __global__ void ij_pbws<256, 10, no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
 
 // TODO port
@@ -1172,8 +1170,8 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
 
 
 __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const part_table_plain_t* __restrict__ part, const join_entry* __restrict__ join_entries, size_t n) {
-    int64_t sum1 = 0;
-    int64_t sum2 = 0;
+    int64_t numerator = 0;
+    int64_t denominator = 0;
     const char* prefix = "PROMO";
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1185,25 +1183,25 @@ __global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineit
         const auto extendedprice = lineitem->l_extendedprice[lineitem_tid];
         const auto discount = lineitem->l_discount[lineitem_tid];
         const auto summand = extendedprice * (100 - discount);
-        sum2 += summand;
+        denominator += summand;
 
         const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
 //        printf("type: %s\n", type);
         if (device_strcmp(type, prefix, 5) == 0) {
-            sum1 += summand;
+            numerator += summand;
         }
     }
 
     // reduce both sums
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        sum1 += __shfl_down_sync(FULL_MASK, sum1, offset);
-        sum2 += __shfl_down_sync(FULL_MASK, sum2, offset);
+        numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
+        denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
     }
     //__reduce_add_sync() requires compute capability 8
     if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)sum1);
-        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)sum2);
+        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)numerator);
+        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)denominator);
     }
 }
 #endif
