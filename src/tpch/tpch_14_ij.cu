@@ -145,7 +145,7 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
     //l_discount_buffer += blockIdx.x*BUFFER_SIZE;
 
     __shared__ indexed_t l_partkey_buffer[BUFFER_SIZE];
-    __shared__ numeric_raw_t lineitem_buffer_pos[BUFFER_SIZE];
+    __shared__ tid_t lineitem_buffer_pos[BUFFER_SIZE];
     __shared__ int buffer_idx;
 
     __shared__ uint32_t fully_occupied_warps;
