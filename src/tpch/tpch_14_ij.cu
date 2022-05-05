@@ -104,16 +104,6 @@ template __global__ void ij_plain_kernel<radix_spline_type::device_index_t>(cons
 template __global__ void ij_plain_kernel<no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
 
-
-/*
-__managed__ unsigned long long lookup_cycles = 0;
-__managed__ unsigned long long scan_cycles = 0;
-__managed__ unsigned long long sync_cycles = 0;
-__managed__ unsigned long long sort_cycles = 0;
-__managed__ unsigned long long join_cycles = 0;
-__managed__ unsigned long long total_cycles = 0;
-*/
-
 // Pipelined Blockwise Sorting index join kernel
 template<
     unsigned BLOCK_THREADS,
@@ -148,8 +138,6 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
 
     auto* __restrict__ l_extendedprice_buffer = args.state->l_extendedprice_buffer + blockIdx.x*BUFFER_SIZE;
     auto* __restrict__ l_discount_buffer = args.state->l_discount_buffer + blockIdx.x*BUFFER_SIZE;
-    //l_extendedprice_buffer += blockIdx.x*BUFFER_SIZE;
-    //l_discount_buffer += blockIdx.x*BUFFER_SIZE;
 
     __shared__ indexed_t l_partkey_buffer[BUFFER_SIZE];
     __shared__ tid_t lineitem_buffer_pos[BUFFER_SIZE];
@@ -261,28 +249,18 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
             atomicAdd(&scan_cycles, (unsigned long long)scan_t2 - t1);
         }
 #endif
-/*
-#ifdef MEASURE_CYCLES
-        const auto sync_t1 = clock64();
-#endif
-*/
+
         __syncthreads(); // wait until all threads have gathered enough elements
 #ifdef MEASURE_CYCLES
         __syncwarp();
         const auto sync_t2 = clock64();
         if (lane_id == 0) {
-//            atomicAdd(&sync_cycles, (unsigned long long)sync_t2 - sync_t1);
             atomicAdd(&sync_cycles, (unsigned long long)sync_t2 - scan_t2);
         }
 #endif
 
 
 #ifndef SKIP_SORT
-/*
-#ifdef MEASURE_CYCLES
-        const auto sort_t1 = clock64();
-#endif
-*/
         if (fully_occupied_warps == WARPS_PER_BLOCK) {
 //if (warp_id == 0 && lane_id == 0) printf("=== sorting... ===\n");
 
@@ -302,7 +280,6 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
         __syncwarp();
         const auto sort_t2 = clock64();
         if (lane_id == 0) {
-//            atomicAdd(&sort_cycles, (unsigned long long)sort_t2 - sort_t1);
             atomicAdd(&sort_cycles, (unsigned long long)sort_t2 - sync_t2);
         }
 #endif
@@ -359,7 +336,6 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
             }
 
 //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
-
         }
 
 #ifdef MEASURE_CYCLES
