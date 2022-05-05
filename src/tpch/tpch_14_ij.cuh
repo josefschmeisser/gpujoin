@@ -16,6 +16,8 @@ struct ij_mutable_state {
     numeric_raw_t* __restrict__ l_discount_buffer = nullptr;
     join_entry* __restrict__ join_entries = nullptr;
     unsigned output_index = 0u;
+    // Debugging counters
+    unsigned lineitem_matches = 0u;
     // Cycle counters
     unsigned long long lookup_cycles = 0ull;
     unsigned long long scan_cycles = 0ull;
@@ -37,6 +39,9 @@ struct ij_args {
     // State and outputs
 	ij_mutable_state* const state;
 };
+
+template<class IndexStructureType>
+__global__ void ij_plain_kernel(const ij_args args, const IndexStructureType index_structure);
 
 // Pipelined Blockwise Sorting index join kernel
 template<

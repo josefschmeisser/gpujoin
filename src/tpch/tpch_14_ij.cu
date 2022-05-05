@@ -1,3 +1,4 @@
+#include "config.hpp"
 #include "tpch_14_ij.cuh"
 #include "tpch_14_common.cuh"
 
@@ -41,37 +42,43 @@ static const uint32_t invalid_tid __attribute__((unused)) = std::numeric_limits<
 __device__ unsigned int count = 0;
 __managed__ int tupleCount;
 */
-
+/*
 // FIXME remove
 __managed__ int64_t globalSum1 = 0;
 __managed__ int64_t globalSum2 = 0;
-
+*/
 
 template<class IndexStructureType>
-__global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, IndexStructureType index_structure) {
+__global__ void ij_plain_kernel(const ij_args args, const IndexStructureType index_structure) {
     const char* prefix = "PROMO";
 
-    int64_t numerator = 0;
-    int64_t denominator = 0;
+    const auto* __restrict__ l_shipdate_column = args.lineitem->l_shipdate;
+    const auto* __restrict__ l_extendedprice_column = args.lineitem->l_extendedprice;
+    const auto* __restrict__ l_discount_column = args.lineitem->l_discount;
+    const auto* __restrict__ l_partkey_column = args.lineitem->l_partkey;
+    const auto* __restrict__ p_type_column = args.part->p_type;
+
+    numeric_raw_t numerator = 0;
+    numeric_raw_t denominator = 0;
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size; i += stride) {
-        if (lineitem->l_shipdate[i] < lower_shipdate ||
-            lineitem->l_shipdate[i] >= upper_shipdate) {
+    for (int i = index; i < args.lineitem_size; i += stride) {
+        if (l_shipdate_column[i] < lower_shipdate ||
+            l_shipdate_column[i] >= upper_shipdate) {
             continue;
         }
 
-        auto payload = index_structure.lookup(lineitem->l_partkey[i]);
+        auto payload = index_structure.lookup(l_partkey_column[i]);
         if (payload != invalid_tid) {
             const auto part_tid = reinterpret_cast<unsigned>(payload);
 
-            const auto extendedprice = lineitem->l_extendedprice[i];
-            const auto discount = lineitem->l_discount[i];
+            const auto extendedprice = l_extendedprice_column[i];
+            const auto discount = l_discount_column[i];
             const auto summand = extendedprice * (100 - discount);
             denominator += summand;
 
-            const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
+            const char* type = reinterpret_cast<const char*>(&p_type_column[part_tid]); // FIXME relies on undefined behavior
             if (device_strcmp(type, prefix, 5) == 0) {
                 numerator += summand;
             }
@@ -85,16 +92,16 @@ __global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ linei
         denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
     }
     if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)numerator);
-        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)denominator);
+        atomicAdd((unsigned long long int*)&args.state->global_numerator, (unsigned long long int)numerator);
+        atomicAdd((unsigned long long int*)&args.state->global_denominator, (unsigned long long int)denominator);
     }
 }
 
-template __global__ void ij_plain_kernel<btree_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const btree_type::device_index_t index_structure);
-template __global__ void ij_plain_kernel<harmonia_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const harmonia_type::device_index_t index_structure);
-template __global__ void ij_plain_kernel<lower_bound_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const lower_bound_type::device_index_t index_structure);
-template __global__ void ij_plain_kernel<radix_spline_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const radix_spline_type::device_index_t index_structure);
-template __global__ void ij_plain_kernel<no_op_type::device_index_t>(const lineitem_table_plain_t* __restrict__ lineitem, const unsigned lineitem_size, const part_table_plain_t* __restrict__ part, const no_op_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
 
 
@@ -220,7 +227,9 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
             uint32_t dest_idx = 0;
             if (lane_id == 0) {
                 dest_idx = atomicAdd(&buffer_idx, item_cnt);
- //atomicAdd(&debug_cnt, item_cnt);
+#ifndef NDEBUG
+                atomicAdd(&args.state->lineitem_matches, item_cnt);
+#endif
             }
             dest_idx = __shfl_sync(FULL_MASK, dest_idx, 0); // propagate the first buffer target index
             dest_idx += __popc(active_mask & right_mask); // add each participating thread's offset
@@ -327,6 +336,8 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
             const auto lookup_t1 = clock64();
 #endif
             tid_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
+            assert(tid_b != invalid_tid);
+
 #ifdef MEASURE_CYCLES
             __syncwarp();
             const auto lookup_t2 = clock64();

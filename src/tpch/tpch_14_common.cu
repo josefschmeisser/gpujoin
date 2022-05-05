@@ -167,11 +167,46 @@ template<class IndexType>
 struct ij_plain_approach {
     void operator()(query_data& d) {
         const auto& config = get_experiment_config();
-
+/*
         const int num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
         IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
         ij_plain_kernel<<<num_blocks, config.block_size>>>(d.lineitem_device, d.lineitem_size, d.part_device, index_structure.device_index);
         cudaDeviceSynchronize();
+*/
+
+        struct ij_mutable_state mutable_state;
+
+        auto d_mutable_state = create_device_array<ij_mutable_state>(1);
+        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(ij_mutable_state));
+
+        const ij_args args {
+            // Inputs
+            d.lineitem_device,
+            d.lineitem_size,
+            d.part_device,
+            d.part_size,
+            // State and outputs
+            d_mutable_state.data()
+        };
+
+        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+
+        //ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(d.lineitem_device, d.lineitem_size, d.part_device, d.part_size, index_structure.device_index, l_extendedprice_buffer, l_discount_buffer);
+const int num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
+        ij_plain_kernel<<<num_blocks, config.block_size>>>(args, index_structure.device_index);
+        cudaDeviceSynchronize();
+
+        // Fetch result
+        const auto r = d_mutable_state.to_host_accessible();
+        const auto& state = r.data()[0];
+        auto numerator = state.global_numerator;
+        auto denominator = state.global_denominator;
+        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
+
+        numerator *= 1'000;
+        denominator /= 1'000;
+        int64_t result = 100*numerator/denominator;
+        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
     }
 };
 
@@ -293,6 +328,8 @@ struct ij_args {
         denominator /= 1'000;
         int64_t result = 100*numerator/denominator;
         printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
+
+        printf("lineitem_matches: %u\n", state.lineitem_matches);
     }
 };
 

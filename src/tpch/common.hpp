@@ -50,14 +50,21 @@ struct to_raw_type<date> {
 template<class T>
 struct column {
     using value_type = T;
+    using raw_type = typename to_raw_type<T>::type;
     using plain_array_type = typename to_raw_type<T>::type *;
     using vector_type = std::vector<T, table_allocator<T>>;
 };
 
+template<class T>
+using column_raw_t = typename column<T>::raw_type;
+
+template<class VectorType>
+using vector_to_raw_t = typename column<typename VectorType::value_type>::raw_type;
+
 struct lineitem_table_t {
     column<uint32_t>::vector_type l_orderkey;
-    //column<uint32_t>::vector_type l_partkey;
-    column<uint64_t>::vector_type l_partkey;
+    column<uint32_t>::vector_type l_partkey;
+    //column<uint64_t>::vector_type l_partkey;
     column<uint32_t>::vector_type l_suppkey;
     column<uint32_t>::vector_type l_linenumber;
     column<numeric<15, 2>>::vector_type l_quantity;
@@ -127,8 +134,8 @@ create table part
   );*/
 
 struct part_table_t {
-    //column<uint32_t>::vector_type p_partkey;
-    column<uint64_t>::vector_type p_partkey;
+    column<uint32_t>::vector_type p_partkey;
+    //column<uint64_t>::vector_type p_partkey;
     column<std::array<char, 55>>::vector_type p_name;
     column<std::array<char, 25>>::vector_type p_mfgr;
     column<std::array<char, 10>>::vector_type p_brand;
