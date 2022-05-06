@@ -103,7 +103,6 @@ template __global__ void ij_plain_kernel<lower_bound_type::device_index_t>(const
 template __global__ void ij_plain_kernel<radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void ij_plain_kernel<no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
-
 // Pipelined Blockwise Sorting index join kernel
 template<
     unsigned BLOCK_THREADS,
@@ -381,44 +380,37 @@ template __global__ void ij_pbws<256, 10, lower_bound_type::device_index_t>(cons
 template __global__ void ij_pbws<256, 10, radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void ij_pbws<256, 10, no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
-
-// TODO port
-#if 0
-struct join_entry {
-    unsigned lineitem_tid;
-    unsigned part_tid;
-};
-__device__ unsigned output_index = 0;
-
-
+// Non-Pipelined Plain Scan and Lookup kernel
 template<class IndexStructureType>
-__global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, join_entry* __restrict__ join_entries) {
+__global__ void ij_lookup_kernel(const ij_args args, const IndexStructureType index_structure) {
+    const auto* __restrict__ l_shipdate_column = args.lineitem->l_shipdate;
+    const auto* __restrict__ l_partkey_column = args.lineitem->l_partkey;
+    auto* __restrict__ join_entries = args.state->join_entries;
+
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < lineitem_size + 31; i += stride) {
+    for (int i = index; i < args.lineitem_size + 31; i += stride) {
         tid_t payload = invalid_tid;
-        if (i < lineitem_size &&
-            lineitem->l_shipdate[i] >= lower_shipdate &&
-            lineitem->l_shipdate[i] < upper_shipdate) {
-            payload = index_structure.lookup(lineitem->l_partkey[i]);
+        if (i < args.lineitem_size &&
+            l_shipdate_column[i] >= lower_shipdate &&
+            l_shipdate_column[i] < upper_shipdate) {
+            payload = index_structure.lookup(l_partkey_column[i]);
         }
 
         int match = payload != invalid_tid;
         unsigned mask = __ballot_sync(FULL_MASK, match);
         unsigned my_lane = lane_id();
-        unsigned right = __funnelshift_l(0xffffffff, 0, my_lane);
-//        printf("right %u\n", right);
+        unsigned right = __funnelshift_l(FULL_MASK, 0, my_lane);
         unsigned offset = __popc(mask & right);
 
         unsigned base = 0;
         int leader = __ffs(mask) - 1;
         if (my_lane == leader) {
-            base = atomicAdd(&output_index, __popc(mask));
+            base = atomicAdd(&args.state->output_index, __popc(mask));
         }
         base = __shfl_sync(FULL_MASK, base, leader);
 
         if (match) {
-//            printf("lane %u store to: %u\n", my_lane, base + offset);
             auto& join_entry = join_entries[base + offset];
             join_entry.lineitem_tid = i;
             join_entry.part_tid = payload;
@@ -426,6 +418,56 @@ __global__ void ij_lookup_kernel(const lineitem_table_plain_t* __restrict__ line
     }
 }
 
+template __global__ void ij_lookup_kernel<btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
+template __global__ void ij_lookup_kernel<harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
+template __global__ void ij_lookup_kernel<lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_lookup_kernel<radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
+template __global__ void ij_lookup_kernel<no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
+
+// Non-Pipelined Plain Join kernel
+__global__ void ij_join_kernel(const ij_args args) {
+    const char* prefix = "PROMO";
+
+    const auto* __restrict__ l_extendedprice_column = args.lineitem->l_extendedprice;
+    const auto* __restrict__ l_discount_column = args.lineitem->l_discount;
+    const auto* __restrict__ p_type_column = args.part->p_type;
+    const auto* __restrict__ join_entries = args.state->join_entries;
+
+    numeric_raw_t numerator = 0;
+    numeric_raw_t denominator = 0;
+
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = blockDim.x * gridDim.x;
+    const auto join_count = args.state->output_index;
+    for (int i = index; i < join_count; i += stride) {
+        const auto lineitem_tid = join_entries[i].lineitem_tid;
+        const auto part_tid = join_entries[i].part_tid;
+
+        const auto extendedprice = l_extendedprice_column[lineitem_tid];
+        const auto discount = l_discount_column[lineitem_tid];
+        const auto summand = extendedprice * (100 - discount);
+        denominator += summand;
+
+        const char* type = reinterpret_cast<const char*>(&p_type_column[part_tid]); // FIXME relies on undefined behavior
+        if (device_strcmp(type, prefix, 5) == 0) {
+            numerator += summand;
+        }
+    }
+
+    // reduce both sums
+    #pragma unroll
+    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
+        numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
+        denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
+    }
+    //__reduce_add_sync() requires compute capability 8
+    if (lane_id() == 0) {
+        atomicAdd((unsigned long long int*)&args.state->global_numerator, (unsigned long long int)numerator);
+        atomicAdd((unsigned long long int*)&args.state->global_denominator, (unsigned long long int)denominator);
+    }
+}
+
+#if 0
 template<
     int   BLOCK_THREADS,
     class IndexStructureType >
@@ -1143,52 +1185,6 @@ unsigned l = __popc(__ballot_sync(FULL_MASK, active && l_partkey < moving_percen
         moving_percentile = -1.;
 
         __syncthreads();
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-__global__ void ij_join_kernel(const lineitem_table_plain_t* __restrict__ lineitem, const part_table_plain_t* __restrict__ part, const join_entry* __restrict__ join_entries, size_t n) {
-    int64_t numerator = 0;
-    int64_t denominator = 0;
-    const char* prefix = "PROMO";
-
-    const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < n; i += stride) {
-        const auto lineitem_tid = join_entries[i].lineitem_tid;
-        const auto part_tid = join_entries[i].part_tid;
-
-        const auto extendedprice = lineitem->l_extendedprice[lineitem_tid];
-        const auto discount = lineitem->l_discount[lineitem_tid];
-        const auto summand = extendedprice * (100 - discount);
-        denominator += summand;
-
-        const char* type = reinterpret_cast<const char*>(&part->p_type[part_tid]); // FIXME relies on undefined behavior
-//        printf("type: %s\n", type);
-        if (device_strcmp(type, prefix, 5) == 0) {
-            numerator += summand;
-        }
-    }
-
-    // reduce both sums
-    #pragma unroll
-    for (int offset = warpSize / 2; offset > 0; offset /= 2) {
-        numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
-        denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
-    }
-    //__reduce_add_sync() requires compute capability 8
-    if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&globalSum1, (unsigned long long int)numerator);
-        atomicAdd((unsigned long long int*)&globalSum2, (unsigned long long int)denominator);
     }
 }
 #endif

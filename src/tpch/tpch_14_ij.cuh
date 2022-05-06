@@ -53,3 +53,10 @@ __global__ void ij_pbws (
     const ij_args args,
     const IndexStructureType index_structure
     );
+
+// Non-Pipelined Plain Scan and Lookup kernel
+template<class IndexStructureType>
+__global__ void ij_lookup_kernel(const ij_args args, const IndexStructureType index_structure);
+
+// Non-Pipelined Plain Join kernel
+__global__ void ij_join_kernel(const ij_args args);

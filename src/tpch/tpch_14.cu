@@ -2,29 +2,6 @@
 
 
 
-    void run_two_phase_ij_plain() {
-        join_entry* join_entries;
-        cudaMalloc(&join_entries, sizeof(join_entry)*lineitem_size);
-
-        const auto kernelStart = std::chrono::high_resolution_clock::now();
-
-        int num_blocks = (part_size + block_size - 1) / block_size;
-        ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries);
-        cudaDeviceSynchronize();
-
-        decltype(output_index) matches;
-        cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
-        assert(error == cudaSuccess);
-        //printf("join matches: %u\n", matches);
-
-        num_blocks = (lineitem_size + block_size - 1) / block_size;
-        ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
-        cudaDeviceSynchronize();
-
-        const auto kernelStop = std::chrono::high_resolution_clock::now();
-        const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
-        std::cout << "kernel time: " << kernelTime << " ms\n";
-    }
 
     void compare_join_results(join_entry* ref, unsigned ref_size, join_entry* actual, unsigned actual_size) {
         std::unordered_map<uint32_t, uint32_t> map;

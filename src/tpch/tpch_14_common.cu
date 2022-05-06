@@ -207,7 +207,7 @@ struct ij_plain_approach {
 template<class IndexType>
 struct ij_pbws_approach {
     void operator()(query_data& d) {
-        const auto& config = get_experiment_config();
+//        const auto& config = get_experiment_config();
 
         enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
 
@@ -254,6 +254,84 @@ struct ij_pbws_approach {
     }
 };
 
+/*
+void run_two_phase_ij_plain() {
+    join_entry* join_entries;
+    cudaMalloc(&join_entries, sizeof(join_entry)*lineitem_size);
+
+    const auto kernelStart = std::chrono::high_resolution_clock::now();
+
+    int num_blocks = (part_size + block_size - 1) / block_size;
+    ij_lookup_kernel<<<num_blocks, block_size>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries);
+    cudaDeviceSynchronize();
+
+    decltype(output_index) matches;
+    cudaError_t error = cudaMemcpyFromSymbol(&matches, output_index, sizeof(matches), 0, cudaMemcpyDeviceToHost);
+    assert(error == cudaSuccess);
+    //printf("join matches: %u\n", matches);
+
+    num_blocks = (lineitem_size + block_size - 1) / block_size;
+    ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries, matches);
+    cudaDeviceSynchronize();
+
+    const auto kernelStop = std::chrono::high_resolution_clock::now();
+    const auto kernelTime = std::chrono::duration_cast<std::chrono::microseconds>(kernelStop - kernelStart).count()/1000.;
+    std::cout << "kernel time: " << kernelTime << " ms\n";
+}
+*/
+
+// Non-Pipelined Lookup First Plain approach
+template<class IndexType>
+struct ij_nplfplain_approach {
+    static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
+
+    void operator()(query_data& d) {
+        const auto& config = get_experiment_config();
+
+        auto d_join_entries = create_device_array<join_entry>(selectivity_est*d.lineitem_size);
+
+        struct ij_mutable_state mutable_state;
+        mutable_state.join_entries = d_join_entries.data();
+
+        auto d_mutable_state = create_device_array<ij_mutable_state>(1);
+        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(ij_mutable_state));
+
+        const ij_args args {
+            // Inputs
+            d.lineitem_device,
+            d.lineitem_size,
+            d.part_device,
+            d.part_size,
+            // State and outputs
+            d_mutable_state.data()
+        };
+
+        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+
+        int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
+        ij_lookup_kernel<<<num_blocks, config.block_size>>>(args, index_structure.device_index);
+
+        num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
+        ij_join_kernel<<<num_blocks, config.block_size>>>(args);
+
+        cudaDeviceSynchronize();
+
+        // Fetch result
+        const auto r = d_mutable_state.to_host_accessible();
+        const auto& state = r.data()[0];
+        auto numerator = state.global_numerator;
+        auto denominator = state.global_denominator;
+        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
+
+        numerator *= 1'000;
+        denominator /= 1'000;
+        int64_t result = 100*numerator/denominator;
+        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
+
+        printf("lineitem_matches: %u\n", state.lineitem_matches);
+    }
+};
+
 template<class IndexType>
 struct ij_partitioning_approach {
     using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
@@ -263,7 +341,7 @@ struct ij_partitioning_approach {
     static constexpr unsigned radix_bits = 10; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
     static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
-    
+
     size_t buffer_size;
     int grid_size;
 
@@ -539,6 +617,7 @@ static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
     { "ij_plain", std::make_shared<approach_dispatcher<ij_plain_approach>>() },
     { "ij_pbws", std::make_shared<approach_dispatcher<ij_pbws_approach>>() },
+    { "ij_nplfplain", std::make_shared<approach_dispatcher<ij_nplfplain_approach>>() },
     { "ij_partitioning", std::make_shared<approach_dispatcher<ij_partitioning_approach>>() }
 };
 
@@ -550,9 +629,7 @@ static measuring::experiment_description create_experiment_description() {
     r.approach = config.approach;
     std::vector<std::pair<std::string, std::string>> other = {
         std::make_pair(std::string("device"), std::string(get_device_properties(0).name)),
-        std::make_pair(std::string("index_type"), config.index_type),
         std::make_pair(std::string("db_path"), config.db_path),
-        std::make_pair(std::string("prefetch_index"), tmpl_to_string(config.prefetch_index)),
         std::make_pair(std::string("sort_indexed_relation"), tmpl_to_string(config.sort_indexed_relation)),
         std::make_pair(std::string("block_size"), tmpl_to_string(config.block_size)),
 
@@ -561,6 +638,11 @@ static measuring::experiment_description create_experiment_description() {
         std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
         std::make_pair(std::string("device_table_allocator"), std::string(type_name<device_table_allocator<int>>::value()))
     };
+
+    if (r.approach != "hj") {
+        other.emplace_back(std::string("index_type"), config.index_type);
+        other.emplace_back(std::string("prefetch_index"), tmpl_to_string(config.prefetch_index));
+    }
 
     if (r.approach == "ij_partitioning") {
         other.emplace_back(std::string("num_stream"), tmpl_to_string(ij_partitioning_approach<no_op_type>::num_streams));
