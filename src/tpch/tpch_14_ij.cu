@@ -32,22 +32,6 @@
 
 using namespace cub;
 
-/*
-static const uint32_t lower_shipdate = 2449962; // 1995-09-01
-static const uint32_t upper_shipdate = 2449992; // 1995-10-01
-static const uint32_t invalid_tid __attribute__((unused)) = std::numeric_limits<uint32_t>::max();
-*/
-
-/*
-__device__ unsigned int count = 0;
-__managed__ int tupleCount;
-*/
-/*
-// FIXME remove
-__managed__ int64_t globalSum1 = 0;
-__managed__ int64_t globalSum2 = 0;
-*/
-
 template<class IndexStructureType>
 __global__ void ij_plain_kernel(const ij_args args, const IndexStructureType index_structure) {
     const char* prefix = "PROMO";
@@ -467,37 +451,43 @@ __global__ void ij_join_kernel(const ij_args args) {
     }
 }
 
-#if 0
+// ----------------------------------------------------------------------------
+
+
+// Non-Pipelined Lane Refill Scan and Lookup kernel
+// ij_lookup_kernel_4
 template<
     int   BLOCK_THREADS,
     class IndexStructureType >
-__global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ lineitem, unsigned lineitem_size, const IndexStructureType index_structure, join_entry* __restrict__ join_entries) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
+__global__ void ij_np_lane_refill_scan_lookup(const ij_args args, const IndexStructureType index_structure) {
+    const auto* __restrict__ l_shipdate_column = args.lineitem->l_shipdate;
+    const auto* __restrict__ l_partkey_column = args.lineitem->l_partkey;
+    auto* __restrict__ join_entries = args.state->join_entries;
 
     const unsigned my_warp = threadIdx.x / 32;
     const unsigned my_lane = lane_id();
-    const uint32_t right_mask = __funnelshift_l(0xffffffff, 0, my_lane);
+    const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, my_lane);
 
     __shared__ uint32_t l_partkey_buffer[BLOCK_THREADS];
     __shared__ uint32_t lineitem_buffer_pos[BLOCK_THREADS];
 
-    //__shared__ uint32_t buffer_idx;
+    // attributes
+    vector_to_raw_t<decltype(lineitem_table_t::l_shipdate)> l_shipdate;
+    vector_to_raw_t<decltype(lineitem_table_t::l_partkey)> l_partkey;
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+
+    tid_t lineitem_tid;
     unsigned buffer_cnt = 0; // number of buffered items in this warp
     const unsigned buffer_start = 32*my_warp;
 
-    // attributes
-    uint32_t l_shipdate;
-    uint32_t l_partkey;
-
-    unsigned lineitem_tid;
-
-    uint32_t unfinished_lanes = __ballot_sync(FULL_MASK, index < lineitem_size);
+    uint32_t unfinished_lanes = __ballot_sync(FULL_MASK, index < args.lineitem_size);
     while (unfinished_lanes || buffer_cnt > 0) {
-        bool active = index < lineitem_size;
+        bool active = index < args.lineitem_size;
         if (active) {
-            l_shipdate = lineitem->l_shipdate[index];
-            l_partkey = lineitem->l_partkey[index];
+            l_shipdate = l_shipdate_column[index];
+            l_partkey = l_partkey_column[index];
             lineitem_tid = index;
         }
 
@@ -536,7 +526,7 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
 
             unsigned base = 0;
             if (my_lane == 0 && mask) {
-                base = atomicAdd(&output_index, __popc(mask));
+                base = atomicAdd(&args.state->output_index, __popc(mask));
             }
             base = __shfl_sync(FULL_MASK, base, 0);
 
@@ -564,9 +554,23 @@ __global__ void ij_lookup_kernel_4(const lineitem_table_plain_t* __restrict__ li
         }
 
         index += stride;
-        unfinished_lanes = __ballot_sync(FULL_MASK, index < lineitem_size);
+        unfinished_lanes = __ballot_sync(FULL_MASK, index < args.lineitem_size);
     }
 }
+
+template __global__ void ij_np_lane_refill_scan_lookup<256, btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
+template __global__ void ij_np_lane_refill_scan_lookup<256, harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
+template __global__ void ij_np_lane_refill_scan_lookup<256, lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_np_lane_refill_scan_lookup<256, radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
+template __global__ void ij_np_lane_refill_scan_lookup<256, no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
+
+
+
+
+
+
+
+#if 0
 
 template<
     int   BLOCK_THREADS,

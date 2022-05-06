@@ -102,6 +102,21 @@ struct query_data {
     }
 };
 
+template<class T>
+void print_results(const T& d_mutable_state) {
+    // Fetch result
+    const auto r = d_mutable_state.to_host_accessible();
+    const auto& state = r.data()[0];
+    auto numerator = state.global_numerator;
+    auto denominator = state.global_denominator;
+    printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
+
+    numerator *= 1'000;
+    denominator /= 1'000;
+    int64_t result = 100*numerator/denominator;
+    printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
+}
+
 struct abstract_approach_dispatcher {
     virtual void run(query_data& d, index_type_enum index_type) const = 0;
 };
@@ -157,6 +172,8 @@ struct hj_approach {
         num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
         hj_probe_kernel<<<num_blocks, config.block_size>>>(d.lineitem_size, d.part_device, d.lineitem_device, ht.deviceHandle);
         cudaDeviceSynchronize();
+
+// TODO        print_results();
     }
 };
 
@@ -189,17 +206,7 @@ struct ij_plain_approach {
         ij_plain_kernel<<<num_blocks, config.block_size>>>(args, index_structure.device_index);
         cudaDeviceSynchronize();
 
-        // Fetch result
-        const auto r = d_mutable_state.to_host_accessible();
-        const auto& state = r.data()[0];
-        auto numerator = state.global_numerator;
-        auto denominator = state.global_denominator;
-        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
-
-        numerator *= 1'000;
-        denominator /= 1'000;
-        int64_t result = 100*numerator/denominator;
-        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
+        print_results(d_mutable_state);
     }
 };
 
@@ -238,19 +245,7 @@ struct ij_pbws_approach {
         ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(args, index_structure.device_index);
         cudaDeviceSynchronize();
 
-        // Fetch result
-        const auto r = d_mutable_state.to_host_accessible();
-        const auto& state = r.data()[0];
-        auto numerator = state.global_numerator;
-        auto denominator = state.global_denominator;
-        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
-
-        numerator *= 1'000;
-        denominator /= 1'000;
-        int64_t result = 100*numerator/denominator;
-        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
-
-        printf("lineitem_matches: %u\n", state.lineitem_matches);
+        print_results(d_mutable_state);
     }
 };
 
@@ -313,22 +308,9 @@ struct ij_nplfplain_approach {
 
         num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
         ij_join_kernel<<<num_blocks, config.block_size>>>(args);
-
         cudaDeviceSynchronize();
 
-        // Fetch result
-        const auto r = d_mutable_state.to_host_accessible();
-        const auto& state = r.data()[0];
-        auto numerator = state.global_numerator;
-        auto denominator = state.global_denominator;
-        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
-
-        numerator *= 1'000;
-        denominator /= 1'000;
-        int64_t result = 100*numerator/denominator;
-        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
-
-        printf("lineitem_matches: %u\n", state.lineitem_matches);
+        print_results(d_mutable_state);
     }
 };
 

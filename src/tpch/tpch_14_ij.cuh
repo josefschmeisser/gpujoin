@@ -60,3 +60,9 @@ __global__ void ij_lookup_kernel(const ij_args args, const IndexStructureType in
 
 // Non-Pipelined Plain Join kernel
 __global__ void ij_join_kernel(const ij_args args);
+
+// Non-Pipelined Lane Refill Scan and Lookup kernel
+template<
+    int   BLOCK_THREADS,
+    class IndexStructureType >
+__global__ void ij_np_lane_refill_scan_lookup(const ij_args args, const IndexStructureType index_structure);
