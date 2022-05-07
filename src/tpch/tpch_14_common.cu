@@ -17,6 +17,7 @@
 #include "LinearProbingHashTable.cuh"
 #include "measuring.hpp"
 #include "partitioned_relation.hpp"
+#include "tpch_14_hj.cuh"
 #include "tpch_14_ij.cuh"
 #include "tpch_14_ij_partitioning.cuh"
 
@@ -153,27 +154,38 @@ struct my_approach {
     }
 };
 
-using device_ht_t = LinearProbingHashTable<uint32_t, size_t>::DeviceHandle;
-
-__global__ void hj_build_kernel(size_t n, const part_table_plain_t* part, device_ht_t ht);
-
-__global__ void hj_probe_kernel(size_t n, const part_table_plain_t* __restrict__ part, const lineitem_table_plain_t* __restrict__ lineitem, device_ht_t ht);
-
 template<class IndexType>
 struct hj_approach {
     void operator()(query_data& d) {
         const auto& config = get_experiment_config();
 
         LinearProbingHashTable<uint32_t, size_t> ht(d.part_size);
-        int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
-        hj_build_kernel<<<num_blocks, config.block_size>>>(d.part_size, d.part_device, ht.deviceHandle);
 
-        //num_blocks = 32*num_sms;
+        hj_mutable_state mutable_state {
+            ht.deviceHandle
+        };
+
+        auto d_mutable_state = create_device_array<hj_mutable_state>(1);
+        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
+
+        const hj_args args {
+            // Inputs
+            d.lineitem_device,
+            d.lineitem_size,
+            d.part_device,
+            d.part_size,
+            // State and outputs
+            d_mutable_state.data()
+        };
+
+        int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
+        hj_build_kernel<<<num_blocks, config.block_size>>>(args);
+
         num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
-        hj_probe_kernel<<<num_blocks, config.block_size>>>(d.lineitem_size, d.part_device, d.lineitem_device, ht.deviceHandle);
+        hj_probe_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-// TODO        print_results();
+        print_results(d_mutable_state);
     }
 };
 
@@ -185,10 +197,9 @@ struct ij_plain_approach {
     void operator()(query_data& d) {
         const auto& config = get_experiment_config();
 
-        struct ij_mutable_state mutable_state;
-
+        ij_mutable_state mutable_state;
         auto d_mutable_state = create_device_array<ij_mutable_state>(1);
-        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(ij_mutable_state));
+        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
 
         const ij_args args {
             // Inputs
@@ -214,8 +225,6 @@ struct ij_plain_approach {
 template<class IndexType>
 struct ij_pbws_approach {
     void operator()(query_data& d) {
-//        const auto& config = get_experiment_config();
-
         enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
 
         const int num_blocks = 4 * get_device_properties(0).multiProcessorCount;
@@ -227,7 +236,6 @@ struct ij_pbws_approach {
         struct ij_mutable_state mutable_state;
         mutable_state.l_extendedprice_buffer = d_l_extendedprice_buffer.data();
         mutable_state.l_discount_buffer = d_l_discount_buffer.data();
-
         auto d_mutable_state = create_device_array<ij_mutable_state>(1);
         target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(ij_mutable_state));
 
@@ -275,6 +283,7 @@ void run_two_phase_ij_plain() {
 }
 */
 
+
 // Non-Pipelined Lookup First Plain approach
 template<class IndexType>
 struct ij_nplfplain_approach {
@@ -287,7 +296,6 @@ struct ij_nplfplain_approach {
 
         struct ij_mutable_state mutable_state;
         mutable_state.join_entries = d_join_entries.data();
-
         auto d_mutable_state = create_device_array<ij_mutable_state>(1);
         target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(ij_mutable_state));
 
@@ -311,6 +319,118 @@ struct ij_nplfplain_approach {
         cudaDeviceSynchronize();
 
         print_results(d_mutable_state);
+    }
+};
+
+
+
+
+template<class IndexType>
+struct abstract_ij_non_pipelined_approach {
+    static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
+
+    device_array_wrapper<join_entry> d_join_entries;
+    device_array_wrapper<ij_mutable_state> d_mutable_state;
+
+    ij_args create_kernel_args(query_data& d) {
+        d_join_entries = create_device_array<join_entry>(selectivity_est*d.lineitem_size);
+
+        struct ij_mutable_state mutable_state;
+        mutable_state.join_entries = d_join_entries.data();
+        d_mutable_state = create_device_array<ij_mutable_state>(1);
+        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(ij_mutable_state));
+
+        const ij_args args {
+            // Inputs
+            d.lineitem_device,
+            d.lineitem_size,
+            d.part_device,
+            d.part_size,
+            // State and outputs
+            d_mutable_state.data()
+        };
+
+        return args;
+    }
+
+    typename IndexType::device_index_t& get_device_index(query_data& d) {
+        return static_cast<IndexType*>(d.index_structure.get())->device_index;
+    }
+/*
+    void operator()(query_data& d) {
+        const auto& config = get_experiment_config();
+        const auto args = create_kernel_args();
+
+        int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
+        LookupKernel<<<num_blocks, config.block_size>>>(args, get_device_index(d));
+
+        num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
+        JoinKernel<<<num_blocks, config.block_size>>>(args);
+        cudaDeviceSynchronize();
+
+        print_results(d_mutable_state);
+    }*/
+};
+
+
+/*
+void run_two_phase_ij_buffer() {
+    using namespace std;
+
+    decltype(output_index) matches1 = 0;
+
+    enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
+
+    join_entry* join_entries1;
+    cudaMalloc(&join_entries1, sizeof(join_entry)*lineitem_size);
+
+    int num_sms;
+    cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
+    int num_blocks = num_sms*4; // TODO
+
+    const auto start1 = std::chrono::high_resolution_clock::now();
+    //ij_lookup_kernel<<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+    //ij_lookup_kernel_2<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+    ij_lookup_kernel_3<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+    //ij_lookup_kernel_4<BLOCK_THREADS><<<num_blocks, BLOCK_THREADS>>>(lineitem_device, lineitem_size, index_structure.device_index, join_entries1);
+    cudaDeviceSynchronize();
+    const auto d1 = chrono::duration_cast<chrono::microseconds>(std::chrono::high_resolution_clock::now() - start1).count()/1000.;
+    std::cout << "kernel time: " << d1 << " ms\n";
+
+    cudaError_t error = cudaMemcpyFromSymbol(&matches1, output_index, sizeof(matches1), 0, cudaMemcpyDeviceToHost);
+    assert(error == cudaSuccess);
+    printf("join matches1: %u\n", matches1);
+
+    num_blocks = (lineitem_size + block_size - 1) / block_size;
+
+    const auto start2 = std::chrono::high_resolution_clock::now();
+    ij_join_kernel<<<num_blocks, block_size>>>(lineitem_device, part_device, join_entries1, matches1);
+    cudaDeviceSynchronize();
+    const auto kernelStop = std::chrono::high_resolution_clock::now();
+    const auto kernelTime = chrono::duration_cast<chrono::microseconds>(kernelStop - start2).count()/1000.;
+    std::cout << "kernel time: " << kernelTime << " ms\n";
+    std::cout << "complete time: " << d1 + kernelTime << " ms\n";
+}
+*/
+// Non-Pipelined Lookup First with Lane Refill Plain approach
+template<class IndexType>
+struct ij_np_lf_lr_plain_approach : public abstract_ij_non_pipelined_approach<IndexType> {
+    using base_type = abstract_ij_non_pipelined_approach<IndexType>;
+
+    enum { BLOCK_THREADS = 256 }; // TODO optimize
+
+    void operator()(query_data& d) {
+        const auto& config = get_experiment_config();
+        const auto args = base_type::create_kernel_args(d);
+
+        int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
+        ij_np_lane_refill_scan_lookup<BLOCK_THREADS><<<num_blocks, config.block_size>>>(args, base_type::get_device_index(d));
+
+        num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
+        ij_join_kernel<<<num_blocks, config.block_size>>>(args);
+        cudaDeviceSynchronize();
+
+        print_results(base_type::d_mutable_state);
     }
 };
 
@@ -598,8 +718,9 @@ constexpr unsigned ij_partitioning_approach<IndexType>::oversubscription_factor;
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
     { "ij_plain", std::make_shared<approach_dispatcher<ij_plain_approach>>() },
-    { "ij_pbws", std::make_shared<approach_dispatcher<ij_pbws_approach>>() },
-    { "ij_nplfplain", std::make_shared<approach_dispatcher<ij_nplfplain_approach>>() },
+    { "ij_p_bws", std::make_shared<approach_dispatcher<ij_pbws_approach>>() },
+    { "ij_np_lf_plain", std::make_shared<approach_dispatcher<ij_nplfplain_approach>>() },
+    { "ij_np_lf_lr_plain", std::make_shared<approach_dispatcher<ij_np_lf_lr_plain_approach>>() },
     { "ij_partitioning", std::make_shared<approach_dispatcher<ij_partitioning_approach>>() }
 };
 
