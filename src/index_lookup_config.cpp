@@ -27,11 +27,12 @@ void parse_options(int argc, char** argv) {
     cxxopts::Options options(argv[0], "A brief description");
 
     options.add_options()
+        ("a,approach", "Approach to use (hj, ij_plain, ij_partitioning)", cxxopts::value<std::string>()->default_value(config.approach))
+        ("i,index", "Index type to use", cxxopts::value<std::string>()->default_value(config.index_type))
         ("e,elements", "Number of elements in the index", cxxopts::value<unsigned>()->default_value(std::to_string(config.num_elements)))
         ("l,lookups", "Size of the lookup dataset", cxxopts::value<unsigned>()->default_value(std::to_string(config.num_lookups)))
         ("m,maxbits", "Number of radix bits", cxxopts::value<unsigned>()->default_value(std::to_string(config.max_bits)))
         ("z,zipf", "Zipf factor (has no effect when 'lookup_pattern != zipf')", cxxopts::value<double>()->default_value(std::to_string(config.zipf_factor)))
-        ("p,partial", "Use partial sorting approach", cxxopts::value<bool>()->default_value(std::to_string(config.partitial_sorting)))
         ("dataset", "Index dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.dataset)))
         ("lookup_pattern", "Lookup dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.lookup_pattern)))
         ("h,help", "Print usage")
@@ -45,11 +46,12 @@ void parse_options(int argc, char** argv) {
     }
 
     // update config state with the parsing results
+    config.approach = result["approach"].as<std::string>();
+    config.index_type = result["index"].as<std::string>();
     config.num_elements = result["elements"].as<unsigned>();
     config.num_lookups = result["lookups"].as<unsigned>();
     config.max_bits = result["maxbits"].as<unsigned>();
     config.zipf_factor = result["zipf"].as<double>();
-    config.partitial_sorting = result["partial"].as<bool>();
 
     // parse dataset type
     if (result["dataset"].as<std::string>() == "sparse") {
