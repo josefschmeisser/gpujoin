@@ -1,4 +1,4 @@
-#include "index_lookup_common.cuh"
+#include "index_lookup.cuh"
 
 #include <cstdio>
 #include <map>
@@ -7,92 +7,78 @@
 #include <memory>
 
 #include "index_lookup_config.hpp"
+#include "index_lookup_common.cuh"
+#include "index_lookup_partitioning.cuh"
 #include "device_properties.hpp"
 #include "measuring.hpp"
 
 using namespace measuring;
 
-struct query_data {
-    std::unique_ptr<abstract_index<index_key_t>> index_structure;
 
-    std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
+query_data::query_data() {
+    const auto& config = get_experiment_config();
 
-    //auto d_mutable_state = create_device_array<hj_mutable_state>(1);
-    device_array_wrapper<index_key_t> d_indexed;
-    device_array_wrapper<index_key_t> d_lookup_keys;
-    device_array_wrapper<value_t> d_tids;
+    // generate datasets
+    printf("generating datasets...\n");
+    indexed.resize(config.num_elements);
+    lookup_keys.resize(config.num_lookups);
+    generate_datasets<index_key_t>(dataset_type::sparse, config.max_bits, indexed, lookup_pattern_type::uniform, config.zipf_factor, lookup_keys);
 
-    query_data() {
-        const auto& config = get_experiment_config();
+    // allocate result vector
+    d_tids = create_device_array<value_t>(config.num_lookups);
 
-        // generate datasets
-        printf("generating datasets...\n");
-        indexed.resize(config.num_elements);
-        lookup_keys.resize(config.num_lookups);
-        generate_datasets<index_key_t>(dataset_type::sparse, config.max_bits, indexed, lookup_pattern_type::uniform, config.zipf_factor, lookup_keys);
-    /*
-        std::cout << "keys: " << stringify(indexed.begin(), indexed.begin() +16) << std::endl;
-        std::cout << "lookups: " << stringify(lookup_keys.begin(), lookup_keys.begin() +2048) << std::endl;
-    */
+    // create gpu accessible vectors
+    indexed_allocator_t indexed_allocator;
+    auto d_indexed = create_device_array_from(indexed, indexed_allocator);
+    lookup_keys_allocator_t lookup_keys_allocator;
+    d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
 
-        // create result array
-        /*
-        value_t* d_tids;
-        cudaMalloc(&d_tids, num_lookup_keys*sizeof(value_t));*/
-        d_tids = create_device_array<value_t>(config.num_lookups);
+    // finalize state
+    create_index();
+}
 
-        // create gpu accessible vectors
-        indexed_allocator_t indexed_allocator;
-        auto d_indexed = create_device_array_from(indexed, indexed_allocator);
-        lookup_keys_allocator_t lookup_keys_allocator;
-        d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
+void query_data::create_index() {
+    const auto& config = get_experiment_config();
 
-        // finalize state
-        create_index();
+    // allocate index structure
+    switch (parse_index_type(config.index_type)) {
+        case index_type_enum::btree:
+            index_structure = build_index<index_key_t, btree_type>(indexed, d_indexed.data());
+            break;
+        case index_type_enum::harmonia:
+            index_structure = build_index<index_key_t, harmonia_type>(indexed, d_indexed.data());
+            break;
+        case index_type_enum::lower_bound:
+            index_structure = build_index<index_key_t, lower_bound_type>(indexed, d_indexed.data());
+            break;
+        case index_type_enum::radix_spline:
+            index_structure = build_index<index_key_t, radix_spline_type>(indexed, d_indexed.data());
+            break;
+        case index_type_enum::no_op:
+            index_structure = build_index<index_key_t, no_op_type>(indexed, d_indexed.data());
+            break;
+        default:
+            assert(false);
     }
+}
 
-    void create_index() {
-        const auto& config = get_experiment_config();
+bool query_data::validate_results() {
+    auto h_tids = d_tids.to_host_accessible();
+    auto h_tids_raw = h_tids.data();
 
-        // allocate index structure
-        switch (parse_index_type(config.index_type)) {
-            case index_type_enum::btree:
-                index_structure = build_index<index_key_t, btree_type>(indexed, d_indexed.data());
-                break;
-            case index_type_enum::harmonia:
-                index_structure = build_index<index_key_t, harmonia_type>(indexed, d_indexed.data());
-                break;
-            case index_type_enum::lower_bound:
-                index_structure = build_index<index_key_t, lower_bound_type>(indexed, d_indexed.data());
-                break;
-            case index_type_enum::radix_spline:
-                index_structure = build_index<index_key_t, radix_spline_type>(indexed, d_indexed.data());
-                break;
-            case index_type_enum::no_op:
-                index_structure = build_index<index_key_t, no_op_type>(indexed, d_indexed.data());
-                break;
-            default:
-                assert(false);
+    // validate results
+    printf("validating results...\n");
+    for (unsigned i = 0; i < lookup_keys.size(); ++i) {
+        if (lookup_keys[i] != indexed[h_tids_raw[i]]) {
+            printf("lookup_keys[%u]: %u indexed[h_tids[%u]]: %u\n", i, lookup_keys[i], i, indexed[h_tids_raw[i]]);
+            fflush(stdout);
+            return false;
         }
     }
 
-    bool validate_results() {
-        auto h_tids = d_tids.to_host_accessible();
-        auto h_tids_raw = h_tids.data();
+    return true;
+}
 
-        // validate results
-        printf("validating results...\n");
-        for (unsigned i = 0; i < lookup_keys.size(); ++i) {
-            if (lookup_keys[i] != indexed[h_tids_raw[i]]) {
-                printf("lookup_keys[%u]: %u indexed[h_tids[%u]]: %u\n", i, lookup_keys[i], i, indexed[h_tids_raw[i]]);
-                fflush(stdout);
-                return false;
-            }
-        }
-
-        return true;
-    }
-};
 
 struct abstract_approach_dispatcher {
     virtual void run(query_data& d, index_type_enum index_type) const = 0;
@@ -259,11 +245,12 @@ struct blockwise_sorting_approach {
     }
 };
 
+/*
 template<class IndexType>
 struct partitioning_approach {
     void operator()(query_data& d) {
     }
-};
+};*/
 
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
@@ -371,8 +358,9 @@ int main(int argc, char** argv) {
 */
 
 void execute_benchmark_scenario(std::string scenario) {
+    const auto& config = get_experiment_config();
     // TODO
-    execute_approach("plain");
+    execute_approach(config.approach);
 }
 
 int main(int argc, char** argv) {

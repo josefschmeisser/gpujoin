@@ -1,3 +1,5 @@
+#include "index_lookup_partitioning.cuh"
+
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -38,10 +40,12 @@ static const uint32_t ignore_bits = 4;//3;
 // laswwc max 8 bits
 // sswwc v2 max 7 bits
 
+/*
 template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
 //template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
 
 using index_type = INDEX_TYPE;
+*/
 
 struct PartitionedLookupArgs {
     // Input
@@ -57,7 +61,7 @@ struct PartitionedLookupArgs {
     value_t* __restrict__ tids;
 };
 
-
+/*
 static experiment_description create_experiment_description() {
     const auto& config = get_experiment_config();
 
@@ -66,7 +70,7 @@ static experiment_description create_experiment_description() {
     r.approach = "partitioning";
     r.other = create_common_experiment_description_pairs<index_type>();
     return r;
-}
+}*/
 
 void dump_offsets(const partition_offsets& offsets) {
     auto h_offsets = offsets.offsets.to_host_accessible();
@@ -95,7 +99,7 @@ struct stream_state {
 };
 
 std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, size_t num_lookups, value_t* d_dst_tids) {
-    device_allocator_t<int> device_allocator;
+    device_exclusive_allocator<int> device_allocator;
     auto state = std::make_unique<stream_state>();
     CubDebugExit(cudaStreamCreate(&state->stream));
 
@@ -350,6 +354,7 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
 }
 
+#if 0
 int main(int argc, char** argv) {
     parse_options(argc, argv);
     const auto& config = get_experiment_config();
@@ -414,3 +419,72 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+#endif
+
+template<class IndexType>
+void partitioning_approach<IndexType>::operator()(query_data& d) {
+    printf("partitioning_approach\n");
+    const auto& config = get_experiment_config();
+    const auto& device_properties = get_device_properties(0);
+
+#if 0
+    const int num_blocks = 3 * get_device_properties(0).multiProcessorCount; // TODO
+    printf("numblocks: %d\n", num_blocks);
+
+    printf("executing kernel...\n");
+    IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+    if (config.block_size != 256) {
+        throw 0;
+    }
+    lookup_kernel_with_sorting_v1<256, 4><<<num_blocks, 256>>>(index_structure.device_index, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data(), config.max_bits);
+    cudaDeviceSynchronize();
+#endif
+
+    if (grid_size == 0) {
+        grid_size = device_properties.multiProcessorCount;
+    }
+
+    size_t remaining = config.num_lookups;
+    size_t max_stream_portion = config.num_lookups / num_streams; // FIXME
+    const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
+    value_t* d_stream_tids = d.d_tids.data();
+
+    std::vector<std::unique_ptr<stream_state>> stream_states;
+
+    // create streams
+    for (unsigned i = 0; i < num_streams; ++i) {
+        size_t stream_portion = std::min(remaining, max_stream_portion);
+        remaining -= stream_portion;
+        printf("stream portion: %lu\n", stream_portion);
+        auto state = create_stream_state(d_stream_lookup_keys, stream_portion, d_stream_tids);
+        stream_states.push_back(std::move(state));
+
+        d_stream_lookup_keys += stream_portion;
+        d_stream_tids += stream_portion;
+    }
+
+    IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+    for (const auto& state : stream_states) {
+        run_on_stream(*state, index_structure, device_properties);
+    }
+    cudaDeviceSynchronize();
+
+/*
+    validate_results(lookup_keys, indexed, d_dst_tids);
+
+    cudaDeviceReset();
+*/
+}
+
+/*
+template struct partitioning_approach<btree_type::device_index_t>;
+template struct partitioning_approach<harmonia_type::device_index_t>;
+template struct partitioning_approach<lower_bound_type::device_index_t>;
+template struct partitioning_approach<radix_spline_type::device_index_t>;
+template struct partitioning_approach<no_op_type::device_index_t>;
+*/
+template void partitioning_approach<btree_type>::operator()(query_data& d);
+template void partitioning_approach<harmonia_type>::operator()(query_data& d);
+template void partitioning_approach<lower_bound_type>::operator()(query_data& d);
+template void partitioning_approach<radix_spline_type>::operator()(query_data& d);
+template void partitioning_approach<no_op_type>::operator()(query_data& d);
