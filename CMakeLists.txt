@@ -60,7 +60,20 @@ include_directories(
 #add_executable(rs_lookup src/rs_lookup.cu)
 #target_link_libraries(rs_lookup ${CUDART_LIBRARY} numa radixspline)
 
-add_executable(index_lookup src/index_lookup_new.cu src/measuring.cpp src/device_properties.cpp src/indexes.cu src/index_lookup_config.cpp)
+add_executable(index_lookup
+    src/index_lookup_new.cu
+    src/index_lookup_partitioning.cu
+    src/measuring.cpp
+    src/device_properties.cpp
+    src/indexes.cu
+    src/index_lookup_config.cpp
+    src/gpu_radix_partition.cu
+)
+target_include_directories(index_lookup PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
+)
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
 if(false)
@@ -88,30 +101,3 @@ target_link_libraries(huge_pages numa)
 
 add_subdirectory(src/tpch)
 add_subdirectory(test)
-
-
-add_executable(index_lookup_partitioning
-    src/measuring.cpp
-    src/device_properties.cpp
-    src/index_lookup_config.cpp
-    src/index_lookup_partitioning.cu
-    src/gpu_radix_partition.cu
-)
-target_include_directories(index_lookup_partitioning PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
-)
-target_link_libraries(index_lookup_partitioning ${CUDART_LIBRARY} numa cub radixspline)
-# additional nvcc flags
-if(true)
-    # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
-    # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
-    target_compile_options(index_lookup_partitioning PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                        #--generate-line-info
-                        #-lineinfo
-                        #-G
-                        --default-stream per-thread
-                        --expt-relaxed-constexpr
-                        >)
-endif()

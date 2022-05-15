@@ -116,83 +116,6 @@ struct my_approach {
     }
 };
 
-/*
-template<class IndexType>
-struct hj_approach {
-    void operator()(query_data& d) {
-        const auto& config = get_experiment_config();
-
-        LinearProbingHashTable<uint32_t, size_t> ht(d.part_size);
-
-        hj_mutable_state mutable_state {
-            ht.deviceHandle
-        };
-
-        auto d_mutable_state = create_device_array<hj_mutable_state>(1);
-        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
-
-        const hj_args args {
-            // Inputs
-            d.lineitem_device,
-            d.lineitem_size,
-            d.part_device,
-            d.part_size,
-            // State and outputs
-            d_mutable_state.data()
-        };
-
-        int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
-        hj_build_kernel<<<num_blocks, config.block_size>>>(args);
-
-        num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
-        hj_probe_kernel<<<num_blocks, config.block_size>>>(args);
-        cudaDeviceSynchronize();
-
-        print_results(d_mutable_state);
-    }
-};*/
-
-#if false
-template<class IndexStructureType>
-auto run_lookup_benchmark(const measuring::experiment_description& experiment_desc, IndexStructureType& index_structure, const index_key_t* d_lookup_keys, unsigned num_lookup_keys) {
-    const auto& config = get_experiment_config();
-
-    int num_blocks;
-    if /*constexpr*/ (!config.partitial_sorting) {
-        num_blocks = (num_lookup_keys + blockSize - 1) / blockSize;
-    } else {
-        int num_sms;
-        cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);
-        num_blocks = num_sms*3; // TODO
-    }
-    printf("numblocks: %d\n", num_blocks);
-
-    // create result array
-    value_t* d_tids;
-    cudaMalloc(&d_tids, num_lookup_keys*sizeof(value_t));
-
-    printf("executing kernel...\n");
-
-    measure(experiment_desc, [&]() {
-        if /*constexpr*/ (!config.partitial_sorting) {
-            lookup_kernel<<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids);
-        } else {
-            lookup_kernel_with_sorting_v1<blockSize, 4><<<num_blocks, blockSize>>>(index_structure.device_index, num_lookup_keys, d_lookup_keys, d_tids, config.max_bits);
-        }
-        cudaDeviceSynchronize();
-    });
-
-    // transfer results
-    std::unique_ptr<value_t[]> h_tids(new value_t[num_lookup_keys]);
-    cudaMemcpy(h_tids.get(), d_tids, num_lookup_keys*sizeof(value_t), cudaMemcpyDeviceToHost);
-
-    cudaFree(d_tids);
-
-    return std::move(h_tids);
-}
-#endif
-
-
 template<class IndexType>
 struct plain_approach {
     void operator()(query_data& d) {
@@ -206,15 +129,6 @@ struct plain_approach {
         lookup_kernel<<<num_blocks, config.block_size>>>(index_structure.device_index, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data());
 
         cudaDeviceSynchronize();
-
-/*
-        // transfer results
-        std::unique_ptr<value_t[]> h_tids(new value_t[num_lookup_keys]);
-        cudaMemcpy(h_tids.get(), d_tids, num_lookup_keys*sizeof(value_t), cudaMemcpyDeviceToHost);
-
-        cudaFree(d_tids);
-
-        return std::move(h_tids);*/
     }
 };
 
@@ -223,7 +137,7 @@ struct blockwise_sorting_approach {
     void operator()(query_data& d) {
         const auto& config = get_experiment_config();
 
-        const int num_blocks = 3 * get_device_properties(0).multiProcessorCount;; // TODO
+        const int num_blocks = 3 * get_device_properties(0).multiProcessorCount;; // TODO optimize
         printf("numblocks: %d\n", num_blocks);
 
         printf("executing kernel...\n");
@@ -233,24 +147,8 @@ struct blockwise_sorting_approach {
         }
         lookup_kernel_with_sorting_v1<256, 4><<<num_blocks, 256>>>(index_structure.device_index, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data(), config.max_bits);
         cudaDeviceSynchronize();
-
-/*
-        // transfer results
-        std::unique_ptr<value_t[]> h_tids(new value_t[num_lookup_keys]);
-        cudaMemcpy(h_tids.get(), d_tids, num_lookup_keys*sizeof(value_t), cudaMemcpyDeviceToHost);
-
-        cudaFree(d_tids);
-
-        return std::move(h_tids);*/
     }
 };
-
-/*
-template<class IndexType>
-struct partitioning_approach {
-    void operator()(query_data& d) {
-    }
-};*/
 
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
@@ -289,36 +187,6 @@ std::vector<std::pair<std::string, std::string>> create_common_experiment_descri
 
 static measuring::experiment_description create_experiment_description() {
     const auto& config = get_experiment_config();
-/*
-    measuring::experiment_description r;
-    r.name = "tpch_query14";
-    r.approach = config.approach;
-    std::vector<std::pair<std::string, std::string>> other = {
-        std::make_pair(std::string("device"), std::string(get_device_properties(0).name)),
-        std::make_pair(std::string("db_path"), config.db_path),
-        std::make_pair(std::string("sort_indexed_relation"), tmpl_to_string(config.sort_indexed_relation)),
-        std::make_pair(std::string("block_size"), tmpl_to_string(config.block_size)),
-
-        // allocators:
-        std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator<int>>::value())),
-        std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
-        std::make_pair(std::string("device_table_allocator"), std::string(type_name<device_table_allocator<int>>::value()))
-    };
-
-    if (r.approach != "hj") {
-        other.emplace_back(std::string("index_type"), config.index_type);
-        other.emplace_back(std::string("prefetch_index"), tmpl_to_string(config.prefetch_index));
-    }
-
-    if (r.approach == "ij_partitioning") {
-        other.emplace_back(std::string("num_stream"), tmpl_to_string(ij_partitioning_approach<no_op_type>::num_streams));
-        other.emplace_back(std::string("oversubscription_factor"), tmpl_to_string(ij_partitioning_approach<no_op_type>::oversubscription_factor));
-    }
-
-    r.other.swap(other);
-
-    return r;
-*/
 
     experiment_description r;
     r.name = "plain_lookup";
@@ -339,24 +207,6 @@ void execute_approach(std::string approach_name) {
     });
 }
 
-/*
-int main(int argc, char** argv) {
-    parse_options(argc, argv);
-    const auto& config = get_experiment_config();
-
-    // set-up the measuring utility
-    auto& measuring_config = measuring::get_settings();
-    measuring_config.dest_file = "tpch_14_results.yml";
-    measuring_config.repetitions = 1;
-    measuring_config.stdout_only = true;
-    // TODO
-    //const auto experiment_desc = create_experiment_description();
-
-    execute_approach(config.approach);
-    return 0;
-}
-*/
-
 void execute_benchmark_scenario(std::string scenario) {
     const auto& config = get_experiment_config();
     // TODO
@@ -364,16 +214,6 @@ void execute_benchmark_scenario(std::string scenario) {
 }
 
 int main(int argc, char** argv) {
-/*
-    double zipf_factor = 1.25;
-    auto num_elements = default_num_elements;
-    auto num_lookups = default_num_lookups;
-    if (argc > 1) {
-        std::string::size_type sz;
-        num_elements = std::stod(argv[1], &sz);
-    }
-    std::cout << "index size: " << num_elements << std::endl;
-*/
     parse_options(argc, argv);
     const auto& config = get_experiment_config();
 

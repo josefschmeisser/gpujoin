@@ -40,13 +40,6 @@ static const uint32_t ignore_bits = 4;//3;
 // laswwc max 8 bits
 // sswwc v2 max 7 bits
 
-/*
-template<class T> using device_allocator_t = cuda_allocator<T, cuda_allocation_type::device>;
-//template<class T> using device_index_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
-
-using index_type = INDEX_TYPE;
-*/
-
 struct PartitionedLookupArgs {
     // Input
     void* rel;
@@ -60,17 +53,6 @@ struct PartitionedLookupArgs {
     // Output
     value_t* __restrict__ tids;
 };
-
-/*
-static experiment_description create_experiment_description() {
-    const auto& config = get_experiment_config();
-
-    experiment_description r;
-    r.name = "plain_lookup";
-    r.approach = "partitioning";
-    r.other = create_common_experiment_description_pairs<index_type>();
-    return r;
-}*/
 
 void dump_offsets(const partition_offsets& offsets) {
     auto h_offsets = offsets.offsets.to_host_accessible();
@@ -427,19 +409,6 @@ void partitioning_approach<IndexType>::operator()(query_data& d) {
     const auto& config = get_experiment_config();
     const auto& device_properties = get_device_properties(0);
 
-#if 0
-    const int num_blocks = 3 * get_device_properties(0).multiProcessorCount; // TODO
-    printf("numblocks: %d\n", num_blocks);
-
-    printf("executing kernel...\n");
-    IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
-    if (config.block_size != 256) {
-        throw 0;
-    }
-    lookup_kernel_with_sorting_v1<256, 4><<<num_blocks, 256>>>(index_structure.device_index, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data(), config.max_bits);
-    cudaDeviceSynchronize();
-#endif
-
     if (grid_size == 0) {
         grid_size = device_properties.multiProcessorCount;
     }
@@ -468,21 +437,8 @@ void partitioning_approach<IndexType>::operator()(query_data& d) {
         run_on_stream(*state, index_structure, device_properties);
     }
     cudaDeviceSynchronize();
-
-/*
-    validate_results(lookup_keys, indexed, d_dst_tids);
-
-    cudaDeviceReset();
-*/
 }
 
-/*
-template struct partitioning_approach<btree_type::device_index_t>;
-template struct partitioning_approach<harmonia_type::device_index_t>;
-template struct partitioning_approach<lower_bound_type::device_index_t>;
-template struct partitioning_approach<radix_spline_type::device_index_t>;
-template struct partitioning_approach<no_op_type::device_index_t>;
-*/
 template void partitioning_approach<btree_type>::operator()(query_data& d);
 template void partitioning_approach<harmonia_type>::operator()(query_data& d);
 template void partitioning_approach<lower_bound_type>::operator()(query_data& d);
