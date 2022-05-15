@@ -22,6 +22,7 @@ target_sources(cuda_tpch_14 PRIVATE
     tpch_14_ij.cu
     tpch_14_ij_partitioning.cu
     ../gpu_radix_partition.cu
+    ../indexes.cu
 )
 target_include_directories(cuda_tpch_14 PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/>
