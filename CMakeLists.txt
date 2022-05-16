@@ -48,6 +48,9 @@ include(lib/RadixSpline.cmake)
 include(lib/gtest.cmake)
 include(lib/cub.cmake)
 
+# CUB does not use NDEBUG but rather DEBUG and _DEBUG, so we define the latter here
+add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
+
 include_directories(
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
