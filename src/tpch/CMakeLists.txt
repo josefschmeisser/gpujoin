@@ -18,12 +18,14 @@ add_executable(cuda_tpch_14 "")
 target_sources(cuda_tpch_14 PRIVATE
     tpch_14_new.cu
     tpch_14_common.cu
-    tpch_14_hj.cu
+    # TODO port to 64 bit keys tpch_14_hj.cu
     tpch_14_ij.cu
     tpch_14_ij_partitioning.cu
     ../gpu_radix_partition.cu
+    ../harmonia.cu
     ../indexes.cu
 )
+set_target_properties(cuda_tpch_14 PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_include_directories(cuda_tpch_14 PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
@@ -38,7 +40,7 @@ if(true)
                         #--generate-line-info
                         #-lineinfo
                         #-Xptxas="-v" # print register usage
-                        #-rdc=true
+                        -rdc=true
                         >)
 endif()
 
