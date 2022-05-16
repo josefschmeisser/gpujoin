@@ -440,7 +440,7 @@ struct ij_partitioning_approach {
     struct stream_state {
         cudaStream_t stream;
 
-        device_array_wrapper<uint32_t> d_task_assignment;
+        device_array_wrapper<uint32_t> d_task_assignments;
         device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
         partition_offsets partition_offsets_inst;
@@ -540,7 +540,7 @@ struct ij_partitioning_approach {
         CubDebugExit(cudaStreamCreate(&state.stream));
 
         // allocate output arrays
-        state.d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
+        state.d_task_assignments = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
         // see: device_exclusive_prefix_sum_initialize
         const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, config.block_size);
@@ -590,7 +590,7 @@ struct ij_partitioning_approach {
             state.partition_offsets_inst.offsets.data(),
             radix_bits,
             // Outputs
-            state.d_task_assignment.data()
+            state.d_task_assignments.data()
         });
 
         // Initialize lookup-kernel arguments
@@ -609,7 +609,7 @@ struct ij_partitioning_approach {
             static_cast<uint32_t>(state.partitioned_relation_inst.relation.size()), // TODO check
             state.partitioned_relation_inst.padding_length(),
             state.partition_offsets_inst.offsets.data(),
-            state.d_task_assignment.data(),
+            state.d_task_assignments.data(),
             radix_bits,
             // State and outputs
             state.d_mutable_state.data()
@@ -662,7 +662,7 @@ struct ij_partitioning_approach {
         partitioned_consumer_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_consumer_assign_tasks_args_inst);
 #ifdef DEBUG_INTERMEDIATE_STATE
         cudaDeviceSynchronize();
-        dump_task_assignment(state);
+        dump_task_assignments(state);
 #endif
 
         partitioned_ij_lookup<<<grid_size, config.block_size, 0, state.stream>>>(*state.partitioned_ij_lookup_args_inst, index_structure.device_index);

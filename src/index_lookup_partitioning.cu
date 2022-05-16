@@ -47,7 +47,7 @@ struct PartitionedLookupArgs {
     uint32_t rel_padding_length;
     //uint64_t* rel_partition_offsets;
     unsigned long long* rel_partition_offsets;
-    uint32_t* task_assignment;
+    uint32_t* task_assignments;
     uint32_t radix_bits;
     uint32_t ignore_bits;
     // Output
@@ -68,7 +68,7 @@ struct stream_state {
 
     device_array_wrapper<int32_t> d_payloads;
     device_array_wrapper<value_t> d_dst_tids;
-    device_array_wrapper<uint32_t> d_task_assignment;
+    device_array_wrapper<uint32_t> d_task_assignments;
 
     device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
@@ -96,7 +96,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
     }
 
     // allocate output arrays
-    state->d_task_assignment = create_device_array<uint32_t>(grid_size + 1); // TODO check
+    state->d_task_assignments = create_device_array<uint32_t>(grid_size + 1); // TODO check
 
     // see: device_exclusive_prefix_sum_initialize
     const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, block_size);
@@ -144,7 +144,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
         static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
         state->partitioned_relation_inst.padding_length(),
         state->partition_offsets_inst.offsets.data(),
-        state->d_task_assignment.data(),
+        state->d_task_assignments.data(),
         radix_bits,
         ignore_bits,
         //state->d_dst_tids.data()
@@ -181,7 +181,7 @@ __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
         const uint32_t rel_size = args.rel_length - args.rel_padding_length*fanout;
         const uint32_t avg_task_size = (rel_size + gridDim.x - 1U) / gridDim.x;
 
-        args.task_assignment[0] = 0U;
+        args.task_assignments[0] = 0U;
         uint32_t task_id = 1U;
         uint32_t task_size = 0U;
         for (uint32_t p = 0U; p < fanout && task_id < gridDim.x; ++p) {
@@ -190,7 +190,7 @@ __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
 
             task_size += partition_size;
             if (task_size >= avg_task_size) {
-                args.task_assignment[task_id] = p + 1U;
+                args.task_assignments[task_id] = p + 1U;
 // TODO
                 task_size = 0U;
                 task_id += 1;
@@ -198,7 +198,7 @@ __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
         }
 
         for (uint32_t i = task_id; i <= gridDim.x; ++i) {
-            args.task_assignment[i] = fanout;
+            args.task_assignments[i] = fanout;
         }
     }
 }
@@ -207,7 +207,7 @@ template<class TupleType, class IndexStructureType>
 __global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
     const auto fanout = 1U << args.radix_bits;
 
-    for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
+    for (uint32_t p = args.task_assignments[blockIdx.x]; p < args.task_assignments[blockIdx.x + 1U]; ++p) {
         const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel) + args.rel_partition_offsets[p];
 
         const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
@@ -262,8 +262,8 @@ void dump_partitions(const stream_state& state) {
 }
 
 
-void dump_task_assignment(const stream_state& state) {
-    const auto assignment = state.d_task_assignment.to_host_accessible();
+void dump_task_assignments(const stream_state& state) {
+    const auto assignment = state.d_task_assignments.to_host_accessible();
     std::cout << "task assignment: " << stringify(assignment.data(), assignment.data() + assignment.size()) << std::endl;
 }
 
@@ -330,7 +330,7 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     partitioned_lookup_assign_tasks<<<grid_size, 1, 0, state.stream>>>(*state.partitioned_lookup_args);
 #ifdef DEBUG_INTERMEDIATE_STATE
     cudaDeviceSynchronize();
-    dump_task_assignment(state);
+    dump_task_assignments(state);
 #endif
 
     partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);

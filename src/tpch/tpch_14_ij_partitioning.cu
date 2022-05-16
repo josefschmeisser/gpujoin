@@ -173,7 +173,7 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
 
     const auto* __restrict__ p_type = args.part->p_type;
 
-    for (uint32_t p = args.task_assignment[blockIdx.x]; p < args.task_assignment[blockIdx.x + 1U]; ++p) {
+    for (uint32_t p = args.task_assignments[blockIdx.x]; p < args.task_assignments[blockIdx.x + 1U]; ++p) {
         const partitioned_tuple_type* __restrict__ relation = reinterpret_cast<const partitioned_tuple_type*>(args.rel) + args.rel_partition_offsets[p];
 
         const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;

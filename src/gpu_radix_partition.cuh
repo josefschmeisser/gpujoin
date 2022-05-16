@@ -51,7 +51,7 @@ struct partitioned_consumer_assign_tasks_args {
     unsigned long long* rel_partition_offsets;
     uint32_t radix_bits;
     // Output
-    uint32_t* task_assignment;
+    uint32_t* task_assignments;
 };
 
 __global__ void partitioned_consumer_assign_tasks(partitioned_consumer_assign_tasks_args args);

@@ -4,6 +4,8 @@
 #include "config.hpp"
 #include "indexes.cuh"
 
+#include "mmap_allocator.hpp"
+
 // allocators:
 template<class T> using host_allocator = HOST_ALLOCATOR_TYPE;
 template<class T> using device_index_allocator = DEVICE_INDEX_ALLOCATOR_TYPE;

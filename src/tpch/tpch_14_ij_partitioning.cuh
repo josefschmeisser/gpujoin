@@ -42,7 +42,7 @@ struct partitioned_ij_lookup_args {
     uint32_t rel_length;
     uint32_t rel_padding_length;
     unsigned long long* rel_partition_offsets;
-    uint32_t* task_assignment;
+    uint32_t* task_assignments;
     uint32_t radix_bits;
     // State and outputs
 	partitioned_ij_lookup_mutable_state* const state;

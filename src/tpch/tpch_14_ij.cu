@@ -142,7 +142,7 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
 
     const unsigned tile_size = min(args.lineitem_size, (args.lineitem_size + gridDim.x - 1) / gridDim.x);
     tid_t tid = blockIdx.x*tile_size; // first tid where the first thread of a block starts scanning
-    const tid_t tid_limit = min(tid + tile_size, args.lineitem_size); // marks the end of each tile
+    const tid_t tid_limit = min(tid + tile_size, static_cast<tid_t>(args.lineitem_size)); // marks the end of each tile
     tid += threadIdx.x; // each thread starts at it's correponding offset
 
 //if (lane_id == 0 && warp_id == 0) printf("lineitem_size: %u, gridDim.x: %u, tile_size: %u\n", lineitem_size, gridDim.x, tile_size);
