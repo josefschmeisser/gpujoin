@@ -141,10 +141,11 @@ struct my_approach {
 template<class IndexType>
 struct hj_approach {
     void operator()(query_data& d) {
+// TODO port to 64 bit keys
+#if 0
         const auto& config = get_experiment_config();
 
-        LinearProbingHashTable<uint32_t, size_t> ht(d.part_size);
-
+        hj_ht_t ht(d.part_size);
         hj_mutable_state mutable_state {
             ht.deviceHandle
         };
@@ -170,6 +171,7 @@ struct hj_approach {
         cudaDeviceSynchronize();
 
         print_results(d_mutable_state);
+#endif
     }
 };
 
@@ -669,6 +671,10 @@ struct ij_partitioning_approach {
     }
 
     void operator()(query_data& d) {
+        if (sizeof(indexed_t) != 8) {
+            // TODO
+            throw std::runtime_error("usage of keys with other sizes than 8 bytes is not implemented");
+        }
         init(d);
         phase1(d);
         phase2(d);
