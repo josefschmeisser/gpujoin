@@ -6,11 +6,12 @@
 #include "tpch_14_common.cuh"
 #include "LinearProbingHashTable.cuh"
 
-using device_ht_t = LinearProbingHashTable<indexed_t, size_t>::DeviceHandle;
+using hj_ht_t = LinearProbingHashTable<indexed_t, size_t>;
+using hj_device_ht_t = hj_ht_t::DeviceHandle;
 
 struct hj_mutable_state {
     // Ephemeral state
-    device_ht_t ht;
+    hj_device_ht_t ht;
     // Outputs
     numeric_raw_t global_numerator = 0ll;
     numeric_raw_t global_denominator = 0ll;
