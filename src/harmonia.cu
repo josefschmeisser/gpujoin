@@ -1,5 +1,6 @@
 #include "harmonia.cuh"
 
+#if 0
 namespace harmonia {
 
 // only contains the upper tree levels; stored in constant memory
@@ -8,3 +9,4 @@ namespace harmonia {
 __constant__ uint32_t harmonia_upper_levels[42*1024/sizeof(uint32_t)];
 
 }
+#endif
