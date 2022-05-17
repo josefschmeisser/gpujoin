@@ -29,7 +29,7 @@ query_data::query_data() {
 
     // create gpu accessible vectors
     indexed_allocator_t indexed_allocator;
-    auto d_indexed = create_device_array_from(indexed, indexed_allocator);
+    d_indexed = create_device_array_from(indexed, indexed_allocator);
     lookup_keys_allocator_t lookup_keys_allocator;
     d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
 
