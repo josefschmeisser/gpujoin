@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 14)
 
 set(ENABLE_PERFBENCHMARKING false)
 
-set(CUDA_SEPARABLE_COMPILATION ON)
+#set(CUDA_SEPARABLE_COMPILATION ON)
 find_package(CUDA)
 
 # put predefined cmake projects in their own solution folder
@@ -32,9 +32,11 @@ message(STATUS "selected target architecture: ${MY_CUDA_TARGET}")
 message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
 endif()
 
+if(true)
 #set(CMAKE_CUDA_ARCHITECTURES 60 61 70 CACHE STRING "CUDA architectures")
 set(CMAKE_CUDA_ARCHITECTURES 60)
 message(STATUS "current: ${CMAKE_CUDA_FLAGS}")
+endif()
 
 # TODO cmake 3.17: use FindCUDAToolkit()
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
@@ -68,10 +70,12 @@ add_executable(index_lookup
     src/index_lookup_partitioning.cu
     src/measuring.cpp
     src/device_properties.cpp
+    src/harmonia.cu
     src/indexes.cu
     src/index_lookup_config.cpp
     src/gpu_radix_partition.cu
 )
+set_target_properties(index_lookup PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_include_directories(index_lookup PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
@@ -79,18 +83,40 @@ target_include_directories(index_lookup PUBLIC
 )
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
-if(false)
+target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
+# debug flag
+target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
+if(true)
     # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
     # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
     target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                        --generate-line-info
-                        --use_fast_math
-                        --relocatable-device-code=true
-                        -Xptxas --def-load-cache=cg
-                        -Xptxas -dscm=cg
-                        -lineinfo
+                        #--generate-line-info
+                        #--use_fast_math
+                        #-Xptxas --def-load-cache=cg
+                        #-Xptxas -dscm=cg
                         >)
 endif()
+
+
+
+add_executable(index_lookup_partitioning
+    src/index_lookup_partitioning_old.cu
+    src/measuring.cpp
+    src/device_properties.cpp
+    #src/harmonia.cu
+    src/indexes.cu
+    src/index_lookup_config.cpp
+    src/gpu_radix_partition.cu
+)
+#set_target_properties(index_lookup_partitioning PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+target_include_directories(index_lookup_partitioning PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
+)
+target_link_libraries(index_lookup_partitioning ${CUDART_LIBRARY} numa cub radixspline)
+# additional nvcc flags
+target_compile_options(index_lookup_partitioning PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
 
 add_executable(bf_search src/bf_search.cpp)
 

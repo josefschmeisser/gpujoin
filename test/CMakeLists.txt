@@ -9,6 +9,7 @@ target_link_libraries(test_utils gtest gtest_main pthread)
 
 add_executable(test_harmonia test_harmonia.cu)
 target_link_libraries(test_harmonia cub)
+target_compile_options(test_harmonia PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
 
 add_executable(test_huge_page_allocator test_huge_page_allocator.cpp)
 target_link_libraries(test_huge_page_allocator gtest gtest_main pthread numa)

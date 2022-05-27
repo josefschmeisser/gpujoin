@@ -9,6 +9,9 @@
 #include <numeric>
 #include <type_traits>
 #include <random>
+#include <iostream>
+
+#include <cub/util_debug.cuh>
 
 #include "utils.hpp"
 #include "cuda_utils.cuh"
@@ -17,13 +20,21 @@
 #ifndef FULL_MASK
 #define FULL_MASK 0xffffffff
 #endif
-
+#define DEBUG
 namespace harmonia {
+
+using child_ref_t = uint32_t;
+
+#ifndef NRDC
+#define HARMONIA_EXTERN_CACHE extern
+#else
+#define HARMONIA_EXTERN_CACHE
+#endif
 
 // only contains the upper tree levels; stored in constant memory
 // retain some space for kernel launch arguments (those are also stored in constant memory)
-//__constant__ uint32_t harmonia_upper_levels[14336];
-__constant__ uint32_t harmonia_upper_levels[42*1024/sizeof(uint32_t)];
+static constexpr int harmonia_max_constant_mem = 42*1024;
+HARMONIA_EXTERN_CACHE __constant__ child_ref_t harmonia_upper_levels[harmonia_max_constant_mem/sizeof(child_ref_t)];
 
 template<
     class Key,
@@ -35,7 +46,6 @@ template<
 struct harmonia_tree {
     using key_t = Key;
     using value_t = Value;
-    using child_ref_t = uint32_t;
 
     static const unsigned max_depth = 16;
     static constexpr auto max_keys = fanout - 1;
@@ -284,8 +294,8 @@ struct harmonia_tree {
         std::tie(caching_depth, bytes_to_copy) = determine_children_caching_limit(available_bytes);
 
         //caching_depth = resulting_caching_depth;
-        auto ret = cudaMemcpyToSymbol(harmonia_upper_levels, children.data(), bytes_to_copy);
-        assert(ret == cudaSuccess);
+        CubDebugExit(cudaMemcpyToSymbol(harmonia_upper_levels, children.data(), bytes_to_copy));
+        //copy_to_cacheable_memory(children.data(), bytes_to_copy);
 
         printf("harmonia constant memory required: %lu depth limit: %u full depth: %u\n", bytes_to_copy, caching_depth, depth);
         return caching_depth;
@@ -742,4 +752,3 @@ struct harmonia_tree {
 };
 
 }
-

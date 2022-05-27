@@ -69,12 +69,18 @@ bool query_data::validate_results() {
     // validate results
     printf("validating results...\n");
     for (unsigned i = 0; i < lookup_keys.size(); ++i) {
+        if (h_tids_raw[i] > indexed.size()) {
+            printf("invaild tid: %u, at %u from %u\n", h_tids_raw[i], i, lookup_keys.size());
+            fflush(stdout);
+            return false;
+        }
         if (lookup_keys[i] != indexed[h_tids_raw[i]]) {
             printf("lookup_keys[%u]: %u indexed[h_tids[%u]]: %u\n", i, lookup_keys[i], i, indexed[h_tids_raw[i]]);
             fflush(stdout);
             return false;
         }
     }
+    printf("validation complete\n");
 
     return true;
 }
@@ -205,6 +211,8 @@ void execute_approach(std::string approach_name) {
     measure(experiment_desc, [&]() {
         approaches.at(approach_name)->run(qd, index_type);
     });
+
+    qd.validate_results();
 }
 
 void execute_benchmark_scenario(std::string scenario) {
