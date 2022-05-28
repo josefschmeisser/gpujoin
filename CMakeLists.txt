@@ -85,8 +85,9 @@ target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
 target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
 # debug flag
-target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
-if(true)
+#target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
+target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>")
+if(false)
     # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
     # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
     target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:

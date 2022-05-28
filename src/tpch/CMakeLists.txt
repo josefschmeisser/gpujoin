@@ -35,8 +35,9 @@ target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
 # additional nvcc flags
 target_compile_options(cuda_tpch_14 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
 # debug flag
-target_compile_options(cuda_tpch_14 PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
-if(true)
+#target_compile_options(cuda_tpch_14 PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
+target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>")
+if(false)
     # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
     # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
     target_compile_options(cuda_tpch_14 PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
@@ -51,19 +52,6 @@ if(false)
 add_executable(cuda_tpch_14_split tpch_14_split.cu)
 target_link_libraries(cuda_tpch_14_split tpch_common numa pthread radixspline cub)
 # additional nvcc flags
-if(true)
-    # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
-    # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
-    target_compile_options(cuda_tpch_14_split PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                        #--generate-line-info
-                        -lineinfo
-                        #-G
-                        #-Xptxas="-v" # print register usage
-                        >)
-endif()
 
-# hash join executable
-add_executable(cuda_hj_tpch_14 tpch_14.cu)
-target_compile_definitions(cuda_hj_tpch_14 PUBLIC USE_HJ)
-target_link_libraries(cuda_hj_tpch_14 tpch_common numa pthread radixspline cub)
+
 endif()
