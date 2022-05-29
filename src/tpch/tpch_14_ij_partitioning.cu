@@ -182,18 +182,19 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
         // cooperative lookup implementation
         for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
             const bool active = i < partition_size;
-            const partitioned_tuple_type tuple = active ? relation[i] : partitioned_tuple_type();
-            const auto part_tid = index_structure.cooperative_lookup(active, tuple.key);
 
-            decltype(materialized_tuple::summand) summand = tuple.value;
-            if (part_tid != invalid_tid) {
+            const partitioned_tuple_type tuple = active ? relation[i] : partitioned_tuple_type();
+            const indexed_t key = static_cast<indexed_t>(tuple.key);
+            const auto part_tid = index_structure.cooperative_lookup(active, key);
+            if (active && part_tid != invalid_tid) {
+                const payload_t summand = static_cast<payload_t>(tuple.value);
                 denominator += summand;
 
                 const char* type = reinterpret_cast<const char*>(&p_type[part_tid]); // FIXME relies on undefined behavior
                 if (device_strcmp(type, prefix, 5) == 0) {
                     numerator += summand;
                 }
-            } else {
+            } else if (active) {
                 assert(false);
             }
         }
