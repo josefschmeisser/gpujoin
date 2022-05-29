@@ -8,16 +8,26 @@
 #include "tpch_14_common.cuh"
 
 struct materialized_tuple {
-    std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>::type summand;
     std::remove_pointer<decltype(lineitem_table_plain_t::l_partkey)>::type l_partkey;
+    std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>::type summand;
 };
 
-using partitioned_tuple_type = Tuple<uint64_t, uint64_t>;
+using partitioning_indexed_t = int64_t;
+static_assert(sizeof(partitioning_indexed_t) >= sizeof(decltype(materialized_tuple::l_partkey)));
+
+using partitioning_payload_t = int64_t;
+static_assert(sizeof(partitioning_payload_t) >= sizeof(decltype(materialized_tuple::summand)));
+
+using partitioned_tuple_type = Tuple<partitioning_indexed_t, partitioning_payload_t>;
 
 struct partitioned_ij_scan_mutable_state {
 	// State
+    /*
     decltype(lineitem_table_plain_t::l_partkey) const __restrict__ l_partkey;
     decltype(lineitem_table_plain_t::l_extendedprice) const __restrict__ summand;
+    */
+    partitioning_indexed_t* const l_partkey;
+    partitioning_payload_t* const summand;
     uint32_t materialized_size;
 };
 

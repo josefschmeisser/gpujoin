@@ -109,6 +109,14 @@ public:
         return *this;
     }
 
+    template<class Allocator = cuda_allocator<T>>
+    void allocate(size_t size) {
+        using array_allocator_type = typename Allocator::template rebind<T>::other;
+        array_allocator_type array_allocator;
+        T* ptr = array_allocator.allocate(size);
+        device_array_ = std::make_unique<device_array<T, Allocator>>(ptr, size, array_allocator);
+    }
+
     static device_array_wrapper<T> create_reference_only(T* ptr, size_t size) {
         return device_array_wrapper(std::make_unique<device_array<T, void>>(ptr, size));
     }

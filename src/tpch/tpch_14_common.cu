@@ -422,7 +422,7 @@ struct ij_np_lf_lr_plain_approach : public abstract_ij_non_pipelined_approach<In
 
 template<class IndexType>
 struct ij_partitioning_approach {
-    using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
+    //using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
 
     static constexpr unsigned num_streams = 1;
     static constexpr unsigned oversubscription_factor = 2;
@@ -436,8 +436,8 @@ struct ij_partitioning_approach {
     std::unique_ptr<partitioned_ij_scan_args> partitioned_ij_scan_args_inst;
     device_array_wrapper<partitioned_ij_scan_mutable_state> d_mutable_state;
     // materialized attributes
-    device_array_wrapper<indexed_t> d_l_partkey_materialized;
-    device_array_wrapper<payload_type> d_summand_materialized;
+    device_array_wrapper<std::remove_pointer_t<decltype(partitioned_ij_scan_mutable_state::l_partkey)>> d_l_partkey_materialized;
+    device_array_wrapper<std::remove_pointer_t<decltype(partitioned_ij_scan_mutable_state::summand)>> d_summand_materialized;
 
     struct stream_state {
         cudaStream_t stream;
@@ -470,9 +470,12 @@ struct ij_partitioning_approach {
         cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
 
         buffer_size = buffer_size_upper_bound(d);
-
-        d_l_partkey_materialized = create_device_array<indexed_t>(buffer_size);
-        d_summand_materialized = create_device_array<payload_type>(buffer_size);
+/*
+        d_l_partkey_materialized = create_device_array<uint64_t>(buffer_size);
+        d_summand_materialized = create_device_array<uint64_t>(buffer_size);
+*/
+        d_l_partkey_materialized.allocate(buffer_size);
+        d_summand_materialized.allocate(buffer_size);
 
         const partitioned_ij_scan_mutable_state mutable_state {
             // State
@@ -508,8 +511,8 @@ struct ij_partitioning_approach {
 
         size_t remaining = materialized_size;
         size_t max_stream_portion = (materialized_size + num_streams) / num_streams;
-        indexed_t* d_indexed = d_l_partkey_materialized.data();
-        payload_type* d_payloads = d_summand_materialized.data();
+        auto* d_indexed = d_l_partkey_materialized.data();
+        auto* d_payloads = d_summand_materialized.data();
 
         // create streams
         for (unsigned i = 0; i < num_streams; ++i) {
@@ -532,7 +535,7 @@ struct ij_partitioning_approach {
         cudaDeviceSynchronize();
     }
 
-    void init_stream_state(const unsigned state_num, const query_data& d, indexed_t* d_indexed, const uint32_t stream_portion, payload_type* d_payloads) {
+    void init_stream_state(const unsigned state_num, const query_data& d, partitioning_indexed_t* d_indexed, const uint32_t stream_portion, partitioning_payload_t* d_payloads) {
         const auto& config = get_experiment_config();
         cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
 
@@ -650,6 +653,8 @@ struct ij_partitioning_approach {
         // calculate radix partition kernel shared memory requirement
         const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
+        static_assert(std::is_same<partitioning_indexed_t, int64_t>::value);
+        static_assert(std::is_same<partitioning_payload_t, int64_t>::value);
         gpu_chunked_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
         //gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
         //gpu_chunked_sswwc_radix_partition_v2_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
@@ -673,7 +678,7 @@ struct ij_partitioning_approach {
     void operator()(query_data& d) {
         if (sizeof(indexed_t) != 8) {
             // TODO
-            throw std::runtime_error("usage of keys with other sizes than 8 bytes is not implemented");
+            //throw std::runtime_error("usage of keys with other sizes than 8 bytes is not implemented");
         }
         init(d);
         phase1(d);

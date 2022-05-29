@@ -10,11 +10,15 @@
 #include <gpu_radix_partition.h>
 
 __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
-
+    // Inputs
     const auto* __restrict__ l_shipdate = args.lineitem->l_shipdate;
     const auto* __restrict__ l_extendedprice = args.lineitem->l_extendedprice;
     const auto* __restrict__ l_discount = args.lineitem->l_discount;
     const auto* __restrict__ l_partkey = args.lineitem->l_partkey;
+
+    // Outputs
+    auto* __restrict__ materialized_l_partkey = args.state->l_partkey;
+    auto* __restrict__ materialized_summand = args.state->summand;
 
     const unsigned my_lane = lane_id();
 
@@ -48,8 +52,8 @@ __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
         base = __shfl_sync(FULL_MASK, base, 0);
 
         if (active) {
-            args.state->l_partkey[base + thread_offset] = partkey;
-            args.state->summand[base + thread_offset] = summand;
+            materialized_l_partkey[base + thread_offset] = partkey;
+            materialized_summand[base + thread_offset] = summand;
         }
     }
 }
@@ -63,10 +67,15 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
     assert(tuples_per_thread * blockDim.x * sizeof(materialized_tuple) <= 48*1024);
     //if (blockIdx.x == 0 && threadIdx.x == 0) printf("buffer_size %u\n", tuples_per_thread * blockDim.x * sizeof(materialized_tuple));
 
+    // Inputs
     const auto* __restrict__ l_shipdate = args.lineitem->l_shipdate;
     const auto* __restrict__ l_extendedprice = args.lineitem->l_extendedprice;
     const auto* __restrict__ l_discount = args.lineitem->l_discount;
     const auto* __restrict__ l_partkey = args.lineitem->l_partkey;
+
+    // Outputs
+    auto* __restrict__ materialized_l_partkey = args.state->l_partkey;
+    auto* __restrict__ materialized_summand = args.state->summand;
 
     const unsigned my_lane = lane_id();
     const unsigned warp_id = (threadIdx.x / 32);
@@ -110,8 +119,8 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
                 const bool participate = my_lane < buffer_count;
                 if (participate) {
                     const auto& src_tuple = tuple_buffer[buffer_count - 1 - my_lane];
-                    args.state->l_partkey[base + my_lane] = src_tuple.l_partkey;
-                    args.state->summand[base + my_lane] = src_tuple.summand;
+                    materialized_l_partkey[base + my_lane] = src_tuple.l_partkey;
+                    materialized_summand[base + my_lane] = src_tuple.summand;
                 }
 
                 // decrease buffer_count
@@ -150,8 +159,8 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
             const bool participate = my_lane < buffer_count;
             if (participate) {
                 const auto& src_tuple = tuple_buffer[buffer_count - 1 - my_lane];
-                args.state->l_partkey[base + my_lane] = src_tuple.l_partkey;
-                args.state->summand[base + my_lane] = src_tuple.summand;
+                materialized_l_partkey[base + my_lane] = src_tuple.l_partkey;
+                materialized_summand[base + my_lane] = src_tuple.summand;
             }
 
             // decrease buffer_count
@@ -168,8 +177,8 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
     const char* prefix = "PROMO";
     const auto fanout = 1U << args.radix_bits;
 
-    int64_t numerator = 0;
-    int64_t denominator = 0;
+    numeric_raw_t numerator = 0;
+    numeric_raw_t denominator = 0;
 
     const auto* __restrict__ p_type = args.part->p_type;
 
