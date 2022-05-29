@@ -20,16 +20,16 @@
 #ifndef FULL_MASK
 #define FULL_MASK 0xffffffff
 #endif
-#define DEBUG
-namespace harmonia {
-
-using child_ref_t = uint32_t;
 
 #ifndef NRDC
 #define HARMONIA_EXTERN_CACHE extern
 #else
 #define HARMONIA_EXTERN_CACHE
 #endif
+
+namespace harmonia {
+
+using child_ref_t = uint32_t;
 
 // only contains the upper tree levels; stored in constant memory
 // retain some space for kernel launch arguments (those are also stored in constant memory)
@@ -295,7 +295,6 @@ struct harmonia_tree {
 
         //caching_depth = resulting_caching_depth;
         CubDebugExit(cudaMemcpyToSymbol(harmonia_upper_levels, children.data(), bytes_to_copy));
-        //copy_to_cacheable_memory(children.data(), bytes_to_copy);
 
         printf("harmonia constant memory required: %lu depth limit: %u full depth: %u\n", bytes_to_copy, caching_depth, depth);
         return caching_depth;
