@@ -34,6 +34,7 @@ target_include_directories(cuda_tpch_14 PUBLIC
 target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
 # additional nvcc flags
 target_compile_options(cuda_tpch_14 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
+#target_compile_options(cuda_tpch_14 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
 # debug flag
 #target_compile_options(cuda_tpch_14 PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
 target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>")
