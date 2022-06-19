@@ -94,7 +94,7 @@ struct radix_spline_index : public abstract_index<Key> {
         rs::DeviceRadixSpline<key_t> d_rs_;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            const unsigned estimate = rs::cuda::get_estimate(&d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
+            const unsigned estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
             const unsigned begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
             const unsigned end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
 
@@ -107,13 +107,11 @@ struct radix_spline_index : public abstract_index<Key> {
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
             if (active) {
-                return lookup(key);
+                // TODO implement
+                return lookup(key); // fallback
             } else {
-                return value_t();
+                return invalid_tid;
             }
-            /*
-            assert(false); // TODO implement
-            return value_t();*/
         }
     } device_index;
 
@@ -169,7 +167,7 @@ struct harmonia_index : public abstract_index<Key> {
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
             assert(false); // not available
-            return value_t();
+            return invalid_tid;
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
@@ -227,7 +225,7 @@ struct lower_bound_index : public abstract_index<Key> {
                 auto pos = branch_free_binary_search(key, d_column, d_size);
                 return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
             } else {
-                return value_t();
+                return invalid_tid;
             }
         }
     } device_index;
@@ -260,9 +258,9 @@ struct no_op_index : public abstract_index<Key> {
         const key_t* d_column;
         unsigned d_size;
 
-        __device__ __forceinline__ value_t lookup(const key_t key) const { return value_t(); }
+        __device__ __forceinline__ value_t lookup(const key_t key) const { return invalid_tid; }
 
-        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const { return value_t(); }
+        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const { return invalid_tid; }
     } device_index;
 
     __host__ void construct(const vector_view<key_t>& /*h_column*/, const key_t* /*d_column*/) override {}
