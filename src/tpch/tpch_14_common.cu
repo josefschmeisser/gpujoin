@@ -87,8 +87,26 @@ struct query_data {
     }
 };
 
+// Mapping: lineitem size -> q14 result
+static const std::map<size_t, int64_t> expected_results {
+    { 6001215, 16380778 },
+    { 59986052, 16647594 }
+};
+
+static void validate_results(int64_t r, const query_data& qd) {
+    const auto it = expected_results.find(qd.lineitem_size);
+    if (it != expected_results.end()) {
+        if (it->second != r) {
+            std::cerr << "invalid query result" << std::endl;
+            exit(1);
+        }
+    } else {
+        std::cerr << "unable to validate result" << std::endl;
+    }
+}
+
 template<class T>
-void print_results(const T& d_mutable_state) {
+void validate_and_print_results(const T& d_mutable_state, const query_data& qd) {
     // Fetch result
     const auto r = d_mutable_state.to_host_accessible();
     const auto& state = r.data()[0];
@@ -100,6 +118,8 @@ void print_results(const T& d_mutable_state) {
     denominator /= 1'000;
     int64_t result = 100*numerator/denominator;
     printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
+
+    validate_results(result, qd);
 }
 
 struct abstract_approach_dispatcher {
@@ -170,8 +190,8 @@ struct hj_approach {
         hj_probe_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        print_results(d_mutable_state);
 #endif
+        validate_and_print_results(d_mutable_state, d);
     }
 };
 
@@ -203,7 +223,7 @@ struct ij_plain_approach {
         ij_plain_kernel<<<num_blocks, config.block_size>>>(args, index_structure.device_index);
         cudaDeviceSynchronize();
 
-        print_results(d_mutable_state);
+        validate_and_print_results(d_mutable_state, d);
     }
 };
 
@@ -239,7 +259,7 @@ struct ij_pbws_approach {
         ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(args, index_structure.device_index);
         cudaDeviceSynchronize();
 
-        print_results(d_mutable_state);
+        validate_and_print_results(d_mutable_state, d);
     }
 };
 
@@ -304,7 +324,7 @@ struct ij_nplfplain_approach {
         ij_join_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        print_results(d_mutable_state);
+        validate_and_print_results(d_mutable_state, d);
     }
 };
 
@@ -354,7 +374,7 @@ struct abstract_ij_non_pipelined_approach {
         JoinKernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        print_results(d_mutable_state);
+        validate_and_print_results(d_mutable_state, d);
     }*/
 };
 
@@ -416,7 +436,7 @@ struct ij_np_lf_lr_plain_approach : public abstract_ij_non_pipelined_approach<In
         ij_join_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        print_results(base_type::d_mutable_state);
+        validate_and_print_results(base_type::d_mutable_state, d);
     }
 };
 
