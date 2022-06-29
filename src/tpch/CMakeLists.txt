@@ -37,7 +37,7 @@ target_compile_options(cuda_tpch_14 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=tru
 #target_compile_options(cuda_tpch_14 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
 # debug flag
 #target_compile_options(cuda_tpch_14 PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
-target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>")
+target_compile_options(cuda_tpch_14 PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>")
 if(false)
     # https://forums.developer.nvidia.com/t/passing-flags-to-nvcc-via-cmake/75768
     # https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#ptxas-options-def-load-cache
