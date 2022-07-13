@@ -157,16 +157,16 @@ __global__ void do_lower_bound(const int* arr, const unsigned size) {
 */
 
 template<class Key>
-__device__ unsigned get_spline_segment(const DeviceRadixSpline<Key>* rs, const Key key) {
-    const auto prefix = (key - rs->min_key_) >> rs->num_shift_bits_;
+__device__ unsigned get_spline_segment(const DeviceRadixSpline<Key>& rs, const Key key) {
+    const auto prefix = (key - rs.min_key_) >> rs.num_shift_bits_;
 
-    const uint32_t begin = rs->radix_table_[prefix];
-    const uint32_t end = rs->radix_table_[prefix + 1];
+    const uint32_t begin = rs.radix_table_[prefix];
+    const uint32_t end = rs.radix_table_[prefix + 1];
 
     // TODO measure linear search for narrow ranges as in the reference implementation
 
     const auto range_size = end - begin;
-    const auto lb = begin + lower_bound(key, rs->spline_points_ + begin, range_size, [] (const auto& coord, const Key key) {
+    const auto lb = begin + lower_bound(key, rs.spline_points_ + begin, range_size, [] (const auto& coord, const Key key) {
         return coord.x < key;
     });
 //    printf("key: %lu, lb: %u\n", key, lb);
@@ -174,14 +174,14 @@ __device__ unsigned get_spline_segment(const DeviceRadixSpline<Key>* rs, const K
 }
 
 template<class Key>
-__device__ double get_estimate(const DeviceRadixSpline<Key>* rs, const Key key) {
-    if (key <= rs->min_key_) return 0;
-    if (key >= rs->max_key_) return rs->num_keys_ - 1;
+__device__ double get_estimate(const DeviceRadixSpline<Key>& rs, const Key key) {
+    if (key <= rs.min_key_) return 0;
+    if (key >= rs.max_key_) return rs.num_keys_ - 1;
 
     // find spline segment
     const unsigned index = get_spline_segment(rs, key);
-    const auto& down = rs->spline_points_[index - 1];
-    const auto& up = rs->spline_points_[index];
+    const auto& down = rs.spline_points_[index - 1];
+    const auto& up = rs.spline_points_[index];
 
     // slope
     const double x_diff = up.x - down.x;
