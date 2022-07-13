@@ -445,8 +445,8 @@ struct ij_partitioning_approach {
     //using payload_type = std::remove_pointer_t<decltype(lineitem_table_plain_t::l_extendedprice)>;
 
     static constexpr unsigned num_streams = 1;
-    static constexpr unsigned oversubscription_factor = 2;
-    static constexpr unsigned radix_bits = 10; // TODO
+    static constexpr unsigned oversubscription_factor = 1;
+    static constexpr unsigned radix_bits = 11; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
     static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
 
@@ -675,8 +675,8 @@ struct ij_partitioning_approach {
 
         static_assert(std::is_same<partitioning_indexed_t, int64_t>::value);
         static_assert(std::is_same<partitioning_payload_t, int64_t>::value);
-        gpu_chunked_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
-        //gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        //gpu_chunked_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
+        gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
         //gpu_chunked_sswwc_radix_partition_v2_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 #ifdef DEBUG_INTERMEDIATE_STATE
