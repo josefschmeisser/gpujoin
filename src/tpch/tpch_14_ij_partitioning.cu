@@ -9,6 +9,9 @@
 #include <prefix_scan_state.h>
 #include <gpu_radix_partition.h>
 
+//#include "gpu_radix_partition.cu"
+//#include "harmonia.cu"
+
 __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
     // Inputs
     const auto* __restrict__ l_shipdate = args.lineitem->l_shipdate;
@@ -28,7 +31,9 @@ __global__ void partitioned_ij_scan(partitioned_ij_scan_args args) {
         bool active = i < args.lineitem_size;
 
         // evaluate predicate
-        active &= (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
+        if (active) {
+            active &= (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
+        }
 
         indexed_t partkey;
         payload_t summand;
@@ -90,7 +95,9 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
         bool active = i < args.lineitem_size;
 
         // evaluate predicate
-        active &= (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
+        if (active) {
+            active &= (l_shipdate[i] >= lower_shipdate) && (l_shipdate[i] < upper_shipdate);
+        }
 
         indexed_t partkey;
         payload_t summand;
@@ -103,7 +110,7 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
         uint32_t mask = __ballot_sync(FULL_MASK, active);
         const auto count = __popc(mask);
         if (count < 1) continue;
-
+#if 1
         // flush buffer
         if (count + buffer_count > per_warp_buffer_size) {
             // reserve space in global materialization buffer
@@ -130,7 +137,9 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
 
             assert(buffer_count == 0);
         }
-
+#else
+        buffer_count = 0;
+#endif
         // update warp buffer index
         const uint32_t right_mask = __funnelshift_l(FULL_MASK, 0, my_lane);
         const unsigned thread_offset = __popc(mask & right_mask);
@@ -143,7 +152,7 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
             tuple.l_partkey = partkey;
         }
     }
-
+#if 1
     // flush buffer
     if (buffer_count > 0) {
         // reserve space in global materialization buffer
@@ -170,6 +179,9 @@ __global__ void partitioned_ij_scan_refill(partitioned_ij_scan_args args) {
 
         assert(buffer_count == 0);
     }
+#else
+    buffer_count = 0;
+#endif
 }
 
 template<class IndexStructureType>
