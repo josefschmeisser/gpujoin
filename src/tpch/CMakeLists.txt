@@ -18,7 +18,7 @@ add_executable(cuda_tpch_14 "")
 target_sources(cuda_tpch_14 PRIVATE
     tpch_14_new.cu
     tpch_14_common.cu
-    # TODO port to 64 bit keys tpch_14_hj.cu
+    tpch_14_hj.cu
     tpch_14_ij.cu
     tpch_14_ij_partitioning.cu
     ../gpu_radix_partition.cu
@@ -53,6 +53,5 @@ if(false)
 add_executable(cuda_tpch_14_split tpch_14_split.cu)
 target_link_libraries(cuda_tpch_14_split tpch_common numa pthread radixspline cub)
 # additional nvcc flags
-
 
 endif()
