@@ -53,7 +53,7 @@ __global__ void ij_plain_kernel(const ij_args args, const IndexStructureType ind
             continue;
         }
 
-        auto payload = index_structure.lookup(l_partkey_column[i]);
+        auto payload = index_structure.lookup(l_partkey_column[i]); // FIXME use cooperative lookup
         if (payload != invalid_tid) {
             const auto part_tid = reinterpret_cast<unsigned>(payload);
 
@@ -296,7 +296,7 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
             const auto lookup_t1 = clock64();
 #endif
             tid_t tid_b = index_structure.cooperative_lookup(active, l_partkey);
-            assert(tid_b != invalid_tid);
+            assert(!active || tid_b != invalid_tid);
 
 #ifdef MEASURE_CYCLES
             __syncwarp();
@@ -378,7 +378,7 @@ __global__ void ij_lookup_kernel(const ij_args args, const IndexStructureType in
         if (i < args.lineitem_size &&
             l_shipdate_column[i] >= lower_shipdate &&
             l_shipdate_column[i] < upper_shipdate) {
-            payload = index_structure.lookup(l_partkey_column[i]);
+            payload = index_structure.lookup(l_partkey_column[i]); // FIXME use cooperative lookup
         }
 
         int match = payload != invalid_tid;
