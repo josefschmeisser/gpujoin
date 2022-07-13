@@ -179,8 +179,16 @@ struct harmonia_index : public abstract_index<Key> {
 
     __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* /*d_column*/) override {
         tree.construct(h_column);
+
+        // migrate harmonia spline
+        const auto start = std::chrono::high_resolution_clock::now();
+
         DeviceAllocator<key_t> device_allocator;
         tree.create_device_handle(device_index.d_tree, device_allocator, guard);
+
+        const auto finish = std::chrono::high_resolution_clock::now();
+        const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;
+        std::cout << "harmonia migration time: " << duration << " ms\n";
     }
 
     __host__ size_t memory_consumption() const override {
