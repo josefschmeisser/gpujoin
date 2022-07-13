@@ -208,7 +208,7 @@ void execute_approach(std::string approach_name) {
 
     const auto experiment_desc = create_experiment_description();
     index_type_enum index_type = parse_index_type(config.index_type);
-    measure(experiment_desc, [&]() {
+    measure(experiment_desc, [&](auto& measurement) {
         approaches.at(approach_name)->run(qd, index_type);
     });
 

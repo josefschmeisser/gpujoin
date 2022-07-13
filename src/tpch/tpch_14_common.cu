@@ -21,6 +21,8 @@
 #include "tpch_14_ij.cuh"
 #include "tpch_14_ij_partitioning.cuh"
 
+using measuring::measurement;
+
 struct query_data {
     Database db;
 
@@ -123,27 +125,27 @@ void validate_and_print_results(const T& d_mutable_state, const query_data& qd) 
 }
 
 struct abstract_approach_dispatcher {
-    virtual void run(query_data& d, index_type_enum index_type) const = 0;
+    virtual void run(measurement& m, query_data& d, index_type_enum index_type) const = 0;
 };
 
 template<template<class T> class Func>
 struct approach_dispatcher : public abstract_approach_dispatcher {
-    void run(query_data& d, index_type_enum index_type) const override {
+    void run(measurement& m, query_data& d, index_type_enum index_type) const override {
         switch (index_type) {
             case index_type_enum::btree:
-                Func<btree_type>()(d);
+                Func<btree_type>()(m, d);
                 break;
             case index_type_enum::harmonia:
-                Func<harmonia_type>()(d);
+                Func<harmonia_type>()(m, d);
                 break;
             case index_type_enum::lower_bound:
-                Func<lower_bound_type>()(d);
+                Func<lower_bound_type>()(m, d);
                 break;
             case index_type_enum::radix_spline:
-                Func<radix_spline_type>()(d);
+                Func<radix_spline_type>()(m, d);
                 break;
             case index_type_enum::no_op:
-                Func<no_op_type>()(d);
+                Func<no_op_type>()(m, d);
                 break;
             default:
                 assert(false);
@@ -160,9 +162,7 @@ struct my_approach {
 
 template<class IndexType>
 struct hj_approach {
-    void operator()(query_data& d) {
-// TODO port to 64 bit keys
-#if 0
+    void operator()(measurement& m, query_data& d) {
         const auto& config = get_experiment_config();
 
         hj_ht_t ht(d.part_size);
@@ -185,12 +185,12 @@ struct hj_approach {
 
         int num_blocks = (d.part_size + config.block_size - 1) / config.block_size;
         hj_build_kernel<<<num_blocks, config.block_size>>>(args);
-
+cudaDeviceSynchronize();
+measuring::record_timestamp(m);
         num_blocks = (d.lineitem_size + config.block_size - 1) / config.block_size;
         hj_probe_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-#endif
         validate_and_print_results(d_mutable_state, d);
     }
 };
@@ -200,7 +200,7 @@ __global__ void ij_plain_kernel(const lineitem_table_plain_t* __restrict__ linei
 
 template<class IndexType>
 struct ij_plain_approach {
-    void operator()(query_data& d) {
+    void operator()(measurement& m, query_data& d) {
         const auto& config = get_experiment_config();
 
         ij_mutable_state mutable_state;
@@ -230,7 +230,7 @@ struct ij_plain_approach {
 // Pipelined Blockwise Sorting
 template<class IndexType>
 struct ij_pbws_approach {
-    void operator()(query_data& d) {
+    void operator()(measurement& m, query_data& d) {
         enum { BLOCK_THREADS = 256, ITEMS_PER_THREAD = 10 }; // TODO optimize
 
         const int num_blocks = 4 * get_device_properties(0).multiProcessorCount;
@@ -295,7 +295,7 @@ template<class IndexType>
 struct ij_nplfplain_approach {
     static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
 
-    void operator()(query_data& d) {
+    void operator()(measurement& m, query_data& d) {
         const auto& config = get_experiment_config();
 
         auto d_join_entries = create_device_array<join_entry>(selectivity_est*d.lineitem_size);
@@ -425,7 +425,7 @@ struct ij_np_lf_lr_plain_approach : public abstract_ij_non_pipelined_approach<In
 
     enum { BLOCK_THREADS = 256 }; // TODO optimize
 
-    void operator()(query_data& d) {
+    void operator()(measurement& m, query_data& d) {
         const auto& config = get_experiment_config();
         const auto args = base_type::create_kernel_args(d);
 
@@ -695,13 +695,18 @@ struct ij_partitioning_approach {
         partitioned_ij_lookup<<<grid_size, config.block_size, 0, state.stream>>>(*state.partitioned_ij_lookup_args_inst, index_structure.device_index);
     }
 
-    void operator()(query_data& d) {
+    void operator()(measurement& m, query_data& d) {
         if (sizeof(indexed_t) != 8) {
             // TODO
             //throw std::runtime_error("usage of keys with other sizes than 8 bytes is not implemented");
         }
         init(d);
+        measuring::record_timestamp(m);
+//measuring::measure_only([&]() {
         phase1(d);
+        cudaDeviceSynchronize();
+//});
+        measuring::record_timestamp(m);
         phase2(d);
         cudaDeviceSynchronize();
         // collect results
@@ -783,7 +788,7 @@ void execute_approach(std::string approach_name) {
 
     const auto experiment_desc = create_experiment_description();
     index_type_enum index_type = parse_index_type(config.index_type);
-    measure(experiment_desc, [&]() {
-        approaches.at(approach_name)->run(qd, index_type);
+    measure(experiment_desc, [&](auto& measurement) {
+        approaches.at(approach_name)->run(measurement, qd, index_type);
     });
 }

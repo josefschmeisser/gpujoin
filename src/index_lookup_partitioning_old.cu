@@ -397,7 +397,7 @@ int main(int argc, char** argv) {
     }
 
     const auto& device_properties = get_device_properties(0);
-    measure(experiment_desc, [&]() {
+    measure(experiment_desc, [&](auto& measurement) {
         for (const auto& state : stream_states) {
             run_on_stream(*state, *index, device_properties);
         }
