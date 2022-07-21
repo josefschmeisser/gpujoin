@@ -414,7 +414,7 @@ void partitioning_approach<IndexType>::operator()(query_data& d) {
     }
 
     size_t remaining = config.num_lookups;
-    size_t max_stream_portion = config.num_lookups / num_streams; // FIXME
+    size_t max_stream_portion = (config.num_lookups + num_streams) / num_streams;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
 
