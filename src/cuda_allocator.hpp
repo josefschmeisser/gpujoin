@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <new>
 #include <limits>
+#include <iostream>
 
 #include <cuda_runtime.h>
 
@@ -59,6 +60,9 @@ struct cuda_allocator {
             cudaHostGetDevicePointer(&temp, host_ptr, 0);
         }
         if (temp == nullptr) {
+            const auto code = cudaGetLastError();
+            const char* name = cudaGetErrorName(code);
+            std::cerr << "cuda allocation failed; code: " << name << std::endl;
             throw std::bad_alloc();
         }
 

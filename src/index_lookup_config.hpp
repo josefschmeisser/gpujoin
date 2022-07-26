@@ -33,16 +33,21 @@ using value_t = uint32_t;
 
 // host allocator
 //template<class T> using host_allocator_t = huge_page_allocator<T>;
-//template<class T> using host_allocator_t = mmap_allocator<T, huge_2mb, 1>;
+//template<class T> using host_allocator_t = mmap_allocator<T, huge_2mb, 0>;
 template<class T> using host_allocator_t = std::allocator<T>;
 //template<class T> using host_allocator_t = cuda_allocator<T, true>;
 
 // device allocators
 //template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::device>;
 template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::zero_copy>;
+//template<class T> using device_index_allocator = mmap_allocator<T, huge_2mb, 0>;
+
 //using indexed_allocator_t = cuda_allocator<index_key_t>;
 using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
+//using indexed_allocator_t = mmap_allocator<index_key_t, huge_2mb, 0>;
+
 using lookup_keys_allocator_t = cuda_allocator<index_key_t>;
+
 template<class T> using device_exclusive_allocator = cuda_allocator<T, cuda_allocation_type::device>;
 
 experiment_config& get_experiment_config();
