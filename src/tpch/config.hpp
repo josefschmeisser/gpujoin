@@ -24,8 +24,8 @@ struct experiment_config {
 //#define HOST_ALLOCATOR_TYPE mmap_allocator<T, huge_2mb, 1>
 
 // device index allocator
-//#define DEVICE_INDEX_ALLOCATOR_TYPE cuda_allocator<T, cuda_allocation_type::zero_copy>
-#define DEVICE_INDEX_ALLOCATOR_TYPE cuda_allocator<T, cuda_allocation_type::device>
+#define DEVICE_INDEX_ALLOCATOR_TYPE cuda_allocator<T, cuda_allocation_type::zero_copy>
+//#define DEVICE_INDEX_ALLOCATOR_TYPE cuda_allocator<T, cuda_allocation_type::device>
 //#define DEVICE_INDEX_ALLOCATOR_TYPE mmap_allocator<T, huge_2mb, 0>
 
 // device relation allocator
