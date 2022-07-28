@@ -199,10 +199,13 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
 
         const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
         const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
+        const uint32_t loop_limit = (partition_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
 
         // cooperative lookup implementation
-        for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
-            const bool active = i < partition_size;
+        for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
+            //assert(__activemask() == FULL_MASK); // ensure that all threads participate
+
+            bool active = i < partition_size;
 
             const partitioned_tuple_type tuple = active ? relation[i] : partitioned_tuple_type();
             const indexed_t key = static_cast<indexed_t>(tuple.key);

@@ -212,6 +212,7 @@ __global__ void partitioned_lookup_kernel(const IndexStructureType index_structu
 
         const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
         const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
+        const uint32_t loop_limit = (partition_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
 
 #if 0
         // standard lookup implementation
@@ -222,7 +223,7 @@ __global__ void partitioned_lookup_kernel(const IndexStructureType index_structu
         }
 #else
         // cooperative lookup implementation
-        for (uint32_t i = threadIdx.x; i < partition_size + 31; i += blockDim.x) {
+        for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
             const bool active = i < partition_size;
             const TupleType tuple = active ? relation[i] : TupleType();
             const auto tid = index_structure.cooperative_lookup(active, tuple.key);
