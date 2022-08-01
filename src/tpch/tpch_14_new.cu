@@ -10,9 +10,14 @@ int main(int argc, char** argv) {
 
     // set-up the measuring utility
     auto& measuring_config = measuring::get_settings();
-    measuring_config.dest_file = "tpch_14_results.yml";
-    measuring_config.repetitions = 1;
-    measuring_config.stdout_only = true;
+
+    if (!config.dest_file.empty()) {
+        measuring_config.dest_file = config.dest_file;// "tpch_14_results.yml";
+        measuring_config.repetitions = 3;
+    } else {
+        measuring_config.repetitions = 1;
+        measuring_config.stdout_only = true;
+    }
     // TODO
     //const auto experiment_desc = create_experiment_description();
 

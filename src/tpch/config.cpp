@@ -21,6 +21,7 @@ void parse_options(int argc, char** argv) {
         ("positional", "Input", cxxopts::value<std::vector<std::string>>())
         ("a,approach", "Approach to use (hj, ij_plain, ij_partitioning)", cxxopts::value<std::string>()->default_value(config.approach))
         ("b,blocksize", "Block size", cxxopts::value<unsigned>()->default_value(std::to_string(config.block_size)))
+        ("d,destfile", "Output file", cxxopts::value<std::string>()->default_value(config.dest_file))
         ("i,index", "Index type to use", cxxopts::value<std::string>()->default_value(config.index_type))
         ("h,help", "Print usage")
     ;
@@ -44,6 +45,7 @@ void parse_options(int argc, char** argv) {
 
     config.approach = result["approach"].as<std::string>();
     config.block_size = result["blocksize"].as<unsigned>();
+    config.dest_file = result["destfile"].as<std::string>();
     config.index_type = result["index"].as<std::string>();
     config.db_path = positional.front();
 }
