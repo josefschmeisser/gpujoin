@@ -416,6 +416,8 @@ void partitioning_approach<IndexType>::operator()(query_data& d) {
 
     size_t remaining = config.num_lookups;
     size_t max_stream_portion = (config.num_lookups + num_streams) / num_streams;
+    printf("ALIGN_BYTES: %u\n", ALIGN_BYTES);
+    max_stream_portion = (max_stream_portion + ALIGN_BYTES - 1) & -ALIGN_BYTES;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
 
