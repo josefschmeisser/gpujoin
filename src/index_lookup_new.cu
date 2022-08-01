@@ -149,6 +149,7 @@ struct blockwise_sorting_approach {
         printf("executing kernel...\n");
         IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
         if (config.block_size != 256) {
+            std::cerr << "invalid block size for this approach" << std::endl;
             throw 0;
         }
         lookup_kernel_with_sorting_v1<256, 4><<<num_blocks, 256>>>(index_structure.device_index, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data(), config.max_bits);

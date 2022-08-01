@@ -27,7 +27,7 @@ void parse_options(int argc, char** argv) {
     cxxopts::Options options(argv[0], "A brief description");
 
     options.add_options()
-        ("a,approach", "Approach to use (hj, ij_plain, ij_partitioning)", cxxopts::value<std::string>()->default_value(config.approach))
+        ("a,approach", "Approach to use (plain, bws, partitioning)", cxxopts::value<std::string>()->default_value(config.approach))
         ("i,index", "Index type to use", cxxopts::value<std::string>()->default_value(config.index_type))
         ("e,elements", "Number of elements in the index", cxxopts::value<unsigned>()->default_value(std::to_string(config.num_elements)))
         ("l,lookups", "Size of the lookup dataset", cxxopts::value<unsigned>()->default_value(std::to_string(config.num_lookups)))
