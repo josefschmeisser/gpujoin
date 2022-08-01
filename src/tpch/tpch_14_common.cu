@@ -92,10 +92,12 @@ struct query_data {
 // Mapping: lineitem size -> q14 result
 static const std::map<size_t, int64_t> expected_results {
     { 6001215, 16380778 },
-    { 59986052, 16647594 }
+    { 59986052, 16647594 },
+    { 59986050, 16647594 }
 };
 
 static void validate_results(int64_t r, const query_data& qd) {
+    std::cout << "lineitem_size: " << qd.lineitem_size << std::endl;
     const auto it = expected_results.find(qd.lineitem_size);
     if (it != expected_results.end()) {
         if (it->second != r) {
@@ -448,7 +450,7 @@ struct ij_partitioning_approach {
     static constexpr unsigned oversubscription_factor = 1;
     static constexpr unsigned radix_bits = 11; // TODO
     static constexpr unsigned ignore_bits = 4; // TODO
-    static constexpr double selectivity_est = 0.02; // actual floating point result: 0.0126612694262745
+    static constexpr double selectivity_est = 0.013; // actual floating point result: 0.0126612694262745
 
     size_t buffer_size;
     int grid_size;
@@ -702,28 +704,30 @@ struct ij_partitioning_approach {
         }
         init(d);
         measuring::record_timestamp(m);
-//measuring::measure_only([&]() {
+
         phase1(d);
-        cudaDeviceSynchronize();
-//});
-        measuring::record_timestamp(m);
+//        cudaDeviceSynchronize();
+//        measuring::record_timestamp(m);
+
         phase2(d);
         cudaDeviceSynchronize();
+
         // collect results
-        int64_t numerator = 0;
-        int64_t denominator = 0;
+        struct results_t {
+            int64_t global_numerator = 0;
+            int64_t global_denominator = 0;
+            const results_t& to_host_accessible() const { return *this; }
+            const results_t* data() const { return this; }
+        } results;
+
         for (const auto& stream_state : stream_states) {
             const auto r = stream_state.d_mutable_state.to_host_accessible();
             const auto& state = r.data()[0];
-            numerator += state.global_numerator;
-            denominator += state.global_denominator;
+            results.global_numerator += state.global_numerator;
+            results.global_denominator += state.global_denominator;
         }
-        printf("numerator: %ld denominator: %ld\n", (long)numerator, (long)denominator);
 
-        numerator *= 1'000;
-        denominator /= 1'000;
-        int64_t result = 100*numerator/denominator;
-        printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
+        validate_and_print_results(results, d);
     }
 };
 
