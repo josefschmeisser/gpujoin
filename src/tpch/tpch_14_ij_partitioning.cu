@@ -203,7 +203,7 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
 
         // cooperative lookup implementation
         for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
-            //assert(__activemask() == FULL_MASK); // ensure that all threads participate
+            //if (blockIdx.x == 0) printf("thread: %d activelanes: 0x%08x\n", threadIdx.x, __activemask());
 
             bool active = i < partition_size;
 
