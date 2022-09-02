@@ -500,9 +500,8 @@ struct harmonia_tree {
         return not_found;
     }
 
-    // TODO test
     __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
+        //assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
 
         unsigned lower_bound = max_keys;
         const unsigned my_lane_id = lane_id();
@@ -519,15 +518,20 @@ struct harmonia_tree {
             const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
 
             const auto leader_active = __shfl_sync(window_mask, active, leader);
-            unsigned exhausted_cnt = leader_active ? 0 : ntg_size;
+            //unsigned exhausted_cnt = leader_active ? 0 : ntg_size;
+            bool advance = leader_active;
             uint32_t matches = 0;
-            while (matches == 0 && exhausted_cnt < ntg_size) {
+            //while (matches == 0 && exhausted_cnt < ntg_size) {
+            while (matches == 0 && advance) {
+
                 key_idx += ntg_size;
 
                 key_t value;
                 if (key_idx < max_keys) value = leader_arr[key_idx];
                 matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
-                exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
+                //exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
+                //advance = key_idx - lane_offset < max_keys; // termination criterion
+                advance = key_idx - lane_offset + ntg_size < max_keys; // termination criterion
             }
 
             if (my_lane_id == leader && matches != 0) {
