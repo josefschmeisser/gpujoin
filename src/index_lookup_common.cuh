@@ -35,7 +35,7 @@ using no_op_type = no_op_index<index_key_t, value_t, device_index_allocator, hos
 template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
     const std::size_t upper_limit = 1ul << (max_bits - 1u);
-    auto rng = std::default_random_engine {};
+    std::mt19937 rng {5486u};
 
     if (keys.size() - 1 > upper_limit) {
         throw std::runtime_error("resulting dataset would exceed the provided limit defined by 'max_bits'");
@@ -65,18 +65,16 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
         std::uniform_int_distribution<size_t> lookup_distribution(0ul, keys.size() - 1ul);
         std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distribution(rng)]; });
     } else if (lookup_pattern == lookup_pattern_type::zipf) {
-        std::mt19937 generator;
-        generator.seed(0);
         zipf_distribution<uint64_t> lookup_distribution(keys.size() - 1, zipf_factor);
         for (uint64_t i = 0; i < lookups.size(); ++i) {
-            const auto key_pos = lookup_distribution(generator);
+            const auto key_pos = lookup_distribution(rng);
             lookups[i] = keys[key_pos];
         }
     } else {
         assert(false);
     }
 
-    //std::sort(lookups.begin(), lookups.end());
+    std::sort(lookups.begin(), lookups.end());
 }
 
 template<class KeyType, class IndexStructureType, class VectorType>
@@ -92,7 +90,7 @@ template<class IndexStructureType>
 __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-
+#if 0
     int i = index;
     uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
     while (active_lanes) {
@@ -105,6 +103,16 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
         i += stride;
         active_lanes = __ballot_sync(FULL_MASK, i < n);
     }
+#else
+    const int loop_limit = (n + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
+    for (int i = index; i < loop_limit; i += stride) {
+        const bool active = i < n;
+        const auto tid = index_structure.cooperative_lookup(active, keys[i]);
+        if (active) {
+            tids[i] = tid;
+        }
+    }
+#endif
 }
 
 template<
