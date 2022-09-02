@@ -28,6 +28,10 @@
 #include "gpu_radix_partition.cuh"
 #include "partitioned_relation.hpp"
 
+#ifdef NRDC
+#include "src/gpu_radix_partition.cu"
+#endif
+
 using namespace measuring;
 
 static const int num_streams = 2;//2;

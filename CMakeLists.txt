@@ -71,7 +71,7 @@ add_executable(index_lookup
     src/measuring.cpp
     src/device_properties.cpp
     src/harmonia.cu
-    src/indexes.cu
+    src/indexes.cpp
     src/index_lookup_config.cpp
     src/gpu_radix_partition.cu
 )
@@ -84,6 +84,7 @@ target_include_directories(index_lookup PUBLIC
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
 # additional nvcc flags
 target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
+#target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
 # debug flag
 #target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
 target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>")
@@ -105,7 +106,7 @@ add_executable(index_lookup_partitioning
     src/measuring.cpp
     src/device_properties.cpp
     #src/harmonia.cu
-    src/indexes.cu
+    src/indexes.cpp
     src/index_lookup_config.cpp
     src/gpu_radix_partition.cu
 )

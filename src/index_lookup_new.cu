@@ -12,6 +12,10 @@
 #include "device_properties.hpp"
 #include "measuring.hpp"
 
+#ifdef NRDC
+#include "index_lookup_partitioning.cu"
+#endif
+
 using namespace measuring;
 
 
@@ -70,7 +74,7 @@ bool query_data::validate_results() {
     printf("validating results...\n");
     for (unsigned i = 0; i < lookup_keys.size(); ++i) {
         if (h_tids_raw[i] > indexed.size()) {
-            printf("invaild tid: %u, at %u from %u\n", h_tids_raw[i], i, lookup_keys.size());
+            printf("invaild tid: %u, at %u from %lu\n", h_tids_raw[i], i, lookup_keys.size());
             fflush(stdout);
             return false;
         }
@@ -230,7 +234,7 @@ int main(int argc, char** argv) {
     auto& measuring_config = measuring::get_settings();
     measuring_config.dest_file = "index_scan_results.yml";
     measuring_config.stdout_only = true;
-    measuring_config.repetitions = 1;
+    measuring_config.repetitions = 20;
     const auto experiment_desc = create_experiment_description();
 /*
     if (config.execute_predefined_scenario) {

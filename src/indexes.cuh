@@ -1,5 +1,7 @@
 #pragma once
 
+#include "indexes.hpp"
+
 #include <sys/types.h>
 #include <cstdint>
 #include <numeric>
@@ -17,9 +19,11 @@ Passing a struct by value has the advantage that the CUDA runtime copies the ent
 Reads to members of these structs are therefore cached and can futhermore be broadcasted/mutlicasted when accessed by multiple threads.
 */
 
+/*
 enum class index_type_enum : unsigned { btree, harmonia, lower_bound, radix_spline, no_op };
 
 index_type_enum parse_index_type(const std::string& index_name);
+*/
 
 template<class Key>
 struct abstract_index {
