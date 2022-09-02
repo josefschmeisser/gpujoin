@@ -141,23 +141,23 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
     const int lane_id = threadIdx.x % 32;
     const int warp_id = threadIdx.x / 32;
+    (void)warp_id;
 
     const unsigned tile_size = min(n, (n + gridDim.x - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
     const unsigned tid_limit = min(tid + tile_size, n);
 
-//if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+    //if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
 
     const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
 
     index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO omit this
 
-
     for (int i = 0; i < iteration_count; ++i) {
-//if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
+        //if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
 
         unsigned valid_items = min(ITEMS_PER_ITERATION, tid_limit - tid);
-//if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
+        //if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
 
         // Load a segment of consecutive items that are blocked across threads
         BlockLoad(temp_storage.load).Load(keys + tid, input_thread_data, valid_items);
@@ -193,7 +193,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
              __syncthreads();
         }/* else {
-//if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
+            //if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
         }*/
 #endif
 
@@ -205,7 +205,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             }
             old = __shfl_sync(FULL_MASK, old, 0);
             unsigned actual_count = min(valid_items - old, 32);
-//if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+            //if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
 
             if (actual_count == 0) break;
 
@@ -216,17 +216,16 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             if (active) {
                 assoc_tid = in_buffer_pos[old + lane_id];
                 element = buffer[old + lane_id];
-//printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+                //printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
             value_t tid_b = index_structure.cooperative_lookup(active, element);
             if (active) {
-//printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+                //printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
                 tids[assoc_tid] = tid_b;
             }
 
-//printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
-
+            //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
         } while (true);
 
         tid += valid_items;
