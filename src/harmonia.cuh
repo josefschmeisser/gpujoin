@@ -61,7 +61,6 @@ struct harmonia_tree {
     struct device_handle_t {
         const key_t* __restrict__ keys;
         const child_ref_t* __restrict__ children;
-//        const child_ref_t* __restrict__ children_cached; // only contains the upper tree levels; stored in constant memory
         const value_t* __restrict__ values;
         unsigned size;
         unsigned depth;
@@ -352,7 +351,6 @@ struct harmonia_tree {
         // migrate key array
         typename DeviceAllocator::rebind<key_t>::other keys_allocator = device_allocator;
         guard.keys_guard = create_device_array_from(keys, keys_allocator);
-//std::exchange(guard.keys_guard, create_device_array_from(keys, keys_allocator));
         handle.keys = guard.keys_guard.data();
 
         // migrate children array
@@ -373,11 +371,45 @@ struct harmonia_tree {
         }
     }
 
+    // utilize the full warp for each query
+    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
+        unsigned lower_bound = max_keys;
+        const unsigned my_lane_id = lane_id();
+        unsigned leader = 0;
+        const int lane_offset = my_lane_id - leader;
+        assert(my_lane_id >= leader);
+
+        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
+        for (unsigned shift = 0; shift < 32; ++shift) {
+            int key_idx = lane_offset - 32;
+            const key_t leader_x = __shfl_sync(FULL_MASK, x, leader);
+            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(FULL_MASK, reinterpret_cast<uint64_t>(arr), leader));
+
+            const auto leader_active = __shfl_sync(FULL_MASK, active, leader);
+            bool advance = leader_active;
+            uint32_t matches = 0;
+            while (matches == 0 && advance) {
+                key_idx += 32;
+
+                key_t value;
+                if (key_idx < max_keys) value = leader_arr[key_idx];
+                matches = __ballot_sync(FULL_MASK, key_idx < max_keys && value >= leader_x);
+                advance = key_idx - lane_offset + 32 < max_keys; // termination criterion
+            }
+
+            if (my_lane_id == leader && matches != 0) {
+                lower_bound = key_idx + __ffs(matches) - 1 - leader;
+            }
+
+            leader += 1;
+        }
+
+        return lower_bound;
+    }
+
     template<unsigned Degree>
     __device__ static value_t cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
         enum { WINDOW_SIZE = 1 << Degree };
-
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads within the warp participate
 
         const unsigned my_lane_id = lane_id();
         unsigned leader = WINDOW_SIZE*(my_lane_id >> Degree); // equivalent to WINDOW_SIZE*(my_lane_id div WINDOW_SIZE)
@@ -393,16 +425,16 @@ struct harmonia_tree {
             const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
 
             const auto leader_active = __shfl_sync(window_mask, active, leader);
-            unsigned exhausted_cnt = leader_active ? 0 : WINDOW_SIZE;
+            bool advance = leader_active;
             uint32_t matches = 0;
-            while (matches == 0 && exhausted_cnt < WINDOW_SIZE) {
+            while (matches == 0 && advance) {
                 key_idx += WINDOW_SIZE;
 
                 key_t value;
                 if (key_idx < max_keys) value = leader_arr[key_idx];
-//                const key_t value = leader_arr[(key_idx < max_keys) ? key_idx : 0]; // almost 10 percent slower than the conditional version
+                //const key_t value = leader_arr[(key_idx < max_keys) ? key_idx : 0]; // almost 10 percent slower than the conditional version
                 matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
-                exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
+                advance = key_idx - lane_offset + WINDOW_SIZE < max_keys; // termination criterion
             }
 
             if (my_lane_id == leader && matches != 0) {
@@ -415,63 +447,44 @@ struct harmonia_tree {
         return lower_bound;
     }
 
-    template<unsigned Degree = 2> // cooperative parallelization Degree
-    // This has to be a function template so that it won't get compiled when Sorted_Only is false.
-    // To make it a function template, we have to add the second predicate to std::enable_if_t which is dependent on the function template parameter.
-    // And with the help of SFINAE only the correct implementation will get compiled.
-    __device__ static std::enable_if_t<Sorted_Only && Degree < 6, value_t> lookup(const bool active, const device_handle_t& tree, const key_t key) {
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
+    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
+        unsigned lower_bound = max_keys;
+        const unsigned my_lane_id = lane_id();
+        const unsigned ntg_size = 1u << ntg_degree;
+        unsigned leader = ntg_size*(my_lane_id >> ntg_degree); // equivalent to ntg_size*(my_lane_id div ntg_size)
+        const int lane_offset = my_lane_id - leader;
+        const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, ntg_size) << leader;
+        assert(my_lane_id >= leader);
 
-        key_t actual;
-        unsigned lb = 0, pos = 0;
-        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
-            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
+        for (unsigned shift = 0; shift < ntg_size; ++shift) {
+            int key_idx = lane_offset - ntg_size;
+            const key_t leader_x = __shfl_sync(window_mask, x, leader);
+            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
 
-            lb = cooperative_linear_search<Degree>(active, key, node_start);
-            actual = node_start[lb];
+            const auto leader_active = __shfl_sync(window_mask, active, leader);
+            bool advance = leader_active;
+            uint32_t matches = 0;
+            while (matches == 0 && advance) {
+                key_idx += ntg_size;
 
-            unsigned new_pos = tree.children[pos] + lb;
-//            active = active && new_pos < tree.size; // TODO
+                key_t value;
+                if (key_idx < max_keys) value = leader_arr[key_idx];
+                matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
+                advance = key_idx - lane_offset + ntg_size < max_keys; // termination criterion
+            }
 
-            // Inactive threads never progress during the traversal phase.
-            // They, however, will be utilized by active threads during the cooperative search.
-            pos = active ? new_pos : 0;
+            if (my_lane_id == leader && matches != 0) {
+                lower_bound = key_idx + __ffs(matches) - 1 - leader;
+            }
+
+            leader += 1;
         }
 
-        if (active && pos < tree.size && key == actual) {
-            return pos;
-        }
-
-        return not_found;
+        return lower_bound;
     }
 
-    template<unsigned Degree = 2>
-    __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t& tree, key_t key) {
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
-
-        key_t actual;
-        unsigned lb = 0, pos = 0;
-        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
-            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
-
-            lb = cooperative_linear_search<Degree>(active, key, node_start);
-            actual = node_start[lb];
-
-            unsigned new_pos = tree.children[pos] + lb;
-//            active = active && new_pos < tree.size; // TODO
-
-            // Inactive threads never progress during the traversal phase.
-            // They, however, will be utilized by active threads during the cooperative search.
-            pos = active ? new_pos : 0;
-        }
-
-        if (active && pos < tree.size && key == actual) {
-            return tree.values[pos];
-        }
-
-        return not_found;
-    }
-
+    // host-side lookup function, for validation purposes only
     __host__ value_t lookup(key_t key) {
         bool active = true;
         key_t actual;
@@ -500,132 +513,72 @@ struct harmonia_tree {
         return not_found;
     }
 
-    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
-        //assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
-
-        unsigned lower_bound = max_keys;
-        const unsigned my_lane_id = lane_id();
-        const unsigned ntg_size = 1u << ntg_degree;
-        unsigned leader = ntg_size*(my_lane_id >> ntg_degree); // equivalent to ntg_size*(my_lane_id div ntg_size)
-        const int lane_offset = my_lane_id - leader;
-        const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, ntg_size) << leader;
-        assert(my_lane_id >= leader);
-
-        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
-        for (unsigned shift = 0; shift < ntg_size; ++shift) {
-            int key_idx = lane_offset - ntg_size;
-            const key_t leader_x = __shfl_sync(window_mask, x, leader);
-            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
-
-            const auto leader_active = __shfl_sync(window_mask, active, leader);
-            //unsigned exhausted_cnt = leader_active ? 0 : ntg_size;
-            bool advance = leader_active;
-            uint32_t matches = 0;
-            //while (matches == 0 && exhausted_cnt < ntg_size) {
-            while (matches == 0 && advance) {
-
-                key_idx += ntg_size;
-
-                key_t value;
-                if (key_idx < max_keys) value = leader_arr[key_idx];
-                matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
-                //exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
-                //advance = key_idx - lane_offset < max_keys; // termination criterion
-                advance = key_idx - lane_offset + ntg_size < max_keys; // termination criterion
-            }
-
-            if (my_lane_id == leader && matches != 0) {
-                lower_bound = key_idx + __ffs(matches) - 1 - leader;
-            }
-
-            leader += 1;
-        }
-
-        return lower_bound;
-    }
-
-    // utilize the full warp for each query
-    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
-
-        unsigned lower_bound = max_keys;
-        const unsigned my_lane_id = lane_id();
-        unsigned leader = 0;
-        const int lane_offset = my_lane_id - leader;
-        assert(my_lane_id >= leader);
-
-        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
-        for (unsigned shift = 0; shift < 32; ++shift) {
-            int key_idx = lane_offset - 32;
-            const key_t leader_x = __shfl_sync(FULL_MASK, x, leader);
-            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(FULL_MASK, reinterpret_cast<uint64_t>(arr), leader));
-
-            const auto leader_active = __shfl_sync(FULL_MASK, active, leader);
-            unsigned exhausted_cnt = leader_active ? 0 : 32;
-            uint32_t matches = 0;
-            while (matches == 0 && exhausted_cnt < 32) {
-                key_idx += 32;
-
-                key_t value;
-                if (key_idx < max_keys) value = leader_arr[key_idx];
-                matches = __ballot_sync(FULL_MASK, key_idx < max_keys && value >= leader_x);
-                exhausted_cnt = __popc(__ballot_sync(FULL_MASK, key_idx >= max_keys));
-            }
-
-            if (my_lane_id == leader && matches != 0) {
-                lower_bound = key_idx + __ffs(matches) - 1 - leader;
-            }
-
-            leader += 1;
-        }
-
-        return lower_bound;
-    }
-
-#if 0
-    __device__ static unsigned cooperative_linear_search_unconstrained(const bool active, const key_t x, const key_t* arr, const unsigned ntg_size) {
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
-
-        unsigned lower_bound = max_keys;
-        const unsigned my_lane_id = lane_id();
-
-        unsigned leader = ntg_size*(my_lane_id / ntg_size); // subtract the remainder
-        const int lane_offset = my_lane_id - leader;
-        const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, ntg_size) << leader;
-        assert(my_lane_id >= leader);
-
-        // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
-        for (unsigned shift = 0; shift < ntg_size; ++shift) {
-            int key_idx = lane_offset - ntg_size;
-            const key_t leader_x = __shfl_sync(window_mask, x, leader);
-            const key_t* leader_arr = reinterpret_cast<const key_t*>(__shfl_sync(window_mask, reinterpret_cast<uint64_t>(arr), leader));
-
-            const auto leader_active = __shfl_sync(window_mask, active, leader);
-            unsigned exhausted_cnt = leader_active ? 0 : ntg_size;
-            uint32_t matches = 0;
-            while (matches == 0 && exhausted_cnt < ntg_size) {
-                key_idx += ntg_size;
-
-                key_t value;
-                if (key_idx < max_keys) value = leader_arr[key_idx];
-                matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
-                exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= max_keys));
-            }
-
-            if (my_lane_id == leader && matches != 0) {
-                lower_bound = key_idx + __ffs(matches) - 1 - leader;
-            }
-
-            leader += 1;
-        }
-
-        return lower_bound;
-    }
+    template<unsigned Degree = 2> // cooperative parallelization Degree
+    // This has to be a function template so that it won't get compiled when Sorted_Only is false.
+    // To make it a function template, we have to add the second predicate to std::enable_if_t which is dependent on the function template parameter.
+    // And with the help of SFINAE only the correct implementation will get compiled.
+    __device__ static std::enable_if_t<Sorted_Only && Degree < 6, value_t> lookup(const bool active, const device_handle_t& tree, const key_t key) {
+#ifndef NDEBUG
+        __syncwarp();
+        assert(__activemask() == FULL_MASK); // ensure that all threads participate
 #endif
+        key_t actual;
+        unsigned lb = 0, pos = 0;
+        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
+            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+
+            lb = cooperative_linear_search<Degree>(active, key, node_start);
+            actual = node_start[lb];
+
+            unsigned new_pos = tree.children[pos] + lb;
+            //active = active && new_pos < tree.size; // TODO
+
+            // Inactive threads never progress during the traversal phase.
+            // They, however, will be utilized by active threads during the cooperative search.
+            pos = active ? new_pos : 0;
+        }
+
+        if (active && pos < tree.size && key == actual) {
+            return pos;
+        }
+
+        return not_found;
+    }
+
+    template<unsigned Degree = 2>
+    __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t& tree, key_t key) {
+#ifndef NDEBUG
+        __syncwarp();
+        assert(__activemask() == FULL_MASK); // ensure that all threads participate
+#endif
+        key_t actual;
+        unsigned lb = 0, pos = 0;
+        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
+            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+
+            lb = cooperative_linear_search<Degree>(active, key, node_start);
+            actual = node_start[lb];
+
+            unsigned new_pos = tree.children[pos] + lb;
+            //active = active && new_pos < tree.size; // TODO
+
+            // Inactive threads never progress during the traversal phase.
+            // They, however, will be utilized by active threads during the cooperative search.
+            pos = active ? new_pos : 0;
+        }
+
+        if (active && pos < tree.size && key == actual) {
+            return tree.values[pos];
+        }
+
+        return not_found;
+    }
 
     __device__ static value_t ntg_lookup(const bool active, const device_handle_t& tree, const key_t key) {
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
-
+#ifndef NDEBUG
+        __syncwarp();
+        assert(__activemask() == FULL_MASK); // ensure that all threads participate
+#endif
         key_t actual;
         unsigned lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
@@ -648,10 +601,11 @@ struct harmonia_tree {
         return not_found;
     }
 
-#if 1
     __device__ static value_t ntg_lookup_with_caching(const bool active, const device_handle_t& tree, const key_t key) {
-        assert(__all_sync(FULL_MASK, 1)); // ensure that all threads participate
-
+#ifndef NDEBUG
+        __syncwarp();
+        assert(__activemask() == FULL_MASK); // ensure that all threads participate
+#endif
         key_t actual;
         unsigned lb = 0, pos = 0, current_depth = 0; 
         // use the portion of the children array which is stored in constant memory; hence, accesses to this array will be cached
@@ -662,7 +616,7 @@ struct harmonia_tree {
             actual = node_start[lb];
 
             unsigned new_pos = harmonia_upper_levels[pos] + lb;
-//            active = active && new_pos < tree.size; // TODO
+            //active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
@@ -676,7 +630,7 @@ struct harmonia_tree {
             actual = node_start[lb];
 
             unsigned new_pos = tree.children[pos] + lb;
-//            active = active && new_pos < tree.size; // TODO
+            //active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
@@ -684,13 +638,12 @@ struct harmonia_tree {
         }
 
         if (active && pos < tree.size && key == actual) {
-//            return tree.values[pos];
+            //return tree.values[pos];
             return pos; // FIXME: use a compile time switch
         }
 
         return not_found;
     }
-#endif
 
     __host__ unsigned count_ntg_steps(const key_t x, const key_t* arr, const unsigned ntg_degree) {
         const unsigned ntg_size = 1u << ntg_degree;
@@ -742,7 +695,7 @@ struct harmonia_tree {
                 avg_steps_after = static_cast<double>(acc_steps)/sample.size();
                 std::cout << "depth " << current_depth << " avg_steps_after : " << avg_steps_after << std::endl;
 
-                factor = 1.7*avg_steps_before/avg_steps_after;
+                factor = 2.*avg_steps_before/avg_steps_after;
                 std::cout << "factor: " << factor << std::endl;
                 avg_steps_before = avg_steps_after;
             } while (factor > 1. && current_ntg_degree > 1);
