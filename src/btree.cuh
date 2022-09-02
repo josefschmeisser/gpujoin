@@ -441,18 +441,21 @@ struct btree {
         //unsigned pos = naive_lower_bound(node, key);
         unsigned pos = branch_free_exponential_search(key, leaf->keys, leaf->header.count, hint);
         //printf("leaf pos: %d\n", pos);
-    /*
+/*
         if ((pos < leaf->header.count) && (leaf->keys[pos] == key)) {
             return leaf->payloads[pos];
         }
         return Not_Found;
-    */
+*/
         return (pos < leaf->header.count) && (leaf->keys[pos] == key) ? leaf->payloads[pos] : Not_Found;
     }
 
-    // this function has to be called by the entire warp, otherwise the function is likly to yield wrong results
+    // this function has to be called by the entire warp, otherwise the function is likely to yield wrong results
     static __device__ value_t cooperative_lookup(bool active, const NodeBase* tree, key_t key) {
-        assert(__all_sync(FULL_MASK, 1));
+#ifndef NDEBUG
+        __syncwarp();
+        assert(__activemask() == FULL_MASK); // ensure that all threads participate
+#endif
 
         //printf("btree_cooperative_lookup active: %d key: %u\n", active, key);
         const NodeBase* node = tree;

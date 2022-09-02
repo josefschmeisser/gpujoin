@@ -64,7 +64,7 @@ __device__ unsigned branch_free_exponential_search(T x, const T* arr, const unsi
     const unsigned upper = (!cont || !less) ? pre_upper : n;
 
     return lower + branchy_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
-//    return lower + branch_free_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
+    //return lower + branch_free_binary_search(x, arr + lower, upper - lower); // TODO measure alternatives
 }
 
 template<class T>
@@ -88,27 +88,14 @@ __device__ unsigned linear_search(T x, const T* arr, const unsigned size) {
 
 template<class T, unsigned degree = 3>
 __device__ unsigned cooperative_linear_search(bool active, T x, const T* arr, const unsigned size) {
-
     enum { WINDOW_SIZE = 1 << degree };
 
-//if (threadIdx.x < 832 || threadIdx.x > 863) return 0;
-    assert(__all_sync(FULL_MASK, 1));
-
-
     const unsigned my_lane_id = lane_id();
-
     unsigned lower_bound = size;
-
-    //uint32_t leader = 1 << degree*(my_lane_id >> degree);
     unsigned leader = WINDOW_SIZE*(my_lane_id >> degree);
-  //  printf("thread: %d lane: %d leader: %d\n", threadIdx.x, my_lane_id, leader);
-    //__funnelshift_l ( unsigned int  lo, unsigned int  hi, unsigned int  shift )
     const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
-  //  printf("thread: %d lane: %d window_mask: 0x%.8X\n", threadIdx.x, my_lane_id, window_mask);
-
     assert(my_lane_id >= leader);
     const int lane_offset = my_lane_id - leader;
-    //const int lane_offset = max(my_lane_id, leader) - min(my_lane_id, leader); // TODO
 
     for (unsigned shift = 0; shift < WINDOW_SIZE; ++shift) {
         int key_idx = lane_offset - WINDOW_SIZE;
@@ -117,33 +104,24 @@ __device__ unsigned cooperative_linear_search(bool active, T x, const T* arr, co
         const unsigned leader_size = __shfl_sync(window_mask, size, leader);
 
         const auto leader_active = __shfl_sync(window_mask, active, leader);
-        unsigned exhausted_cnt = leader_active ? 0 : WINDOW_SIZE;
-
-  //      if (my_lane_id == leader && !leader_active) printf("thread: %d leader: %d leader not active\n", threadIdx.x, leader);
-
+        bool advance = leader_active;
         uint32_t matches = 0;
-        while (matches == 0 && exhausted_cnt < WINDOW_SIZE) {
+        while (matches == 0 && advance) {
             key_idx += WINDOW_SIZE;
 
             T value;
             if (key_idx < leader_size) value = leader_arr[key_idx];
             matches = __ballot_sync(window_mask, key_idx < leader_size && value >= leader_x);
-            exhausted_cnt = __popc(__ballot_sync(window_mask, key_idx >= leader_size));
-
-   //         if (leader == 8) printf("thread: %d leader: %d key_idx: %d value: %d\n", threadIdx.x, leader, key_idx, value);
-  //          if (my_lane_id == leader) printf("thread: %d leader: %d matches: 0x%.8X exhausted_cnt: %d\n", threadIdx.x, leader, matches, exhausted_cnt);
+            advance = key_idx - lane_offset + WINDOW_SIZE < size; // termination criterion
         }
 
         if (my_lane_id == leader && matches != 0) {
-    //        printf("thread: %d lane: %d key_idx: %u, ffs: %u\n", threadIdx.x, my_lane_id, key_idx, __ffs(matches) - 1 - leader);
             lower_bound = key_idx + __ffs(matches) - 1 - leader;
-        } else if (my_lane_id == leader) {
-  //          printf("thread: %d lane: %d key_idx: %u\n", threadIdx.x, my_lane_id, lower_bound);
         }
 
         leader += 1;
     }
-  //  printf("thread: %d lane: %d size: %u lower_bound: %u arr[lower_bound]: %u x: %u arr[size - 1]: %u\n", threadIdx.x, my_lane_id, size, lower_bound, arr[lower_bound], x, arr[size - 1]);
+
     assert(!active || lower_bound >= size || arr[lower_bound] >= x);
     return lower_bound;
 }
