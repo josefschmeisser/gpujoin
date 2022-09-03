@@ -49,6 +49,7 @@ endif(ENABLE_PERFBENCHMARKING)
 include(lib/RadixSpline.cmake)
 include(lib/gtest.cmake)
 include(lib/cub.cmake)
+include(lib/oneTBB.cmake)
 
 # CUB does not use NDEBUG but rather DEBUG and _DEBUG, so we define the latter here
 add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
@@ -81,7 +82,7 @@ target_include_directories(index_lookup PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
 )
-target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline)
+target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline onetbb)
 # additional nvcc flags
 target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
 #target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")

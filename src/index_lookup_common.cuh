@@ -13,6 +13,9 @@
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_radix_sort.cuh>
 
+#include <oneapi/tbb/parallel_for.h>
+#include <oneapi/tbb/parallel_sort.h>
+
 #include "utils.hpp"
 #include "zipf.hpp"
 
@@ -25,6 +28,8 @@
 #include "device_array.hpp"
 #include "index_lookup_config.hpp"
 #include "index_lookup_config.tpp"
+
+using namespace oneapi::tbb;
 
 using btree_type = btree_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 using harmonia_type = harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
@@ -42,8 +47,13 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     }
 
     // generate dataset to be indexed
+    printf("generating dataset to be indexed...\n");
     if (dt == dataset_type::dense) {
-        std::iota(keys.begin(), keys.end(), 0);
+        oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, keys.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+            //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
+            std::iota(keys.begin() + r.begin(), keys.begin() + r.end(), r.begin());
+        });
+        // TODO validate
     } else if (dt == dataset_type::sparse) {
         // create random keys
         std::uniform_int_distribution<KeyType> key_distrib(0, upper_limit);
@@ -61,6 +71,8 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     }
 
     // generate lookup keys
+    printf("generating lookups...\n");
+/*
     if (lookup_pattern == lookup_pattern_type::uniform) {
         std::uniform_int_distribution<size_t> lookup_distribution(0ul, keys.size() - 1ul);
         std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distribution(rng)]; });
@@ -73,8 +85,27 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     } else {
         assert(false);
     }
+*/
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, lookups.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+        if (lookup_pattern == lookup_pattern_type::uniform) {
+            std::uniform_int_distribution<size_t> lookup_distribution(0ul, keys.size() - 1ul);
+            std::generate(lookups.begin() + r.begin(), lookups.begin() + r.end(), [&]() { return keys[lookup_distribution(rng)]; });
+        } else if (lookup_pattern == lookup_pattern_type::zipf) {
+            zipf_distribution<uint64_t> lookup_distribution(keys.size() - 1, zipf_factor);
+            for (uint64_t i = 0; i < r.size(); ++i) {
+                const auto key_pos = lookup_distribution(rng);
+                lookups[r.begin() + i] = keys[key_pos];
+            }
+        } else {
+            assert(false);
+        }
+    });
 
-    std::sort(lookups.begin(), lookups.end());
+    //if (sort) { // TODO config flag; and add to output
+    printf("sorting lookups...\n");
+    //std::sort(lookups.begin(), lookups.end());
+    oneapi::tbb::parallel_sort(lookups.begin(), lookups.end());
+    //}
 }
 
 template<class KeyType, class IndexStructureType, class VectorType>

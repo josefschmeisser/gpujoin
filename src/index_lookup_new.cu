@@ -26,7 +26,7 @@ query_data::query_data() {
     printf("generating datasets...\n");
     indexed.resize(config.num_elements);
     lookup_keys.resize(config.num_lookups);
-    generate_datasets<index_key_t>(dataset_type::sparse, config.max_bits, indexed, lookup_pattern_type::uniform, config.zipf_factor, lookup_keys);
+    generate_datasets<index_key_t>(config.dataset, config.max_bits, indexed, config.lookup_pattern, config.zipf_factor, lookup_keys);
 
     // allocate result vector
     d_tids = create_device_array<value_t>(config.num_lookups);

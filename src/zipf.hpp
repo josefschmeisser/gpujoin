@@ -94,9 +94,9 @@ private:
 
     static constexpr RealType epsilon = 1e-8;
 
-    IntType                                  n;     ///< Number of elements
-    RealType                                 q;     ///< Exponent
-    RealType                                 H_x1;  ///< H(x_1)
-    RealType                                 H_n;   ///< H(n)
+    const IntType                            n;     ///< Number of elements
+    const RealType                           q;     ///< Exponent
+    const RealType                           H_x1;  ///< H(x_1)
+    const RealType                           H_n;   ///< H(n)
     std::uniform_real_distribution<RealType> dist;  ///< [H(x_1), H(n)]
 };
