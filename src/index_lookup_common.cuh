@@ -100,12 +100,6 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
             assert(false);
         }
     });
-
-    //if (sort) { // TODO config flag; and add to output
-    printf("sorting lookups...\n");
-    //std::sort(lookups.begin(), lookups.end());
-    oneapi::tbb::parallel_sort(lookups.begin(), lookups.end());
-    //}
 }
 
 template<class KeyType, class IndexStructureType, class VectorType>

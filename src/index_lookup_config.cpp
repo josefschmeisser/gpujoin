@@ -35,8 +35,9 @@ void parse_options(int argc, char** argv) {
         ("b,blocksize", "Block size", cxxopts::value<unsigned>()->default_value(std::to_string(config.block_size)))
         ("m,maxbits", "Number of radix bits", cxxopts::value<unsigned>()->default_value(std::to_string(config.max_bits)))
         ("z,zipf", "Zipf factor (has no effect when 'lookup_pattern != zipf')", cxxopts::value<double>()->default_value(std::to_string(config.zipf_factor)))
-        ("dataset", "Index dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.dataset)))
-        ("lookup_pattern", "Lookup dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.lookup_pattern)))
+        ("d,dataset", "Index dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.dataset)))
+        ("p,lookup_pattern", "Lookup dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.lookup_pattern)))
+        ("s,sorted_lookups", "Pre-sort the lookup dataset", cxxopts::value<bool>()->default_value(tmpl_to_string(config.sorted_lookups)))
         ("h,help", "Print usage")
     ;
 
@@ -50,25 +51,29 @@ void parse_options(int argc, char** argv) {
     // update config state with the parsing results
     config.approach = result["approach"].as<std::string>();
     config.index_type = result["index"].as<std::string>();
-    config.num_elements = result["elements"].as<unsigned>();
-    config.num_lookups = result["lookups"].as<unsigned>();
+    config.num_elements = result["elements"].as<uint64_t>();
+    config.num_lookups = result["lookups"].as<uint64_t>();
     config.block_size = result["blocksize"].as<unsigned>();
     config.max_bits = result["maxbits"].as<unsigned>();
     config.zipf_factor = result["zipf"].as<double>();
+    config.sorted_lookups = result["sorted_lookups"].as<bool>();
 
     // parse dataset type
-    if (result["dataset"].as<std::string>() == "sparse") {
+    const auto dataset_str = result["dataset"].as<std::string>();
+    std::cout << "dataset type: " << dataset_str << std::endl;
+    if (dataset_str == "sparse") {
         config.dataset = dataset_type::sparse;
-    } else if (result["dataset"].as<std::string>() == "dense") {
+    } else if (dataset_str == "dense") {
         config.dataset = dataset_type::dense;
     } else {
         assert(false);
     }
 
     // parse lookup pattern type
-    if (result["lookup_pattern"].as<std::string>() == "uniform") {
+    const auto lookup_pattern_str = result["lookup_pattern"].as<std::string>();
+    if (lookup_pattern_str == "uniform") {
         config.lookup_pattern = lookup_pattern_type::uniform;
-    } else if (result["lookup_pattern"].as<std::string>() == "zipf") {
+    } else if (lookup_pattern_str == "zipf") {
         config.lookup_pattern = lookup_pattern_type::zipf;
     } else {
         assert(false);

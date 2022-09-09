@@ -6,6 +6,8 @@
 #include <string>
 #include <memory>
 
+#include <oneapi/tbb/parallel_sort.h>
+
 #include "index_lookup_config.hpp"
 #include "index_lookup_common.cuh"
 #include "index_lookup_partitioning.cuh"
@@ -27,6 +29,10 @@ query_data::query_data() {
     indexed.resize(config.num_elements);
     lookup_keys.resize(config.num_lookups);
     generate_datasets<index_key_t>(config.dataset, config.max_bits, indexed, config.lookup_pattern, config.zipf_factor, lookup_keys);
+    if (config.sorted_lookups) {
+        printf("sorting lookups...\n");
+        oneapi::tbb::parallel_sort(lookup_keys.begin(), lookup_keys.end());
+    }
 
     // allocate result vector
     d_tids = create_device_array<value_t>(config.num_lookups);
@@ -38,6 +44,7 @@ query_data::query_data() {
     d_lookup_keys = create_device_array_from(lookup_keys, lookup_keys_allocator);
 
     // finalize state
+    printf("generating index...\n");
     create_index();
 }
 
@@ -178,6 +185,7 @@ std::vector<std::pair<std::string, std::string>> create_common_experiment_descri
         std::make_pair(std::string("lookup_pattern"), tmpl_to_string(config.lookup_pattern)),
         std::make_pair(std::string("num_elements"), std::to_string(config.num_elements)),
         std::make_pair(std::string("num_lookups"), std::to_string(config.num_lookups)),
+        std::make_pair(std::string("sorted_lookups"), std::to_string(config.sorted_lookups)),
         // allocators:
         std::make_pair(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value())),
         std::make_pair(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
@@ -234,7 +242,7 @@ int main(int argc, char** argv) {
     auto& measuring_config = measuring::get_settings();
     measuring_config.dest_file = "index_scan_results.yml";
     measuring_config.stdout_only = true;
-    measuring_config.repetitions = 20;
+    measuring_config.repetitions = 10;
     const auto experiment_desc = create_experiment_description();
 /*
     if (config.execute_predefined_scenario) {

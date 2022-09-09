@@ -23,6 +23,7 @@ struct experiment_config {
     int block_size = 128;
     dataset_type dataset = dataset_type::sparse;
     lookup_pattern_type lookup_pattern = lookup_pattern_type::uniform;
+    bool sorted_lookups = false;
 };
 
 // types
