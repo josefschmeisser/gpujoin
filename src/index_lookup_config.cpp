@@ -2,6 +2,7 @@
 #include "index_lookup_config.tpp"
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 #include <string>
 
@@ -29,8 +30,8 @@ void parse_options(int argc, char** argv) {
     options.add_options()
         ("a,approach", "Approach to use (plain, bws, partitioning)", cxxopts::value<std::string>()->default_value(config.approach))
         ("i,index", "Index type to use", cxxopts::value<std::string>()->default_value(config.index_type))
-        ("e,elements", "Number of elements in the index", cxxopts::value<unsigned>()->default_value(std::to_string(config.num_elements)))
-        ("l,lookups", "Size of the lookup dataset", cxxopts::value<unsigned>()->default_value(std::to_string(config.num_lookups)))
+        ("e,elements", "Number of elements in the index", cxxopts::value<uint64_t>()->default_value(std::to_string(config.num_elements)))
+        ("l,lookups", "Size of the lookup dataset", cxxopts::value<uint64_t>()->default_value(std::to_string(config.num_lookups)))
         ("b,blocksize", "Block size", cxxopts::value<unsigned>()->default_value(std::to_string(config.block_size)))
         ("m,maxbits", "Number of radix bits", cxxopts::value<unsigned>()->default_value(std::to_string(config.max_bits)))
         ("z,zipf", "Zipf factor (has no effect when 'lookup_pattern != zipf')", cxxopts::value<double>()->default_value(std::to_string(config.zipf_factor)))

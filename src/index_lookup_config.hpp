@@ -16,8 +16,8 @@ struct experiment_config {
     std::string approach = "plain";
     std::string index_type = "btree";
     std::string scenario = "single";
-    unsigned num_lookups = 1e8;
-    unsigned num_elements = 1e6;
+    uint64_t num_lookups = 1e8;
+    uint64_t num_elements = 1e6;
     unsigned max_bits = 24;
     double zipf_factor = 1.25;
     int block_size = 128;
