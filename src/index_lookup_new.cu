@@ -81,13 +81,11 @@ bool query_data::validate_results() {
     printf("validating results...\n");
     for (unsigned i = 0; i < lookup_keys.size(); ++i) {
         if (h_tids_raw[i] > indexed.size()) {
-            printf("invaild tid: %u, at %u from %lu\n", h_tids_raw[i], i, lookup_keys.size());
-            fflush(stdout);
+            std::cerr << "invalid tid: " << h_tids_raw[i] << ", at " << i << " from " << lookup_keys.size() << std::endl;
             return false;
         }
         if (lookup_keys[i] != indexed[h_tids_raw[i]]) {
-            printf("lookup_keys[%u]: %u indexed[h_tids[%u]]: %u\n", i, lookup_keys[i], i, indexed[h_tids_raw[i]]);
-            fflush(stdout);
+            std::cerr << "lookup_keys[" << i << "]: " << lookup_keys[i] << "indexed[h_tids[" << i << "]]: " << indexed[h_tids_raw[i]] << std::endl;
             return false;
         }
     }
