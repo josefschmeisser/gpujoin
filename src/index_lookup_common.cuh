@@ -14,7 +14,6 @@
 #include <cub/block/block_radix_sort.cuh>
 
 #include <oneapi/tbb/parallel_for.h>
-#include <oneapi/tbb/parallel_sort.h>
 
 #include "utils.hpp"
 #include "zipf.hpp"
@@ -40,7 +39,7 @@ using no_op_type = no_op_index<index_key_t, value_t, device_index_allocator, hos
 template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
     const std::size_t upper_limit = 1ul << (max_bits - 1u);
-    std::mt19937 rng {5486u};
+    //std::mt19937 rng {};
 
     if (keys.size() - 1 > upper_limit) {
         throw std::runtime_error("resulting dataset would exceed the provided limit defined by 'max_bits'");
@@ -56,6 +55,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
         // TODO validate
     } else if (dt == dataset_type::sparse) {
         // create random keys
+        std::mt19937 rng {};
         std::uniform_int_distribution<KeyType> key_distrib(0, upper_limit);
         std::unordered_set<KeyType> unique;
         unique.reserve(keys.size());
@@ -86,12 +86,18 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
         assert(false);
     }
 */
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, lookups.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
+        std::mt19937 rng {r.begin()};
         if (lookup_pattern == lookup_pattern_type::uniform) {
-            std::uniform_int_distribution<size_t> lookup_distribution(0ul, keys.size() - 1ul);
-            std::generate(lookups.begin() + r.begin(), lookups.begin() + r.end(), [&]() { return keys[lookup_distribution(rng)]; });
+            std::uniform_int_distribution<uint64_t> lookup_distribution(0ul, keys.size() - 1ul);
+            //std::generate(lookups.begin() + r.begin(), lookups.begin() + r.end(), [&]() { return keys[lookup_distribution(rng)]; });
+            for (uint64_t i = r.begin(); i < r.end(); ++i) {
+                const auto key_idx = lookup_distribution(rng);
+                assert(key_idx < keys.size());
+                lookups[i] = keys[key_idx];
+            }
         } else if (lookup_pattern == lookup_pattern_type::zipf) {
-            zipf_distribution<uint64_t> lookup_distribution(keys.size() - 1, zipf_factor);
+            zipf_distribution<KeyType> lookup_distribution(keys.size() - 1ul, zipf_factor);
             for (uint64_t i = 0; i < r.size(); ++i) {
                 const auto key_pos = lookup_distribution(rng);
                 lookups[r.begin() + i] = keys[key_pos];
