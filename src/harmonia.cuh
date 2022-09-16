@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <cstring>
@@ -16,6 +17,7 @@
 #include "utils.hpp"
 #include "cuda_utils.cuh"
 #include "device_array.hpp"
+#include "device_definitions.hpp"
 
 #ifndef FULL_MASK
 #define FULL_MASK 0xffffffff
@@ -48,13 +50,14 @@ struct harmonia_tree {
     using value_t = Value;
 
     static const unsigned max_depth = 16;
-    static constexpr auto max_keys = fanout - 1;
+    static_assert(fanout < std::numeric_limits<unsigned>::max());
+    static constexpr unsigned max_keys = fanout - 1; // per node
 
     std::vector<key_t, HostAllocator<key_t>> keys;
     std::vector<child_ref_t, HostAllocator<child_ref_t>> children;
     std::vector<value_t, HostAllocator<value_t>> values;
 
-    unsigned size;
+    device_size_t size;
     unsigned depth;
     std::vector<unsigned> ntg_degrees;
 
@@ -62,7 +65,7 @@ struct harmonia_tree {
         const key_t* __restrict__ keys;
         const child_ref_t* __restrict__ children;
         const value_t* __restrict__ values;
-        unsigned size;
+        device_size_t size;
         unsigned depth;
         unsigned caching_depth;
         unsigned ntg_degree[max_depth]; // ntg size for each level starting at the root level
@@ -76,7 +79,7 @@ struct harmonia_tree {
 
     struct intermediate_node {
         bool is_leaf = false;
-        unsigned count = 0;
+        device_size_t count = 0;
         key_t keys[max_keys];
         union {
             intermediate_node* children[fanout];
@@ -118,7 +121,7 @@ struct harmonia_tree {
         node->is_leaf = false;
         node->keys[0] = std::numeric_limits<key_t>::max();
 
-        for (unsigned i = 0; i < lower_level->size() - 1; i++) {
+        for (uint64_t i = 0; i < lower_level->size() - 1; i++) {
             auto& curr = lower_level->at(i);
             if (node->count >= max_keys) {
                 node->children[node->count] = curr.get();
@@ -170,7 +173,7 @@ struct harmonia_tree {
     }
 
     __host__ void fill_underfull_node(intermediate_node& node) {
-        for (unsigned i = 1; i < max_keys; ++i) {
+        for (uint64_t i = 1; i < max_keys; ++i) {
             if (node.keys[i - 1] > node.keys[i]) {
                 node.keys[i] = std::numeric_limits<key_t>::max();
             }
@@ -178,7 +181,7 @@ struct harmonia_tree {
     }
 
     __host__ void store_nodes(tree_levels_t& tree_levels) {
-        unsigned key_offset = 0;
+        uint64_t key_offset = 0;
 
         // the keys are stored in breadth first order
         for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
@@ -193,7 +196,7 @@ struct harmonia_tree {
     }
 
     __host__ void store_structure(const tree_levels_t& tree_levels) {
-        unsigned children_offset = 0;
+        uint64_t children_offset = 0;
         child_ref_t prefix_sum = 1;
 
         // levels are stored in reverse order since the tree was constructed in bottom-up fashion
@@ -217,13 +220,15 @@ struct harmonia_tree {
 
     template<class Vector>
     __host__ void construct(const Vector& input) {
+        assert(input.size() < std::numeric_limits<device_size_t>::max());
+
         auto tree_levels = construct_levels(input);
         auto& root = tree_levels.front()->front();
 
         // allocate arrays
         // transform_reduce was introduced with c++17
         //const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
-        unsigned node_count = 0;
+        uint64_t node_count = 0;
         for (const auto& level : tree_levels) {
             node_count += level->size();
         }
@@ -240,7 +245,7 @@ struct harmonia_tree {
 
         if /*constexpr*/ (!Sorted_Only) {
             // insert values
-            for (unsigned i = 0; i < input.size(); ++i) {
+            for (uint64_t i = 0; i < input.size(); ++i) {
                 values[i] = i;
             }
         }
@@ -267,12 +272,12 @@ struct harmonia_tree {
         constexpr key_t largest_key = std::numeric_limits<key_t>::max() - 1;
 
         unsigned current_depth = 0;
-        unsigned lb = 0, pos = 0;
+        size_t lb = 0, pos = 0;
         for (; current_depth < depth; ++current_depth) {
             const key_t* node_start = &keys[max_keys*pos];
 
             lb = std::lower_bound(node_start, node_start + max_keys, largest_key) - node_start;
-            unsigned new_pos = children[pos] + lb;
+            size_t new_pos = children[pos] + lb;
             if (new_pos*sizeof(child_ref_t) > available_bytes) {
                 break;
             }
@@ -372,8 +377,8 @@ struct harmonia_tree {
     }
 
     // utilize the full warp for each query
-    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
-        unsigned lower_bound = max_keys;
+    __device__ static device_size_t cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
+        device_size_t lower_bound = max_keys;
         const unsigned my_lane_id = lane_id();
         unsigned leader = 0;
         const int lane_offset = my_lane_id - leader;
@@ -408,15 +413,15 @@ struct harmonia_tree {
     }
 
     template<unsigned Degree>
-    __device__ static value_t cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
+    __device__ static device_size_t cooperative_linear_search(const bool active, const key_t x, const key_t* arr) {
         enum { WINDOW_SIZE = 1 << Degree };
 
+        device_size_t lower_bound = max_keys;
         const unsigned my_lane_id = lane_id();
         unsigned leader = WINDOW_SIZE*(my_lane_id >> Degree); // equivalent to WINDOW_SIZE*(my_lane_id div WINDOW_SIZE)
         const uint32_t window_mask = ((1u << WINDOW_SIZE) - 1u) << leader;
         assert(my_lane_id >= leader);
         const int lane_offset = my_lane_id - leader;
-        unsigned lower_bound = max_keys;
 
         // iterate over all threads within a cooperative group by shifting the leader thread from the lsb to the msb within the window mask
         for (unsigned shift = 0; shift < WINDOW_SIZE; ++shift) {
@@ -447,8 +452,8 @@ struct harmonia_tree {
         return lower_bound;
     }
 
-    __device__ static unsigned cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
-        unsigned lower_bound = max_keys;
+    __device__ static device_size_t cooperative_linear_search(const bool active, const key_t x, const key_t* arr, const unsigned ntg_degree) {
+        device_size_t lower_bound = max_keys;
         const unsigned my_lane_id = lane_id();
         const unsigned ntg_size = 1u << ntg_degree;
         unsigned leader = ntg_size*(my_lane_id >> ntg_degree); // equivalent to ntg_size*(my_lane_id div ntg_size)
@@ -488,14 +493,14 @@ struct harmonia_tree {
     __host__ value_t lookup(key_t key) {
         bool active = true;
         key_t actual;
-        unsigned lb = 0, pos = 0;
+        device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             const key_t* node_start = &keys[max_keys*pos];
 
             lb = std::lower_bound(node_start, node_start + max_keys, key) - node_start;
             actual = node_start[lb];
 
-            unsigned new_pos = children[pos] + lb;
+            device_size_t new_pos = children[pos] + lb;
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
@@ -523,14 +528,14 @@ struct harmonia_tree {
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
 #endif
         key_t actual;
-        unsigned lb = 0, pos = 0;
+        device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
             const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search<Degree>(active, key, node_start);
             actual = node_start[lb];
 
-            unsigned new_pos = tree.children[pos] + lb;
+            device_size_t new_pos = tree.children[pos] + lb;
             //active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
@@ -552,14 +557,14 @@ struct harmonia_tree {
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
 #endif
         key_t actual;
-        unsigned lb = 0, pos = 0;
+        device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
             const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search<Degree>(active, key, node_start);
             actual = node_start[lb];
 
-            unsigned new_pos = tree.children[pos] + lb;
+            device_size_t new_pos = tree.children[pos] + lb;
             //active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
@@ -580,14 +585,14 @@ struct harmonia_tree {
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
 #endif
         key_t actual;
-        unsigned lb = 0, pos = 0;
+        device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
             const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search(active, key, node_start, tree.ntg_degree[current_depth]);
             actual = node_start[lb];
 
-            unsigned new_pos = tree.children[pos] + lb;
+            device_size_t new_pos = tree.children[pos] + lb;
 
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
@@ -607,7 +612,7 @@ struct harmonia_tree {
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
 #endif
         key_t actual;
-        unsigned lb = 0, pos = 0, current_depth = 0; 
+        device_size_t lb = 0, pos = 0, current_depth = 0;
         // use the portion of the children array which is stored in constant memory; hence, accesses to this array will be cached
         for (; current_depth < tree.caching_depth; ++current_depth) {
             const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
@@ -615,7 +620,7 @@ struct harmonia_tree {
             lb = cooperative_linear_search(active, key, node_start, tree.ntg_degree[current_depth]);
             actual = node_start[lb];
 
-            unsigned new_pos = harmonia_upper_levels[pos] + lb;
+            device_size_t new_pos = harmonia_upper_levels[pos] + lb;
             //active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
@@ -629,7 +634,7 @@ struct harmonia_tree {
             lb = cooperative_linear_search(active, key, node_start, tree.ntg_degree[current_depth]);
             actual = node_start[lb];
 
-            unsigned new_pos = tree.children[pos] + lb;
+            device_size_t new_pos = tree.children[pos] + lb;
             //active = active && new_pos < tree.size; // TODO
 
             // Inactive threads never progress during the traversal phase.
@@ -648,19 +653,19 @@ struct harmonia_tree {
     __host__ unsigned count_ntg_steps(const key_t x, const key_t* arr, const unsigned ntg_degree) {
         const unsigned ntg_size = 1u << ntg_degree;
         //std::cout << "ntg_degree: " << ntg_degree << " ntg_size: " << ntg_size << std::endl;
-        const unsigned lb = std::lower_bound(arr, arr + max_keys, x) - arr;
+        const device_size_t lb = std::lower_bound(arr, arr + max_keys, x) - arr;
         //std::cout << "lb: " << lb << std::endl;
-        return 1 + std::min(lb, max_keys - 1)/ntg_size;
+        return 1 + std::min<device_size_t>(lb, max_keys - 1)/ntg_size;
     }
 
     // return: the number of ntg windows shifts required
     __host__ unsigned count_ntg_steps_at_target_depth(const unsigned target_depth, const unsigned current_ntg_degree, const key_t key) {
         // traverse upper levels
-        unsigned lb = 0, pos = 0;
+        device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 0; current_depth < target_depth; ++current_depth) {
             const key_t* node_start = &keys[max_keys*pos];
             lb = std::lower_bound(node_start, node_start + max_keys, key) - node_start;
-            unsigned new_pos = children[pos] + lb;
+            device_size_t new_pos = children[pos] + lb;
             pos = new_pos;
         }
  
