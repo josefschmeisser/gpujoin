@@ -8,6 +8,7 @@ template<class T>
 struct vector_view {
     using my_type = vector_view<T>;
     using value_type = T;
+    using size_type = size_t;
 
     vector_view() noexcept
         : arr_(nullptr), size_(0) {}
