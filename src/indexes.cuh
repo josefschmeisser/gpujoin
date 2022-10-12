@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <cstdint>
 #include <numeric>
+#include <stdexcept>
 #include <type_traits>
 
 #include "search.cuh"
@@ -121,6 +122,10 @@ struct radix_spline_index : public abstract_index<Key> {
     } device_index;
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
+        if (h_column.size() < invalid_tid) {
+            throw std::runtime_error("'value_t' does not suffice");
+        }
+
         device_index.d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
 
@@ -225,6 +230,7 @@ struct lower_bound_index : public abstract_index<Key> {
         unsigned d_size;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
+            static_assert(sizeof(value_t) <= sizeof(device_size_t));
             //auto pos = branchy_binary_search(key, d_column, d_size);
             auto pos = branch_free_binary_search(key, d_column, d_size);
             return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
@@ -234,9 +240,8 @@ struct lower_bound_index : public abstract_index<Key> {
             // TODO implement cooperative binary search
 
             if (active) {
-                //auto pos = branchy_binary_search(key, d_column, d_size);
-                auto pos = branch_free_binary_search(key, d_column, d_size);
-                return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
+                static_assert(sizeof(value_t) <= sizeof(device_size_t));
+                return lookup(key);
             } else {
                 return invalid_tid;
             }
@@ -246,6 +251,9 @@ struct lower_bound_index : public abstract_index<Key> {
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         device_index.d_column = d_column;
         device_index.d_size = h_column.size();
+        if (device_index.d_size < invalid_tid) {
+            throw std::runtime_error("'value_t' does not suffice");
+        }
     }
 
     __host__ size_t memory_consumption() const override {
