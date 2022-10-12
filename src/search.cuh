@@ -22,7 +22,7 @@ struct device_greater {
 };
 
 template<class T, class Compare = less<T>>
-__device__ device_size_t lower_bound(const T& key, const T* arr, const device_size_t size, Compare cmp = less<T>{}) {
+__device__ device_size_t lower_bound(const T& key, const T* arr, const device_size_t size, Compare cmp = device_less<T>{}) {
     device_size_t lower = 0;
     device_size_t count = size;
     while (count > 0) {

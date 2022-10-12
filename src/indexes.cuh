@@ -12,6 +12,7 @@
 #include "harmonia.cuh"
 #include "rs.cuh"
 #include "vector_view.hpp"
+#include "device_definitions.hpp"
 
 /*
 Each index structure struct contains a device_index struct which upon kernel invocation will be passed by value.
@@ -98,14 +99,14 @@ struct radix_spline_index : public abstract_index<Key> {
         rs::DeviceRadixSpline<key_t> d_rs_;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            const unsigned estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
-            const unsigned begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
-            const unsigned end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
+            static_assert(sizeof(value_t) <= sizeof(device_size_t));
 
-            const auto bound_size = end - begin;
-            const unsigned pos = begin + rs::cuda::lower_bound(key, &d_column_[begin], bound_size, [] (const key_t& a, const key_t& b) -> int {
-                return a < b;
-            });
+            const double estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
+            const device_size_t begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
+            const device_size_t end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
+
+            const device_size_t bound_size = end - begin;
+            const device_size_t pos = begin + lower_bound(key, &d_column_[begin], bound_size);
             return (pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
 
