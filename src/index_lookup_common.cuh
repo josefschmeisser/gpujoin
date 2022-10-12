@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <numeric>
 #include <memory>
 #include <stdexcept>
@@ -36,10 +37,74 @@ using lower_bound_type = lower_bound_index<index_key_t, value_t, device_index_al
 using radix_spline_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 using no_op_type = no_op_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 
+
+template<class KeyType, class VectorType>
+void populate_densely(VectorType& v) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, keys.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+        //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
+        std::iota(v.begin() + r.begin(), v.begin() + r.end(), r.begin());
+    });
+}
+
+template<class KeyType, class VectorType>
+void populate_uniformly(VectorType& v, unsigned max_bits) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
+        std::mt19937 rng {r.begin()};
+        std::uniform_int_distribution<uint64_t> lookup_distribution(0ul, v.size() - 1ul);
+        std::generate(lookups.begin() + r.begin(), lookups.begin() + r.end(), [&]() { return lookup_distribution(rng); });
+        /*
+        for (uint64_t i = r.begin(); i < r.end(); ++i) {
+            const auto key_idx = lookup_distribution(rng);
+            assert(key_idx < v.size());
+            lookups[i] = key_idx;
+        }*/
+    });
+}
+
+template<class KeyType, class VectorType>
+void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
+    const std::size_t upper_limit = 1ul << (max_bits - 1u);
+
+    if (v.size()*2 > upper_limit) {
+        throw std::runtime_error("todo");
+    }
+
+    // TODO: consider https://stackoverflow.com/a/6953958
+
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+        //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
+
+        // create random keys
+        std::mt19937 rng {r.begin()};
+        std::uniform_int_distribution<KeyType> key_distrib(0, upper_limit);
+        std::unordered_set<KeyType> unique;
+        unique.reserve(keys.size());
+
+        while (unique.size() < v.size()) {
+            const auto key = key_distrib(rng);
+            unique.insert(key);
+        }
+
+        std::copy(unique.begin(), unique.end(), v.begin() + r.begin());
+        std::sort(v.begin() + r.begin(), v.begin() + r.end());
+    });
+}
+
+template<class KeyType, class VectorType>
+void populate_with_zipfian_pattern(VectorType& v) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
+        std::mt19937 rng {r.begin()};
+        zipf_distribution<KeyType> lookup_distribution(v.size() - 1ul, zipf_factor);
+        for (uint64_t i = 0; i < r.size(); ++i) {
+            const auto key_pos = lookup_distribution(rng);
+            lookups[r.begin() + i] = key_pos;
+        }
+    });
+}
+
 template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
     const std::size_t upper_limit = 1ul << (max_bits - 1u);
-    //std::mt19937 rng {};
 
     if (keys.size() - 1 > upper_limit) {
         throw std::runtime_error("resulting dataset would exceed the provided limit defined by 'max_bits'");
@@ -47,63 +112,34 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
 
     // generate dataset to be indexed
     printf("generating dataset to be indexed...\n");
-    if (dt == dataset_type::dense) {
-        oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, keys.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
-            //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
-            std::iota(keys.begin() + r.begin(), keys.begin() + r.end(), r.begin());
-        });
-        // TODO validate
-    } else if (dt == dataset_type::sparse) {
-        // create random keys
-        std::mt19937 rng {};
-        std::uniform_int_distribution<KeyType> key_distrib(0, upper_limit);
-        std::unordered_set<KeyType> unique;
-        unique.reserve(keys.size());
-        while (unique.size() < keys.size()) {
-            const auto key = key_distrib(rng);
-            unique.insert(key);
-        }
-
-        std::copy(unique.begin(), unique.end(), keys.begin());
-        std::sort(keys.begin(), keys.end());
-    } else {
-        assert(false);
+    switch (dt) {
+        case dataset_type::dense:
+            populate_densely(keys);
+            break;
+        case dataset_type::sparse:
+            populate_uniquely_uniformly(keys, max_bits);
+            break;
+        default:
+            assert(false);
     }
 
     // generate lookup keys
     printf("generating lookups...\n");
-/*
-    if (lookup_pattern == lookup_pattern_type::uniform) {
-        std::uniform_int_distribution<size_t> lookup_distribution(0ul, keys.size() - 1ul);
-        std::generate(lookups.begin(), lookups.end(), [&]() { return keys[lookup_distribution(rng)]; });
-    } else if (lookup_pattern == lookup_pattern_type::zipf) {
-        zipf_distribution<uint64_t> lookup_distribution(keys.size() - 1, zipf_factor);
-        for (uint64_t i = 0; i < lookups.size(); ++i) {
-            const auto key_pos = lookup_distribution(rng);
-            lookups[i] = keys[key_pos];
-        }
-    } else {
-        assert(false);
-    }
-*/
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
-        std::mt19937 rng {r.begin()};
-        if (lookup_pattern == lookup_pattern_type::uniform) {
-            std::uniform_int_distribution<uint64_t> lookup_distribution(0ul, keys.size() - 1ul);
-            //std::generate(lookups.begin() + r.begin(), lookups.begin() + r.end(), [&]() { return keys[lookup_distribution(rng)]; });
-            for (uint64_t i = r.begin(); i < r.end(); ++i) {
-                const auto key_idx = lookup_distribution(rng);
-                assert(key_idx < keys.size());
-                lookups[i] = keys[key_idx];
-            }
-        } else if (lookup_pattern == lookup_pattern_type::zipf) {
-            zipf_distribution<KeyType> lookup_distribution(keys.size() - 1ul, zipf_factor);
-            for (uint64_t i = 0; i < r.size(); ++i) {
-                const auto key_pos = lookup_distribution(rng);
-                lookups[r.begin() + i] = keys[key_pos];
-            }
-        } else {
+    switch (lookup_pattern) {
+        case lookup_pattern_type::uniform:
+            populate_uniformly(keys, max_bits);
+            break;
+        case lookup_pattern_type::zipf:
+            populate_with_zipfian_pattern(keys);
+            break;
+        default:
             assert(false);
+    }
+
+    // map key positions into keys
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
+        for (uint64_t i = 0; i < r.size(); ++i) {
+            lookups[r.begin() + i] = keys[lookups[r.begin() + i];
         }
     });
 }
