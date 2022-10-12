@@ -157,12 +157,12 @@ __device__ device_size_t linear_search(T x, const T* arr, const device_size_t si
     return size;
 }
 
-template<class T, unsigned degree = 3>
-__device__ unsigned cooperative_linear_search(bool active, T x, const T* arr, const device_size_t size) {
-    enum { WINDOW_SIZE = 1 << degree };
+template<class T, unsigned Co_Op_Degree = 3>
+__device__ device_size_t cooperative_linear_search(bool active, T x, const T* arr, const device_size_t size) {
+    enum { WINDOW_SIZE = 1 << Co_Op_Degree };
 
     const unsigned my_lane_id = lane_id();
-    unsigned leader = WINDOW_SIZE*(my_lane_id >> degree);
+    unsigned leader = WINDOW_SIZE*(my_lane_id >> Co_Op_Degree);
     device_size_t lower_bound = size;
     const uint32_t window_mask = __funnelshift_l(FULL_MASK, 0, WINDOW_SIZE) << leader; // TODO replace __funnelshift_l() with compile time computation
     assert(my_lane_id >= leader);
@@ -190,6 +190,88 @@ __device__ unsigned cooperative_linear_search(bool active, T x, const T* arr, co
             lower_bound = key_idx + __ffs(matches) - 1 - leader;
         }
 
+        leader += 1;
+    }
+
+    assert(!active || lower_bound >= size || arr[lower_bound] >= x);
+    return lower_bound;
+}
+
+template<unsigned... Is>
+__device__ constexpr auto split_impl(std::integer_sequence<unsigned, Is...> s, unsigned window_size) -> std::array<unsigned, s.size()> {
+    std::array<int, s.size()> offsets{};
+    ((offsets[Is] = Is*window_size/s.size()), ...);
+    return offsets;
+}
+
+template<unsigned Co_Op_Extent, unsigned WindowSize = CPU_CACHE_LINE_SIZE>
+__device__ constexpr std::array<unsigned, Co_Op_Extent> split() {
+    return split_impl(std::make_integer_sequence<unsigned, Co_Op_Extent>{}, WINDOW_SIZE);
+}
+
+template<class T, unsigned Co_Op_Extent, unsigned WindowSize = CPU_CACHE_LINE_SIZE>
+__device__ __forceinline__ device_size_t cooperative_binary_search_stride(T x, const T* arr, const device_size_t size, const uint32_t group_mask) {
+    const unsigned my_lane_id = lane_id();
+    const unsigned thread_offset = my_lande_id - __ffs(group_mask);
+    static constexpr auto window_offsets = split();
+    static constexpr auto window_offset = window_offsets[thread_offset];
+
+    uint32_t matches_mask = 0u;
+    device_size_t lower = 0;
+    device_size_t count = size;
+    while (count > 0) {
+        const device_size_t step = count / 2;
+        const device_size_t mid = lower + step;
+        const device_size_t pos = min(window_offset + mid - (mid & WindowSize), size - 1); // align to cache line boundary // TODO check
+        const auto r = cmp(arr[pos], key);
+        matches_mask = __ballot_sync(group_mask, r);
+
+        if (matches == group_mask) {
+            lower = mid + 1;
+            count -= step + 1;
+        } else if (matches == 0u) {
+            count = step;
+        } else {
+            // use a branch free binary search from here on
+            break;
+        }
+    }
+
+    count = thread_offsets[__clz(matches_mask) - __clz(group_mask)];
+    return branch_free_binary_search(x, arr + lower, count);
+
+    // alternatively: linear search with all threads
+}
+
+template<class T, unsigned Co_Op_Degree = 3, unsigned WindowSize = CPU_CACHE_LINE_SIZE>
+__device__ device_size_t cooperative_binary_search(bool active, T x, const T* arr, const device_size_t size) {
+    enum { THREAD_GROUP_SIZE  = 1 << Co_Op_Degree };
+
+    const unsigned my_lane_id = lane_id();
+    unsigned leader = THREAD_GROUP_SIZE*(my_lane_id >> degree);
+    device_size_t lower_bound = size;
+    const uint32_t group_mask = __funnelshift_l(FULL_MASK, 0, THREAD_GROUP_SIZE) << leader;
+
+    //static constexpr uint32_t group_mask = ((1u << THREAD_GROUP_SIZE) - 1u) << leader;
+
+    assert(my_lane_id >= leader);
+    const int lane_offset = my_lane_id - leader;
+
+    for (unsigned shift = 0; shift < THREAD_GROUP_SIZE; ++shift) {
+        int key_idx = lane_offset - THREAD_GROUP_SIZE;
+        const T leader_x = __shfl_sync(group_mask, x, leader);
+        const T* leader_arr = reinterpret_cast<const T*>(__shfl_sync(group_mask, reinterpret_cast<uint64_t>(arr), leader));
+        const device_size_t leader_size = __shfl_sync(group_mask, size, leader);
+
+        const auto leader_active = __shfl_sync(group_mask, active, leader);
+        if (leader_active) {
+            const auto leader_lower_bound = cooperative_binary_search_stride<T, THREAD_GROUP_SIZE, WindowSize>(leader_x, leader_arr, leader_size, group_mask);
+            if (my_lane_id == leader) {
+                lower_bound = leader_lower_bound;
+            }
+        }
+
+        // advance leader position within thread group
         leader += 1;
     }
 
