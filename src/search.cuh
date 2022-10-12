@@ -6,6 +6,69 @@
 #include "cuda_utils.cuh"
 
 template<class T>
+struct device_less {
+    // Declaration of the less operation
+    __device__ __forceinline__ bool operator() (const T& x, const T& y) const {
+        return x < y;
+    }
+};
+
+template<class T>
+struct device_greater {
+    // Declaration of the less operation
+    __device__ __forceinline__ bool operator() (const T& x, const T& y) const {
+        return x > y;
+    }
+};
+
+template<class T, class Compare = less<T>>
+__device__ device_size_t lower_bound(const T& key, const T* arr, const device_size_t size, Compare cmp = less<T>{}) {
+    device_size_t lower = 0;
+    device_size_t count = size;
+    while (count > 0) {
+        device_size_t step = count / 2;
+        device_size_t mid = lower + step;
+        if (cmp(arr[mid], key)) {
+            lower = mid + 1;
+            count -= step + 1;
+        } else {
+            count = step;
+        }
+    }
+    return lower;
+}
+/*
+template<class T, class Compare = less<T>>
+__device__ device_size_t branchy_binary_search(T x, const T* arr, const device_size_t size, Compare cmp = less<T>{}) {
+//__device__ device_size_t branchy_binary_search(T x, const T* arr, const device_size_t size, Compare cmp) {
+    device_size_t lower = 0;
+    device_size_t upper = size;
+    do {
+        device_size_t mid = ((upper - lower) / 2) + lower;
+        const int c = cmp(x, arr[mid]);
+        if (c < 0) {
+            upper = mid;
+        } else if (c > 0) {
+            lower = mid + 1;
+        } else {
+            return mid;
+        }
+    } while (lower < upper);
+    return lower;
+}
+*/
+
+/**
+ * Binary Search.
+ *
+ * A branch-based text book binary search implementation.
+ *
+ * @param x Value to search for.
+ * @param arr Search array..
+ * @param size Size of `arr`.
+ * @return Position of `x` in `arr`.
+ */
+template<class T>
 __device__ device_size_t branchy_binary_search(T x, const T* arr, const device_size_t size) {
     device_size_t lower = 0;
     device_size_t upper = size;
@@ -22,8 +85,18 @@ __device__ device_size_t branchy_binary_search(T x, const T* arr, const device_s
     return lower;
 }
 
+/**
+ * Binary Search.
+ *
+ * A branch-free binary search implementation.
+ *
+ * @param x Value to search for.
+ * @param arr Search array..
+ * @param size Size of `arr`.
+ * @return lower bound position of `x` in `arr`.
+ */
 template<class T>
-__device__ device_size_t branch_free_binary_search(T x, const T* arr, const device_size_t size) {
+__device__ device_size_t branch_free_binary_search(T x, const T* arr, const device_size_t size) { // TODO rename? should be lower bound?
     if (size < 1) { return 0; }
 
     const unsigned steps = 31u - __clz(size - 1);
@@ -38,7 +111,7 @@ __device__ device_size_t branch_free_binary_search(T x, const T* arr, const devi
     return ret;
 }
 
-template<class T, unsigned max_step = 4> // TODO find optimal limit
+template<class T, unsigned max_steps = 4> // TODO find optimal limit
 __device__ device_size_t branch_free_exponential_search(T x, const T* arr, const device_size_t n, const float hint) {
     //if (size < 1) return;
 
@@ -50,7 +123,7 @@ __device__ device_size_t branch_free_exponential_search(T x, const T* arr, const
     bool less = arr[start] < x;
     int offset = -1 + 2*less;
     device_size_t current = max(0, min(last , start + offset));
-    for (unsigned i = 0; i < max_step; ++i) {
+    for (unsigned i = 0; i < max_steps; ++i) {
         cont = ((arr[current] < x) == less);
         offset = cont ? offset<<1 : offset;
         current = max(0, min(last, start + offset));

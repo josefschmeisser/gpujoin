@@ -12,6 +12,8 @@
 
 #include "rs/multi_map.h"
 #include "device_array.hpp"
+//#include "device_definitions.hpp"
+#include "search.cuh"
 
 namespace rs {
 
@@ -113,55 +115,12 @@ auto migrate_radix_spline(rs::RadixSpline<Key>& rs, DeviceRadixSpline<Key>& d_rs
 
 namespace cuda {
 
-template<typename T, typename P>
-__device__ unsigned lower_bound(const T& key, const T* arr, const unsigned size) {
-    unsigned lower = 0;
-    unsigned upper = size;
-    do {
-        unsigned mid = ((upper - lower) / 2) + lower;
-        int c = cmp(arr[mid], key); // a < b
-        if (key < arr[mid]) {
-            upper = mid;
-        } else if (key > arr[mid]) {
-            lower = mid + 1;
-        } else {
-            return mid;
-        }
-    } while (lower < upper);
-    return lower;
-}
-
-template<typename T1, typename T2, typename P>
-__device__ unsigned lower_bound(const T1& key, const T2* arr, const unsigned size, P cmp) {
-    unsigned lower = 0;
-    unsigned count = size;
-    while (count > 0) {
-        unsigned step = count / 2;
-        unsigned mid = lower + step;
-        if (cmp(arr[mid], key)) {
-            lower = mid + 1;
-            count -= step + 1;
-        } else {
-            count = step;
-        }
-    }
-    return lower;
-}
-
-/*
-__global__ void do_lower_bound(const int* arr, const unsigned size) {
-    lower_bound(0, arr, size, [] (const auto& a, const auto& b) {
-        return a < b;
-    });
-}
-*/
-
 template<class Key>
-__device__ unsigned get_spline_segment(const DeviceRadixSpline<Key>& rs, const Key key) {
+__device__ device_size_t get_spline_segment(const DeviceRadixSpline<Key>& rs, const Key key) {
     const auto prefix = (key - rs.min_key_) >> rs.num_shift_bits_;
 
-    const uint32_t begin = rs.radix_table_[prefix];
-    const uint32_t end = rs.radix_table_[prefix + 1];
+    const rs_rt_entry_t begin = rs.radix_table_[prefix];
+    const rs_rt_entry_t end = rs.radix_table_[prefix + 1];
 
     // TODO measure linear search for narrow ranges as in the reference implementation
 
@@ -169,7 +128,8 @@ __device__ unsigned get_spline_segment(const DeviceRadixSpline<Key>& rs, const K
     const auto lb = begin + lower_bound(key, rs.spline_points_ + begin, range_size, [] (const auto& coord, const Key key) {
         return coord.x < key;
     });
-//    printf("key: %lu, lb: %u\n", key, lb);
+
+    //printf("key: %lu, lb: %u\n", key, lb);
     return lb;
 }
 
@@ -179,7 +139,7 @@ __device__ double get_estimate(const DeviceRadixSpline<Key>& rs, const Key key) 
     if (key >= rs.max_key_) return rs.num_keys_ - 1;
 
     // find spline segment
-    const unsigned index = get_spline_segment(rs, key);
+    const auto index = get_spline_segment(rs, key);
     const auto& down = rs.spline_points_[index - 1];
     const auto& up = rs.spline_points_[index];
 
