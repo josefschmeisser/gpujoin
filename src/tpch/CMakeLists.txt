@@ -23,7 +23,7 @@ target_sources(cuda_tpch_14 PRIVATE
     tpch_14_ij_partitioning.cu
     ../gpu_radix_partition.cu
     ../harmonia.cu
-    ../indexes.cu
+    ../indexes.cpp
 )
 set_target_properties(cuda_tpch_14 PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_include_directories(cuda_tpch_14 PUBLIC
