@@ -40,7 +40,7 @@ using no_op_type = no_op_index<index_key_t, value_t, device_index_allocator, hos
 
 template<class KeyType, class VectorType>
 void populate_densely(VectorType& v) {
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, keys.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
         //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
         std::iota(v.begin() + r.begin(), v.begin() + r.end(), r.begin());
     });
@@ -48,15 +48,15 @@ void populate_densely(VectorType& v) {
 
 template<class KeyType, class VectorType>
 void populate_uniformly(VectorType& v, unsigned max_bits) {
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         std::mt19937 rng {r.begin()};
         std::uniform_int_distribution<uint64_t> lookup_distribution(0ul, v.size() - 1ul);
-        std::generate(lookups.begin() + r.begin(), lookups.begin() + r.end(), [&]() { return lookup_distribution(rng); });
+        std::generate(v.begin() + r.begin(), v.begin() + r.end(), [&]() { return lookup_distribution(rng); });
         /*
         for (uint64_t i = r.begin(); i < r.end(); ++i) {
             const auto key_idx = lookup_distribution(rng);
             assert(key_idx < v.size());
-            lookups[i] = key_idx;
+            v[i] = key_idx;
         }*/
     });
 }
@@ -78,7 +78,7 @@ void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
         std::mt19937 rng {r.begin()};
         std::uniform_int_distribution<KeyType> key_distrib(0, upper_limit);
         std::unordered_set<KeyType> unique;
-        unique.reserve(keys.size());
+        unique.reserve(v.size());
 
         while (unique.size() < v.size()) {
             const auto key = key_distrib(rng);
@@ -91,13 +91,13 @@ void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
 }
 
 template<class KeyType, class VectorType>
-void populate_with_zipfian_pattern(VectorType& v) {
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
+void populate_with_zipfian_pattern(VectorType& v, double zipf_factor) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         std::mt19937 rng {r.begin()};
         zipf_distribution<KeyType> lookup_distribution(v.size() - 1ul, zipf_factor);
         for (uint64_t i = 0; i < r.size(); ++i) {
             const auto key_pos = lookup_distribution(rng);
-            lookups[r.begin() + i] = key_pos;
+            v[r.begin() + i] = key_pos;
         }
     });
 }
@@ -114,10 +114,10 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     printf("generating dataset to be indexed...\n");
     switch (dt) {
         case dataset_type::dense:
-            populate_densely(keys);
+            populate_densely<KeyType, VectorType>(keys);
             break;
         case dataset_type::sparse:
-            populate_uniquely_uniformly(keys, max_bits);
+            populate_uniquely_uniformly<KeyType, VectorType>(keys, max_bits);
             break;
         default:
             assert(false);
@@ -127,10 +127,10 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     printf("generating lookups...\n");
     switch (lookup_pattern) {
         case lookup_pattern_type::uniform:
-            populate_uniformly(keys, max_bits);
+            populate_uniformly<KeyType, VectorType>(keys, max_bits);
             break;
         case lookup_pattern_type::zipf:
-            populate_with_zipfian_pattern(keys);
+            populate_with_zipfian_pattern<KeyType, VectorType>(keys, zipf_factor);
             break;
         default:
             assert(false);
@@ -139,7 +139,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     // map key positions into keys
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         for (uint64_t i = 0; i < r.size(); ++i) {
-            lookups[r.begin() + i] = keys[lookups[r.begin() + i];
+            lookups[r.begin() + i] = keys[lookups[r.begin() + i]];
         }
     });
 }

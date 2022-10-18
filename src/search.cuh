@@ -21,8 +21,8 @@ struct device_greater {
     }
 };
 
-template<class T, class Compare = less<T>>
-__device__ device_size_t lower_bound(const T& key, const T* arr, const device_size_t size, Compare cmp = device_less<T>{}) {
+template<class T1, class T2, class Compare = device_less<T1>>
+__device__ device_size_t lower_bound(const T1& key, const T2* arr, const device_size_t size, Compare cmp = device_less<T1>{}) {
     device_size_t lower = 0;
     device_size_t count = size;
     while (count > 0) {
@@ -198,22 +198,23 @@ __device__ device_size_t cooperative_linear_search(bool active, T x, const T* ar
 }
 
 template<unsigned... Is>
-__device__ constexpr auto split_impl(std::integer_sequence<unsigned, Is...> s, unsigned window_size) -> std::array<unsigned, s.size()> {
+__device__ constexpr auto split_impl(std::integer_sequence<unsigned, Is...> s, unsigned window_size) {// -> std::array<unsigned, s.size()> {
     std::array<int, s.size()> offsets{};
-    ((offsets[Is] = Is*window_size/s.size()), ...);
+    //((offsets[Is] = Is*window_size/s.size()), ...);
+    (void) (int[]) {(offsets[Is] = Is*window_size/s.size(), 0)...};
     return offsets;
 }
 
-template<unsigned Co_Op_Extent, unsigned WindowSize = CPU_CACHE_LINE_SIZE>
+template<unsigned Co_Op_Extent, unsigned WindowSize>
 __device__ constexpr std::array<unsigned, Co_Op_Extent> split() {
-    return split_impl(std::make_integer_sequence<unsigned, Co_Op_Extent>{}, WINDOW_SIZE);
+    return split_impl(std::make_integer_sequence<unsigned, Co_Op_Extent>{}, WindowSize);
 }
 
-template<class T, unsigned Co_Op_Extent, unsigned WindowSize = CPU_CACHE_LINE_SIZE>
+template<class T, unsigned Co_Op_Extent, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
 __device__ __forceinline__ device_size_t cooperative_binary_search_stride(T x, const T* arr, const device_size_t size, const uint32_t group_mask) {
     const unsigned my_lane_id = lane_id();
-    const unsigned thread_offset = my_lande_id - __ffs(group_mask);
-    static constexpr auto window_offsets = split();
+    const unsigned thread_offset = my_lane_id - __ffs(group_mask);
+    static constexpr auto window_offsets = split<Co_Op_Extent, WindowSize>();
     static constexpr auto window_offset = window_offsets[thread_offset];
 
     uint32_t matches_mask = 0u;
@@ -223,13 +224,13 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(T x, c
         const device_size_t step = count / 2;
         const device_size_t mid = lower + step;
         const device_size_t pos = min(window_offset + mid - (mid & WindowSize), size - 1); // align to cache line boundary // TODO check
-        const auto r = cmp(arr[pos], key);
+        const auto r = arr[pos] < x; // TODO cmp(arr[pos], x);
         matches_mask = __ballot_sync(group_mask, r);
 
-        if (matches == group_mask) {
+        if (matches_mask == group_mask) {
             lower = mid + 1;
             count -= step + 1;
-        } else if (matches == 0u) {
+        } else if (matches_mask == 0u) {
             count = step;
         } else {
             // use a branch free binary search from here on
@@ -237,18 +238,18 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(T x, c
         }
     }
 
-    count = thread_offsets[__clz(matches_mask) - __clz(group_mask)];
+    count = window_offsets[__clz(matches_mask) - __clz(group_mask)];
     return branch_free_binary_search(x, arr + lower, count);
 
     // alternatively: linear search with all threads
 }
 
-template<class T, unsigned Co_Op_Degree = 3, unsigned WindowSize = CPU_CACHE_LINE_SIZE>
+template<class T, unsigned Co_Op_Degree = 3, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
 __device__ device_size_t cooperative_binary_search(bool active, T x, const T* arr, const device_size_t size) {
     enum { THREAD_GROUP_SIZE  = 1 << Co_Op_Degree };
 
     const unsigned my_lane_id = lane_id();
-    unsigned leader = THREAD_GROUP_SIZE*(my_lane_id >> degree);
+    unsigned leader = THREAD_GROUP_SIZE*(my_lane_id >> Co_Op_Degree);
     device_size_t lower_bound = size;
     const uint32_t group_mask = __funnelshift_l(FULL_MASK, 0, THREAD_GROUP_SIZE) << leader;
 
