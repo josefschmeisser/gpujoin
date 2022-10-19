@@ -218,40 +218,50 @@ struct type_name<harmonia_index<Key, Value, DeviceAllocator, HostAllocator>> {
     }
 };
 
-template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+template<class SearchAlgorithm>
+struct pseudo_cooperative_search_algorithm {
+    __device__ __forceinline__ device_size_t operator() (bool active, T x, const T* arr, const device_size_t size) const {
+        static const SearchAlgorithm search_algorithm{};
+        return search_algorithm(x, arr, size);
+    }
+}
+
+struct default_lower_bound_index_configuration {
+    using search_algorithm = branch_free_binary_search_algorithm;
+    using cooperative_search_algorithm = pseudo_cooperative_search_algorithm<search_algorithm>;
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_lower_bound_index_configuration>
 struct lower_bound_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
+    using index_configuration_t = IndexConfiguration;
+
+    static_assert(sizeof(value_t) <= sizeof(device_size_t));
 
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
     struct device_index_t {
         const key_t* d_column;
-        unsigned d_size;
+        device_size_t d_size;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            static_assert(sizeof(value_t) <= sizeof(device_size_t));
-            //auto pos = branchy_binary_search(key, d_column, d_size);
-            auto pos = branch_free_binary_search(key, d_column, d_size);
+            static const auto search_algorithm = IndexConfiguration::search_algorithm{};
+            const auto pos = search_algorithm(key, d_column, d_size);
             return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            // TODO implement cooperative binary search
-
-            if (active) {
-                static_assert(sizeof(value_t) <= sizeof(device_size_t));
-                return lookup(key);
-            } else {
-                return invalid_tid;
-            }
+            static const auto search_algorithm = IndexConfiguration::cooperative_search_algorithm{};
+            const auto pos = search_algorithm(key, d_column, d_size);
+            return (active && pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
         }
     } device_index;
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         device_index.d_column = d_column;
         device_index.d_size = h_column.size();
-        if (device_index.d_size < invalid_tid) {
+        if (device_index.d_size >= invalid_tid) {
             throw std::runtime_error("'value_t' does not suffice");
         }
     }
@@ -261,8 +271,8 @@ struct lower_bound_index : public abstract_index<Key> {
     }
 };
 
-template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
-struct type_name<lower_bound_index<Key, Value, DeviceAllocator, HostAllocator>> {
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration>
+struct type_name<lower_bound_index<Key, Value, DeviceAllocator, HostAllocator, IndexConfiguration>> {
     static const char* value() {
         return "lower_bound";
     }
