@@ -101,7 +101,8 @@ if(false)
 endif()
 
 
-
+# FIXME
+if(false)
 add_executable(index_lookup_partitioning
     src/index_lookup_partitioning_old.cu
     src/measuring.cpp
@@ -117,9 +118,10 @@ target_include_directories(index_lookup_partitioning PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
 )
-target_link_libraries(index_lookup_partitioning ${CUDART_LIBRARY} numa cub radixspline)
+target_link_libraries(index_lookup_partitioning ${CUDART_LIBRARY} numa cub radixspline onetbb)
 # additional nvcc flags
 target_compile_options(index_lookup_partitioning PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
+endif()
 
 add_executable(bf_search src/bf_search.cpp)
 

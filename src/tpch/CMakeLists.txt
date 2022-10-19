@@ -1,6 +1,6 @@
 add_library(tpch_common STATIC common.cpp config.cpp ../device_properties.cpp  ../measuring.cpp parser.cpp)
 set_property(TARGET tpch_common PROPERTY CXX_STANDARD 17) # no cuda compiliation units involved; so we can use c++17 here
-target_link_libraries(tpch_common pthread)
+target_link_libraries(tpch_common pthread cub)
 
 set(CPU_TPCH_SRC_FILES cpu_bench.cpp cpu_only.cpp)
 add_executable(tpch ${CPU_TPCH_SRC_FILES})
