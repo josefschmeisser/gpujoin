@@ -111,6 +111,14 @@ __device__ device_size_t branch_free_binary_search(T x, const T* arr, const devi
     return ret;
 }
 
+struct branch_free_binary_search_algorithm {
+    static constexpr char name[] = "branch_free_binary_search";
+
+    __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
+        return branch_free_binary_search(x, arr, size);
+    }
+};
+
 template<class T, unsigned max_steps = 4> // TODO find optimal limit
 __device__ device_size_t branch_free_exponential_search(T x, const T* arr, const device_size_t n, const float hint) {
     //if (size < 1) return;
