@@ -220,15 +220,16 @@ struct type_name<harmonia_index<Key, Value, DeviceAllocator, HostAllocator>> {
 
 template<class SearchAlgorithm>
 struct pseudo_cooperative_search_algorithm {
-    __device__ __forceinline__ device_size_t operator() (bool active, T x, const T* arr, const device_size_t size) const {
+    template<class T>
+    __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
         static const SearchAlgorithm search_algorithm{};
         return search_algorithm(x, arr, size);
     }
-}
+};
 
 struct default_lower_bound_index_configuration {
-    using search_algorithm = branch_free_binary_search_algorithm;
-    using cooperative_search_algorithm = pseudo_cooperative_search_algorithm<search_algorithm>;
+    using search_algorithm_type = branch_free_binary_search_algorithm;
+    using cooperative_search_algorithm_type = pseudo_cooperative_search_algorithm<search_algorithm_type>;
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_lower_bound_index_configuration>
@@ -246,14 +247,14 @@ struct lower_bound_index : public abstract_index<Key> {
         device_size_t d_size;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            static const auto search_algorithm = IndexConfiguration::search_algorithm{};
+            static const typename IndexConfiguration::search_algorithm_type search_algorithm{};
             const auto pos = search_algorithm(key, d_column, d_size);
             return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            static const auto search_algorithm = IndexConfiguration::cooperative_search_algorithm{};
-            const auto pos = search_algorithm(key, d_column, d_size);
+            static const typename IndexConfiguration::cooperative_search_algorithm_type cooperative_search_algorithm{};
+            const auto pos = cooperative_search_algorithm(key, d_column, d_size);
             return (active && pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
         }
     } device_index;

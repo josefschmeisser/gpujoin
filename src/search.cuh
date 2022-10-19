@@ -114,6 +114,7 @@ __device__ device_size_t branch_free_binary_search(T x, const T* arr, const devi
 struct branch_free_binary_search_algorithm {
     static constexpr char name[] = "branch_free_binary_search";
 
+    template<class T>
     __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
         return branch_free_binary_search(x, arr, size);
     }
@@ -218,11 +219,11 @@ __device__ constexpr std::array<unsigned, Co_Op_Extent> split() {
     return split_impl(std::make_integer_sequence<unsigned, Co_Op_Extent>{}, WindowSize);
 }
 
-template<class T, unsigned Co_Op_Extent, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
+template<class T, unsigned Co_Op_Extent, unsigned WindowSize>
 __device__ __forceinline__ device_size_t cooperative_binary_search_stride(T x, const T* arr, const device_size_t size, const uint32_t group_mask) {
     const unsigned my_lane_id = lane_id();
     const unsigned thread_offset = my_lane_id - __ffs(group_mask);
-    static constexpr auto window_offsets = split<Co_Op_Extent, WindowSize>();
+    static constexpr auto window_offsets = split<Co_Op_Extent, WindowSize/sizeof(T)>();
     static constexpr auto window_offset = window_offsets[thread_offset];
 
     uint32_t matches_mask = 0u;
