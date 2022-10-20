@@ -122,7 +122,7 @@ struct radix_spline_index : public abstract_index<Key> {
     } device_index;
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
-        if (h_column.size() < invalid_tid) {
+        if (h_column.size() >= invalid_tid) {
             throw std::runtime_error("'value_t' does not suffice");
         }
 
