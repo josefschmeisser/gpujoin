@@ -37,6 +37,16 @@ __device__ device_size_t lower_bound(const T1& key, const T2* arr, const device_
     }
     return lower;
 }
+
+struct branchy_lower_bound_search_algorithm {
+    static constexpr char name[] = "branchy_lower_bound_search";
+
+    template<class T1, class T2, class Compare = device_less<T1>>
+    __device__ __forceinline__ device_size_t operator() (const T1& key, const T2* arr, const device_size_t size, Compare cmp = device_less<T1>{}) const {
+        return lower_bound(x, arr, size, cmp);
+    }
+};
+
 /*
 template<class T, class Compare = less<T>>
 __device__ device_size_t branchy_binary_search(T x, const T* arr, const device_size_t size, Compare cmp = less<T>{}) {
@@ -84,6 +94,15 @@ __device__ device_size_t branchy_binary_search(T x, const T* arr, const device_s
     } while (lower < upper);
     return lower;
 }
+
+struct branchy_binary_search_algorithm {
+    static constexpr char name[] = "branchy_binary_search";
+
+    template<class T>
+    __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
+        return branchy_binary_search(x, arr, size);
+    }
+};
 
 template<class T>
 struct device_clz {

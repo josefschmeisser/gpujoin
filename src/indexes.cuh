@@ -86,10 +86,28 @@ struct type_name<btree_index<Key, Value, DeviceAllocator, HostAllocator>> {
     }
 };
 
-template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+template<class SearchAlgorithm>
+struct pseudo_cooperative_lower_bound_search_algorithm {
+    static constexpr char name[] = "pseudo_ooperative_lower_bound_search";
+
+    template<class T1, class T2, class Compare = device_less<T1>>
+    __device__ __forceinline__ device_size_t operator() (const T1& key, const T2* arr, const device_size_t size, Compare cmp = device_less<T1>{}) const {
+        static const SearchAlgorithm search_algorithm{};
+        return search_algorithm(x, arr, size);
+    }
+};
+
+struct default_radix_spline_index_configuration {
+    using lower_bound_search_algorithm_type = branchy_lower_bound_search_algorithm;
+    using cooperative_lower_bound_search_algorithm_type = pseudo_cooperative_lower_bound_search_algorithm<lower_bound_search_algorithm_type>;
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_radix_spline_index_configuration>
 struct radix_spline_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
+
+    static_assert(sizeof(value_t) <= sizeof(device_size_t));
 
     size_t memory_consumption_ = 0;
     rs::device_array_guard<key_t> guard_;
@@ -100,24 +118,27 @@ struct radix_spline_index : public abstract_index<Key> {
         rs::DeviceRadixSpline<key_t> d_rs_;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            static_assert(sizeof(value_t) <= sizeof(device_size_t));
+            static const typename IndexConfiguration::lower_bound_search_algorithm_type lower_bound_search_algorithm{};
 
             const double estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
             const device_size_t begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
             const device_size_t end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
 
             const device_size_t bound_size = end - begin;
-            const device_size_t pos = begin + lower_bound(key, &d_column_[begin], bound_size);
+            const device_size_t pos = begin + lower_bound_search_algorithm(key, &d_column_[begin], bound_size);
             return (pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            if (active) {
-                // TODO implement
-                return lookup(key); // fallback
-            } else {
-                return invalid_tid;
-            }
+            static const typename IndexConfiguration::cooperative_lower_bound_search_algorithm_type lower_bound_search_algorithm{};
+
+            const double estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
+            const device_size_t begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
+            const device_size_t end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
+
+            const device_size_t bound_size = end - begin;
+            const device_size_t pos = begin + lower_bound_search_algorithm(active, key, &d_column_[begin], bound_size);
+            return (active && pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
     } device_index;
 
@@ -220,6 +241,8 @@ struct type_name<harmonia_index<Key, Value, DeviceAllocator, HostAllocator>> {
 
 template<class SearchAlgorithm>
 struct pseudo_cooperative_search_algorithm {
+    static constexpr char name[] = "pseudo_cooperative_search";
+
     template<class T>
     __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
         static const SearchAlgorithm search_algorithm{};
@@ -229,6 +252,7 @@ struct pseudo_cooperative_search_algorithm {
 
 struct default_lower_bound_index_configuration {
     using search_algorithm_type = branch_free_binary_search_algorithm;
+    //using search_algorithm_type = branchy_binary_search_algorithm;
     using cooperative_search_algorithm_type = pseudo_cooperative_search_algorithm<search_algorithm_type>;
 };
 
