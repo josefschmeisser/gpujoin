@@ -38,19 +38,18 @@ using radix_spline_type = radix_spline_index<index_key_t, value_t, device_index_
 using no_op_type = no_op_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 
 
-template<class KeyType, class VectorType>
+template<class T, class VectorType>
 void populate_densely(VectorType& v) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
-        //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
         std::iota(v.begin() + r.begin(), v.begin() + r.end(), r.begin());
     });
 }
 
-template<class KeyType, class VectorType>
-void populate_uniformly(VectorType& v, unsigned max_bits) {
+template<class T, class VectorType>
+void populate_uniformly(VectorType& v, uint64_t limit) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         std::mt19937 rng {r.begin()};
-        std::uniform_int_distribution<uint64_t> lookup_distribution(0ul, v.size() - 1ul);
+        std::uniform_int_distribution<T> lookup_distribution(0ul, limit - 1ul);
         std::generate(v.begin() + r.begin(), v.begin() + r.end(), [&]() { return lookup_distribution(rng); });
         /*
         for (uint64_t i = r.begin(); i < r.end(); ++i) {
@@ -61,7 +60,7 @@ void populate_uniformly(VectorType& v, unsigned max_bits) {
     });
 }
 
-template<class KeyType, class VectorType>
+template<class T, class VectorType>
 void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
     const std::size_t upper_limit = 1ul << (max_bits - 1u);
 
@@ -76,8 +75,8 @@ void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
 
         // create random keys
         std::mt19937 rng {r.begin()};
-        std::uniform_int_distribution<KeyType> key_distrib(0, upper_limit);
-        std::unordered_set<KeyType> unique;
+        std::uniform_int_distribution<T> key_distrib(0, upper_limit);
+        std::unordered_set<T> unique;
         unique.reserve(v.size());
 
         while (unique.size() < v.size()) {
@@ -90,11 +89,11 @@ void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
     });
 }
 
-template<class KeyType, class VectorType>
-void populate_with_zipfian_pattern(VectorType& v, double zipf_factor) {
+template<class T, class VectorType>
+void populate_with_zipfian_pattern(VectorType& v, uint64_t limit, double zipf_factor) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         std::mt19937 rng {r.begin()};
-        zipf_distribution<KeyType> lookup_distribution(v.size() - 1ul, zipf_factor);
+        zipf_distribution<T> lookup_distribution(limit - 1ul, zipf_factor);
         for (uint64_t i = 0; i < r.size(); ++i) {
             const auto key_pos = lookup_distribution(rng);
             v[r.begin() + i] = key_pos;
@@ -127,10 +126,10 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     printf("generating lookups...\n");
     switch (lookup_pattern) {
         case lookup_pattern_type::uniform:
-            populate_uniformly<KeyType, VectorType>(keys, max_bits);
+            populate_uniformly<uint64_t, VectorType>(lookups, keys.size());
             break;
         case lookup_pattern_type::zipf:
-            populate_with_zipfian_pattern<KeyType, VectorType>(keys, zipf_factor);
+            populate_with_zipfian_pattern<uint64_t, VectorType>(lookups, keys.size(), zipf_factor);
             break;
         default:
             assert(false);
@@ -139,6 +138,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     // map key positions into keys
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         for (uint64_t i = 0; i < r.size(); ++i) {
+            assert(lookups[r.begin() + i < keys.size()]);
             lookups[r.begin() + i] = keys[lookups[r.begin() + i]];
         }
     });
