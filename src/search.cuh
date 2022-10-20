@@ -85,6 +85,24 @@ __device__ device_size_t branchy_binary_search(T x, const T* arr, const device_s
     return lower;
 }
 
+template<class T>
+struct device_clz {
+};
+
+template<>
+struct device_clz<uint32_t> {
+    __device__ __forceinline__ int operator() (const uint32_t x) const {
+        return __clz(x);
+    }
+};
+
+template<>
+struct device_clz<uint64_t> {
+    __device__ __forceinline__ int operator() (const uint64_t x) const {
+        return __clzll(x);
+    }
+};
+
 /**
  * Binary Search.
  *
@@ -97,10 +115,9 @@ __device__ device_size_t branchy_binary_search(T x, const T* arr, const device_s
  */
 template<class T>
 __device__ device_size_t branch_free_binary_search(T x, const T* arr, const device_size_t size) { // TODO rename? should be lower bound?
-    if (size < 1) { return 0; }
-
-    const unsigned steps = 31u - __clz(size - 1);
-    device_size_t mid = 1 << steps;
+    static constexpr unsigned bit_count = sizeof(device_size_t)*8u - 1u;
+    const unsigned steps = bit_count - device_clz<device_size_t>{}(size - 1);
+    device_size_t mid = static_cast<device_size_t>(1u) << steps;
     device_size_t ret = (arr[mid] < x) * (size - mid);
     for (unsigned step = 1; step <= steps; ++step) {
         mid >>= 1;
