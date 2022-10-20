@@ -13,7 +13,7 @@ struct vector_view {
     vector_view() noexcept
         : arr_(nullptr), size_(0) {}
 
-    vector_view(T* arr, size_t size) noexcept
+    vector_view(T* arr, size_type size) noexcept
         : arr_(arr), size_(size)
     {}
 
@@ -27,9 +27,9 @@ struct vector_view {
 
     const T& back() const noexcept { return arr_[size_ - 1]; }
 
-    size_t size() const noexcept { return size_; }
+    size_type size() const noexcept { return size_; }
 
-    size_t capacity() const noexcept { return size_; }
+    size_type capacity() const noexcept { return size_; }
 
     T& operator[](int idx) noexcept { return arr_[idx]; }
 
