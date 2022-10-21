@@ -36,7 +36,39 @@ struct abstract_index {
     __host__ virtual size_t memory_consumption() const = 0;
 };
 
-template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
+struct btree_lookup_algorithm {
+    static constexpr char name[] = "lookup";
+
+    template<class Key>
+    __device__ __forceinline__ value_t lookup(bool active, const NodeBase* tree, Key key) {
+        return btree_t::lookup(d_tree_, key);
+    }
+};
+
+struct btree_cooperative_lookup_algorithm {
+    static constexpr char name[] = "cooperative_lookup";
+
+    template<class Key>
+    __device__ __forceinline__ value_t cooperative_lookup(bool active, const NodeBase* tree, Key key) {
+        return btree_t::cooperative_lookup(active, d_tree_, key);
+    }
+};
+
+struct btree_pseudo_cooperative_lookup_algorithm {
+    static constexpr char name[] = "pseudo_ooperative_lookup";
+
+    template<class Key>
+    __device__ __forceinline__ value_t cooperative_lookup(bool active, const NodeBase* tree, Key key) {
+        return btree_t::lookup(d_tree_, key);
+    }
+};
+
+struct default_btree_index_configuration {
+    using lookup_algorithm_type = btree_lookup_algorithm;
+    using cooperative_lookup_algorithm_type = btree_pseudo_cooperative_lookup_algorithm;
+};
+
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_btree_index_configuration>
 struct btree_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
@@ -52,12 +84,13 @@ struct btree_index : public abstract_index<Key> {
         const typename btree_t::NodeBase* d_tree_;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            return btree_t::lookup(d_tree_, key);
-            //return btree_t::lookup_with_hints(tree_, key); // TODO
+            static const typename IndexConfiguration::lookup_algorithm_type lookup_algorithm{};
+            return lookup_algorithm(d_tree, key);
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            return btree_t::cooperative_lookup(active, d_tree_, key);
+            static const typename IndexConfiguration::cooperative_lower_bound_algorithm_type lookup_algorithm{};
+            return lookup_algorithm(active, d_tree_, key);
         }
     } device_index;
 
@@ -312,7 +345,7 @@ struct no_op_index : public abstract_index<Key> {
 
     struct device_index_t {
         const key_t* d_column;
-        unsigned d_size;
+        device_size_t d_size;
 
         __device__ __forceinline__ value_t lookup(const key_t key) const { return invalid_tid; }
 

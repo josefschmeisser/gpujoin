@@ -12,6 +12,7 @@
 #include "index_lookup_common.cuh"
 #include "index_lookup_partitioning.cuh"
 #include "device_properties.hpp"
+#include "indexes.hpp"
 #include "measuring.hpp"
 
 #ifdef NRDC
@@ -183,12 +184,19 @@ struct search_algorithm_name {
 static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs) {
     const auto& config = get_experiment_config();
 
-    if (config.index_type == index_type_enum::lower_bound) {
-        pairs.emplace_back("index_search_algorithm", std::string(lower_bound_type::index_configuration_t::search_algorithm::name));
-        pairs.emplace_back("index_cooperative_search_algorithm", std::string(lower_bound_type::index_configuration_t::cooperative_search_algorithm::name));
-    } else if (config.index_type == index_type_enum::radix_spline) {
-        pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::lower_bound_search_algorithm_type::name));
-        pairs.emplace_back("index_cooperative_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name));
+    switch (config.index_type) {
+        case index_type_enum::btree:
+            //pairs.emplace_back("index_search_algorithm", std::string(btree_type::index_configuration_t::lookup_algorithm_type::name));
+            pairs.emplace_back("index_cooperative_search_algorithm", std::string(btree_type::index_configuration_t::cooperative_lookup_algorithm_type::name));
+            break;
+        case index_type_enum::lower_bound:
+            //pairs.emplace_back("index_search_algorithm", std::string(lower_bound_type::index_configuration_t::search_algorithm::name));
+            pairs.emplace_back("index_cooperative_search_algorithm", std::string(lower_bound_type::index_configuration_t::cooperative_search_algorithm::name));
+            break;
+        case index_type_enum::radix_spline:
+            //pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::lower_bound_search_algorithm_type::name));
+            pairs.emplace_back("index_cooperative_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name));
+            break;
     }
 }
 
