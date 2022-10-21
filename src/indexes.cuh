@@ -69,7 +69,7 @@ struct btree_cooperative_lookup_algorithm {
 
 struct btree_pseudo_cooperative_lookup_algorithm {
     static constexpr const char* name() {
-        return "pseudo_ooperative_lookup";
+        return "pseudo_cooperative_lookup";
     }
 
     template<class BtreeInfoType>
@@ -142,7 +142,7 @@ template<class SearchAlgorithm>
 struct pseudo_cooperative_lower_bound_search_algorithm {
     //static constexpr char name[] = "pseudo_ooperative_lower_bound_search";
     static constexpr const char* name() {
-        return "pseudo_ooperative_lower_bound_search";
+        return "pseudo_cooperative_lower_bound_search";
     }
 
     template<class T1, class T2, class Compare = device_less<T1>>
