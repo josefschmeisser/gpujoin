@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cassert>
+#include <utility>
 
 #include "device_definitions.hpp"
 #include "cuda_utils.cuh"
@@ -39,10 +41,13 @@ __device__ device_size_t lower_bound(const T1& key, const T2* arr, const device_
 }
 
 struct branchy_lower_bound_search_algorithm {
-    static constexpr char name[] = "branchy_lower_bound_search";
+    //static constexpr char name[] = "branchy_lower_bound_search";
+    static constexpr const char* name() {
+        return "branchy_lower_bound_search";
+    }
 
     template<class T1, class T2, class Compare = device_less<T1>>
-    __device__ __forceinline__ device_size_t operator() (const T1& key, const T2* arr, const device_size_t size, Compare cmp = device_less<T1>{}) const {
+    __device__ __forceinline__ device_size_t operator() (const T1& x, const T2* arr, const device_size_t size, Compare cmp = device_less<T1>{}) const {
         return lower_bound(x, arr, size, cmp);
     }
 };
@@ -96,7 +101,10 @@ __device__ device_size_t branchy_binary_search(T x, const T* arr, const device_s
 }
 
 struct branchy_binary_search_algorithm {
-    static constexpr char name[] = "branchy_binary_search";
+    //static constexpr char name[] = "branchy_binary_search";
+    static constexpr const char* name() {
+        return "branchy_binary_search";
+    }
 
     template<class T>
     __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
@@ -148,7 +156,10 @@ __device__ device_size_t branch_free_binary_search(T x, const T* arr, const devi
 }
 
 struct branch_free_binary_search_algorithm {
-    static constexpr char name[] = "branch_free_binary_search";
+    //static constexpr char name[] = "branch_free_binary_search";
+    static constexpr const char* name() {
+        return "branch_free_binary_search";
+    }
 
     template<class T>
     __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {

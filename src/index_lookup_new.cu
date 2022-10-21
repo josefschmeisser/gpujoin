@@ -184,18 +184,18 @@ struct search_algorithm_name {
 static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs) {
     const auto& config = get_experiment_config();
 
-    switch (config.index_type) {
+    switch (parse_index_type(config.index_type)) {
         case index_type_enum::btree:
             //pairs.emplace_back("index_search_algorithm", std::string(btree_type::index_configuration_t::lookup_algorithm_type::name));
-            pairs.emplace_back("index_cooperative_search_algorithm", std::string(btree_type::index_configuration_t::cooperative_lookup_algorithm_type::name));
+            pairs.emplace_back("index_cooperative_lookup_algorithm", std::string(btree_type::index_configuration_t::cooperative_lookup_algorithm_type::name()));
             break;
         case index_type_enum::lower_bound:
             //pairs.emplace_back("index_search_algorithm", std::string(lower_bound_type::index_configuration_t::search_algorithm::name));
-            pairs.emplace_back("index_cooperative_search_algorithm", std::string(lower_bound_type::index_configuration_t::cooperative_search_algorithm::name));
+            pairs.emplace_back("index_cooperative_search_algorithm", std::string(lower_bound_type::index_configuration_t::cooperative_search_algorithm_type::name()));
             break;
         case index_type_enum::radix_spline:
             //pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::lower_bound_search_algorithm_type::name));
-            pairs.emplace_back("index_cooperative_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name));
+            pairs.emplace_back("index_cooperative_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name()));
             break;
     }
 }
@@ -203,18 +203,18 @@ static void add_index_configuration_description(std::vector<std::pair<std::strin
 static void create_common_experiment_description_pairs_2(std::vector<std::pair<std::string, std::string>>& pairs) {
     const auto& config = get_experiment_config();
 
-    pairs.emplace_back(std::string("device"), std::string(get_device_properties(0).name)),
-    pairs.emplace_back(std::string("index_type"), config.index_type),
-    pairs.emplace_back(std::string("dataset"), tmpl_to_string(config.dataset)),
-    pairs.emplace_back(std::string("lookup_pattern"), tmpl_to_string(config.lookup_pattern)),
-    pairs.emplace_back(std::string("num_elements"), std::to_string(config.num_elements)),
-    pairs.emplace_back(std::string("num_lookups"), std::to_string(config.num_lookups)),
-    pairs.emplace_back(std::string("sorted_lookups"), std::to_string(config.sorted_lookups)),
+    pairs.emplace_back(std::string("device"), std::string(get_device_properties(0).name));
+    pairs.emplace_back(std::string("index_type"), config.index_type);
+    pairs.emplace_back(std::string("dataset"), tmpl_to_string(config.dataset));
+    pairs.emplace_back(std::string("lookup_pattern"), tmpl_to_string(config.lookup_pattern));
+    pairs.emplace_back(std::string("num_elements"), std::to_string(config.num_elements));
+    pairs.emplace_back(std::string("num_lookups"), std::to_string(config.num_lookups));
+    pairs.emplace_back(std::string("sorted_lookups"), std::to_string(config.sorted_lookups));
         // allocators:
-    pairs.emplace_back(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value())),
-    pairs.emplace_back(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value())),
-    pairs.emplace_back(std::string("indexed_allocator"), std::string(type_name<indexed_allocator_t>::value())),
-    pairs.emplace_back(std::string("lookup_keys_allocator"), std::string(type_name<lookup_keys_allocator_t>::value()))
+    pairs.emplace_back(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value()));
+    pairs.emplace_back(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value()));
+    pairs.emplace_back(std::string("indexed_allocator"), std::string(type_name<indexed_allocator_t>::value()));
+    pairs.emplace_back(std::string("lookup_keys_allocator"), std::string(type_name<lookup_keys_allocator_t>::value()));
 
     if (config.dataset == dataset_type::sparse) {
         pairs.emplace_back(std::string("max_bits"), std::to_string(config.max_bits));
@@ -223,8 +223,6 @@ static void create_common_experiment_description_pairs_2(std::vector<std::pair<s
     if (config.lookup_pattern == lookup_pattern_type::zipf) {
         pairs.emplace_back(std::string("zipf_factor"), std::to_string(config.zipf_factor));
     }
-
-    return r;
 }
 
 static measuring::experiment_description create_experiment_description() {

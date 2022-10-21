@@ -36,30 +36,45 @@ struct abstract_index {
     __host__ virtual size_t memory_consumption() const = 0;
 };
 
-struct btree_lookup_algorithm {
-    static constexpr char name[] = "lookup";
+template<class BtreeType>
+struct btree_info {
+    using btree_type = BtreeType;
+    using key_type = typename BtreeType::key_t;
+    using value_type = typename BtreeType::value_t;
+    using node_base_type = typename BtreeType::NodeBase;
+};
 
-    template<class Key>
-    __device__ __forceinline__ value_t lookup(bool active, const NodeBase* tree, Key key) {
-        return btree_t::lookup(d_tree_, key);
+struct btree_lookup_algorithm {
+    //static constexpr char name[] = "lookup";
+    static constexpr const char* name() {
+        return "lookup";
+    }
+
+    template<class BtreeInfoType>
+    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, const typename BtreeInfoType::node_base_type* tree, typename BtreeInfoType::key_type key) const {
+        return BtreeInfoType::btree_type::lookup(tree, key);
     }
 };
 
 struct btree_cooperative_lookup_algorithm {
-    static constexpr char name[] = "cooperative_lookup";
+    static constexpr const char* name() {
+        return "cooperative_lookup";
+    }
 
-    template<class Key>
-    __device__ __forceinline__ value_t cooperative_lookup(bool active, const NodeBase* tree, Key key) {
-        return btree_t::cooperative_lookup(active, d_tree_, key);
+    template<class BtreeInfoType>
+    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, bool active, const typename BtreeInfoType::node_base_type* tree, typename BtreeInfoType::key_type key) const {
+        return BtreeInfoType::btree_type::cooperative_lookup(active, tree, key);
     }
 };
 
 struct btree_pseudo_cooperative_lookup_algorithm {
-    static constexpr char name[] = "pseudo_ooperative_lookup";
+    static constexpr const char* name() {
+        return "pseudo_ooperative_lookup";
+    }
 
-    template<class Key>
-    __device__ __forceinline__ value_t cooperative_lookup(bool active, const NodeBase* tree, Key key) {
-        return btree_t::lookup(d_tree_, key);
+    template<class BtreeInfoType>
+    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, bool active, const typename BtreeInfoType::node_base_type* tree, typename BtreeInfoType::key_type key) const {
+        return BtreeInfoType::btree_type::lookup(tree, key);
     }
 };
 
@@ -72,10 +87,12 @@ template<class Key, class Value, template<class T> class DeviceAllocator, templa
 struct btree_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
+    using index_configuration_t = IndexConfiguration;
 
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
     using btree_t = index_structures::btree<key_t, value_t, HostAllocator, invalid_tid>;
+    using btree_info_type = btree_info<btree_t>;
 
     btree_t h_tree_;
     device_array_wrapper<typename btree_t::page> h_guard;
@@ -83,14 +100,16 @@ struct btree_index : public abstract_index<Key> {
     struct device_index_t {
         const typename btree_t::NodeBase* d_tree_;
 
+        static constexpr btree_info_type btree_info_inst{};
+
         __device__ __forceinline__ value_t lookup(const key_t key) const {
             static const typename IndexConfiguration::lookup_algorithm_type lookup_algorithm{};
-            return lookup_algorithm(d_tree, key);
+            return lookup_algorithm(btree_info_inst, d_tree_, key);
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            static const typename IndexConfiguration::cooperative_lower_bound_algorithm_type lookup_algorithm{};
-            return lookup_algorithm(active, d_tree_, key);
+            static const typename IndexConfiguration::cooperative_lookup_algorithm_type lookup_algorithm{};
+            return lookup_algorithm(btree_info_inst, active, d_tree_, key);
         }
     } device_index;
 
@@ -121,10 +140,13 @@ struct type_name<btree_index<Key, Value, DeviceAllocator, HostAllocator>> {
 
 template<class SearchAlgorithm>
 struct pseudo_cooperative_lower_bound_search_algorithm {
-    static constexpr char name[] = "pseudo_ooperative_lower_bound_search";
+    //static constexpr char name[] = "pseudo_ooperative_lower_bound_search";
+    static constexpr const char* name() {
+        return "pseudo_ooperative_lower_bound_search";
+    }
 
     template<class T1, class T2, class Compare = device_less<T1>>
-    __device__ __forceinline__ device_size_t operator() (const T1& key, const T2* arr, const device_size_t size, Compare cmp = device_less<T1>{}) const {
+    __device__ __forceinline__ device_size_t operator() (bool active, const T1& x, const T2* arr, const device_size_t size, Compare cmp = device_less<T1>{}) const {
         static const SearchAlgorithm search_algorithm{};
         return search_algorithm(x, arr, size);
     }
@@ -139,6 +161,7 @@ template<class Key, class Value, template<class T> class DeviceAllocator, templa
 struct radix_spline_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
+    using index_configuration_t = IndexConfiguration;
 
     static_assert(sizeof(value_t) <= sizeof(device_size_t));
 
@@ -274,7 +297,10 @@ struct type_name<harmonia_index<Key, Value, DeviceAllocator, HostAllocator>> {
 
 template<class SearchAlgorithm>
 struct pseudo_cooperative_search_algorithm {
-    static constexpr char name[] = "pseudo_cooperative_search";
+    //static constexpr char name[] = "pseudo_cooperative_search";
+    static constexpr const char* name() {
+        return "pseudo_cooperative_search";
+    }
 
     template<class T>
     __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
