@@ -120,3 +120,11 @@ struct mmap_allocator {
         p->~T();
     }
 };
+
+template<class T, page_type PageType, unsigned NumaNode>
+struct type_name<mmap_allocator<T, PageType, NumaNode>> {
+    static const char* value() {
+        return "mmap_allocator";
+    }
+};
+
