@@ -675,6 +675,7 @@ struct ij_partitioning_approach {
         // calculate radix partition kernel shared memory requirement
         const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
+        // regarding the use of 64 bit keys, see the not in tpch_14_ij_partitioning.cuh
         static_assert(std::is_same<partitioning_indexed_t, int64_t>::value);
         static_assert(std::is_same<partitioning_payload_t, int64_t>::value);
         //gpu_chunked_radix_partition_int64_int64<<<grid_size, config.block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);

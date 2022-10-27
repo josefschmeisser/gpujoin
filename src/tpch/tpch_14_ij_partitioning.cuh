@@ -12,6 +12,7 @@ struct materialized_tuple {
     std::remove_pointer<decltype(lineitem_table_plain_t::l_extendedprice)>::type summand;
 };
 
+// Note: we use 64 bit keys here because the payload also has 64 bit and both types are required to have the same width
 using partitioning_indexed_t = int64_t;
 static_assert(sizeof(partitioning_indexed_t) >= sizeof(decltype(materialized_tuple::l_partkey)));
 
