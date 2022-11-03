@@ -186,16 +186,13 @@ static void add_index_configuration_description(std::vector<std::pair<std::strin
 
     switch (parse_index_type(config.index_type)) {
         case index_type_enum::btree:
-            //pairs.emplace_back("index_search_algorithm", std::string(btree_type::index_configuration_t::lookup_algorithm_type::name));
-            pairs.emplace_back("index_cooperative_lookup_algorithm", std::string(btree_type::index_configuration_t::cooperative_lookup_algorithm_type::name()));
+            pairs.emplace_back("index_lookup_algorithm", std::string(btree_type::index_configuration_t::cooperative_lookup_algorithm_type::name()));
             break;
         case index_type_enum::lower_bound:
-            //pairs.emplace_back("index_search_algorithm", std::string(lower_bound_type::index_configuration_t::search_algorithm::name));
-            pairs.emplace_back("index_cooperative_search_algorithm", std::string(lower_bound_type::index_configuration_t::cooperative_search_algorithm_type::name()));
+            pairs.emplace_back("index_search_algorithm", std::string(lower_bound_type::index_configuration_t::cooperative_search_algorithm_type::name()));
             break;
         case index_type_enum::radix_spline:
-            //pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::lower_bound_search_algorithm_type::name));
-            pairs.emplace_back("index_cooperative_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name()));
+            pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name()));
             break;
     }
 }
