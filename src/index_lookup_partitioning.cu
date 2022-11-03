@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include <cub/util_debug.cuh>
@@ -68,7 +70,7 @@ void dump_offsets(const partition_offsets& offsets) {
 struct stream_state {
     cudaStream_t stream;
 
-    size_t num_lookups;
+    uint32_t num_lookups;
 
     device_array_wrapper<int32_t> d_payloads;
     device_array_wrapper<value_t> d_dst_tids;
@@ -84,7 +86,7 @@ struct stream_state {
     std::unique_ptr<PartitionedLookupArgs> partitioned_lookup_args;
 };
 
-std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, size_t num_lookups, value_t* d_dst_tids) {
+std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, uint32_t num_lookups, value_t* d_dst_tids) {
     device_exclusive_allocator<int> device_allocator;
     auto state = std::make_unique<stream_state>();
     CubDebugExit(cudaStreamCreate(&state->stream));
@@ -159,7 +161,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
 }
 
 template<class IndexStructureType>
-__global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const Tuple<index_key_t, int32_t>* __restrict__ relation, value_t* __restrict__ tids) {
+__global__ void lookup_kernel(const IndexStructureType index_structure, device_size_t n, const Tuple<index_key_t, int32_t>* __restrict__ relation, value_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -319,11 +321,11 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 #endif
 
     // calculate radix partition kernel shared memory requirement
-    const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
+    //const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
-    //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, required_shared_mem_bytes_2, state.stream>>>(*state.radix_partition_args);
-    //gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
-    gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
+    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    //gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
 
 #ifdef DEBUG_INTERMEDIATE_STATE
     cudaDeviceSynchronize();
@@ -418,9 +420,12 @@ void partitioning_approach<IndexType>::operator()(query_data& d) {
         grid_size = device_properties.multiProcessorCount;
     }
 
+    if (config.num_lookups >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("config.num_lookups >= std::numeric_limits<uint32_t>::max()");
+    }
     size_t remaining = config.num_lookups;
     size_t max_stream_portion = (config.num_lookups + num_streams) / num_streams;
-    printf("ALIGN_BYTES: %u\n", ALIGN_BYTES);
+    //printf("ALIGN_BYTES: %u\n", ALIGN_BYTES);
     max_stream_portion = (max_stream_portion + ALIGN_BYTES - 1) & -ALIGN_BYTES;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
