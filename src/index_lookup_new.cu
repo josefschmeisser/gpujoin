@@ -181,7 +181,7 @@ struct search_algorithm_name {
 };
 */
 
-static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs) {
+static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs, const query_data& qd) {
     const auto& config = get_experiment_config();
 
     switch (parse_index_type(config.index_type)) {
@@ -195,6 +195,8 @@ static void add_index_configuration_description(std::vector<std::pair<std::strin
             pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name()));
             break;
     }
+
+    pairs.emplace_back("index_size", std::to_string(qd.index_structure->memory_consumption()));
 }
 
 static void create_common_experiment_description_pairs_2(std::vector<std::pair<std::string, std::string>>& pairs) {
@@ -222,7 +224,7 @@ static void create_common_experiment_description_pairs_2(std::vector<std::pair<s
     }
 }
 
-static measuring::experiment_description create_experiment_description() {
+static measuring::experiment_description create_experiment_description(const query_data& qd) {
     const auto& config = get_experiment_config();
 
     experiment_description r;
@@ -230,7 +232,7 @@ static measuring::experiment_description create_experiment_description() {
     r.approach = config.approach;
 
     create_common_experiment_description_pairs_2(r.other);
-    add_index_configuration_description(r.other);
+    add_index_configuration_description(r.other, qd);
 
     return r;
 }
@@ -240,7 +242,7 @@ void execute_approach(std::string approach_name) {
 
     query_data qd;
 
-    const auto experiment_desc = create_experiment_description();
+    const auto experiment_desc = create_experiment_description(qd);
     index_type_enum index_type = parse_index_type(config.index_type);
     measure(experiment_desc, [&](auto& measurement) {
         approaches.at(approach_name)->run(qd, index_type);
@@ -263,7 +265,6 @@ int main(int argc, char** argv) {
     measuring_config.dest_file = "index_scan_results.yml";
     measuring_config.stdout_only = true;
     measuring_config.repetitions = 10;
-    const auto experiment_desc = create_experiment_description();
 /*
     if (config.execute_predefined_scenario) {
         execute_benchmark_scenario();
@@ -273,6 +274,7 @@ int main(int argc, char** argv) {
     execute_benchmark_scenario(config.scenario);
 
 #if 0
+    const auto experiment_desc = create_experiment_description();
     // TODO port
     std::unique_ptr<value_t[]> h_tids;
     if /*constexpr*/ (activeLanes < 32) {
