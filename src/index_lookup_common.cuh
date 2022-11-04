@@ -62,11 +62,11 @@ void populate_uniformly(VectorType& v, uint64_t limit) {
 
 template<class T, class VectorType>
 void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
-    const std::size_t upper_limit = 1ul << (max_bits - 1u);
-
-    if (v.size()*2 > upper_limit) {
-        throw std::runtime_error("todo");
+    if (max_bits < std::log2(2*v.size())) {
+        // increase sparsity by providing a larger value for max_bits
+        throw std::runtime_error("not sparse enough");
     }
+    const std::size_t upper_limit = 1ul << (max_bits - 1u);
 
     // TODO: consider https://stackoverflow.com/a/6953958
 
@@ -103,7 +103,7 @@ void populate_with_zipfian_pattern(VectorType& v, uint64_t limit, double zipf_fa
 
 template<class KeyType, class VectorType>
 void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, lookup_pattern_type lookup_pattern, double zipf_factor, VectorType& lookups) {
-    const std::size_t upper_limit = 1ul << (max_bits - 1u);
+    const std::size_t upper_limit = (max_bits > 0) ? (1ul << (max_bits - 1u)) : std::numeric_limits<KeyType>::max();
 
     if (keys.size() - 1 > upper_limit) {
         throw std::runtime_error("resulting dataset would exceed the provided limit defined by 'max_bits'");
