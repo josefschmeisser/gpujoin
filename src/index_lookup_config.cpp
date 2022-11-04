@@ -38,6 +38,7 @@ void parse_options(int argc, char** argv) {
         ("d,dataset", "Index dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.dataset)))
         ("p,lookup_pattern", "Lookup dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.lookup_pattern)))
         ("s,sorted_lookups", "Pre-sort the lookup dataset", cxxopts::value<bool>()->default_value(tmpl_to_string(config.sorted_lookups)))
+        ("o,output", "File to write results into", cxxopts::value<std::string>()->default_value(config.output_file))
         ("h,help", "Print usage")
     ;
 
@@ -57,6 +58,7 @@ void parse_options(int argc, char** argv) {
     config.max_bits = result["maxbits"].as<unsigned>();
     config.zipf_factor = result["zipf"].as<double>();
     config.sorted_lookups = result["sorted_lookups"].as<bool>();
+    config.output_file = result["output"].as<std::string>();
 
     // parse dataset type
     const auto dataset_str = result["dataset"].as<std::string>();

@@ -262,8 +262,12 @@ int main(int argc, char** argv) {
 
     // set-up the measuring utility
     auto& measuring_config = measuring::get_settings();
-    measuring_config.dest_file = "index_scan_results.yml";
-    measuring_config.stdout_only = true;
+    if (!config.output_file.empty()) {
+        measuring_config.stdout_only = false;
+        measuring_config.dest_file = config.output_file;
+    } else {
+        measuring_config.stdout_only = true;
+    }
     measuring_config.repetitions = 10;
 /*
     if (config.execute_predefined_scenario) {

@@ -16,9 +16,10 @@ struct experiment_config {
     std::string approach = "plain";
     std::string index_type = "btree";
     std::string scenario = "single";
+    std::string output_file = "";
     uint64_t num_lookups = 1e8;
     uint64_t num_elements = 1e6;
-    unsigned max_bits = 24;
+    unsigned max_bits = 0;
     double zipf_factor = 1.25;
     int block_size = 128;
     dataset_type dataset = dataset_type::sparse;
