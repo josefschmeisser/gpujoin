@@ -27,8 +27,12 @@ struct experiment_config {
 };
 
 // types
+/*
 using index_key_t = uint32_t;
 using value_t = uint32_t;
+*/
+using index_key_t = uint64_t;
+using value_t = uint64_t;
 
 // allocators:
 

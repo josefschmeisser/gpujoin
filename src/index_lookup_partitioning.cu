@@ -36,7 +36,10 @@
 
 using namespace measuring;
 
-static const int num_streams = 2;//2;
+using dummy_payload_t = index_key_t; // the payload is not used
+using rel_tuple_t = Tuple<index_key_t, dummy_payload_t>;
+
+static const int num_streams = 2;
 static const int block_size = 128;// 64;
 static int grid_size = 0;//1;
 static const uint32_t radix_bits = 11;// 10;
@@ -72,14 +75,14 @@ struct stream_state {
 
     uint32_t num_lookups;
 
-    device_array_wrapper<int32_t> d_payloads;
+    device_array_wrapper<dummy_payload_t> d_payloads;
     device_array_wrapper<value_t> d_dst_tids;
     device_array_wrapper<uint32_t> d_task_assignments;
 
     device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
     partition_offsets partition_offsets_inst;
-    partitioned_relation<Tuple<index_key_t, int32_t>> partitioned_relation_inst;
+    partitioned_relation<rel_tuple_t> partitioned_relation_inst;
 
     std::unique_ptr<PrefixSumArgs> prefix_sum_and_copy_args;
     std::unique_ptr<RadixPartitionArgs> radix_partition_args;
@@ -95,7 +98,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
 
     // initialize payloads
     {
-        std::vector<int32_t> payloads;
+        std::vector<dummy_payload_t> payloads;
         payloads.resize(num_lookups);
         std::iota(payloads.begin(), payloads.end(), 0);
         state->d_payloads = create_device_array_from(payloads, device_allocator);
@@ -109,7 +112,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
     state->d_prefix_scan_state = create_device_array<ScanState<unsigned long long>>(prefix_scan_state_len);
 
     state->partition_offsets_inst = partition_offsets(grid_size, radix_bits, device_allocator);
-    state->partitioned_relation_inst = partitioned_relation<Tuple<index_key_t, int32_t>>(num_lookups, grid_size, radix_bits, device_allocator);
+    state->partitioned_relation_inst = partitioned_relation<rel_tuple_t>(num_lookups, grid_size, radix_bits, device_allocator);
 
     state->prefix_sum_and_copy_args = std::unique_ptr<PrefixSumArgs>(new PrefixSumArgs {
         // Inputs
@@ -161,7 +164,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
 }
 
 template<class IndexStructureType>
-__global__ void lookup_kernel(const IndexStructureType index_structure, device_size_t n, const Tuple<index_key_t, int32_t>* __restrict__ relation, value_t* __restrict__ tids) {
+__global__ void lookup_kernel(const IndexStructureType index_structure, device_size_t n, const rel_tuple_t* __restrict__ relation, value_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -291,7 +294,6 @@ bool validate_results(const std::vector<index_key_t>& lookup_keys, const Indexed
     return valid;
 }
 
-
 template<class IndexStructureType>
 void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties) {
     // calculate prefix sum kernel shared memory requirement
@@ -305,15 +307,34 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     void* args[1];
     args[0] = state.prefix_sum_and_copy_args.get();
 
-    // calculate prefix sum
-    CubDebugExit(cudaLaunchCooperativeKernel(
-        (void*)gpu_contiguous_prefix_sum_int32,
-        dim3(grid_size),
-        dim3(block_size),
-        args,
-        required_shared_mem_bytes,
-        state.stream
-    ));
+    //if constexpr (sizeof(index_key_t) == 4) {
+    // 32 bit version
+    execute_if<sizeof(index_key_t) == 4>::execute([&]() {
+        //printf("execute: gpu_contiguous_prefix_sum_int32\n");
+        // calculate prefix sum
+        CubDebugExit(cudaLaunchCooperativeKernel(
+            (void*)gpu_contiguous_prefix_sum_int32,
+            dim3(grid_size),
+            dim3(block_size),
+            args,
+            required_shared_mem_bytes,
+            state.stream
+        ));
+    });
+    // 64 bit version
+    execute_if<sizeof(index_key_t) == 8>::execute([&]() {
+        //printf("execute: gpu_contiguous_prefix_sum_int64\n");
+        // calculate prefix sum
+        CubDebugExit(cudaLaunchCooperativeKernel(
+            (void*)gpu_contiguous_prefix_sum_int64,
+            dim3(grid_size),
+            dim3(block_size),
+            args,
+            required_shared_mem_bytes,
+            state.stream
+        ));
+    });
+
 #ifdef DEBUG_INTERMEDIATE_STATE
     cudaDeviceSynchronize();
     auto r = state.partition_offsets_inst.offsets.to_host_accessible();
@@ -321,11 +342,18 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 #endif
 
     // calculate radix partition kernel shared memory requirement
-    //const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
-
-    //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
-    gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
-    //gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    // 32 bit version
+    execute_if<sizeof(index_key_t) == 4>::execute([&]() {
+        //gpu_chunked_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
+        gpu_chunked_laswwc_radix_partition_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        //gpu_chunked_sswwc_radix_partition_v2_int32_int32<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    });
+    // 64 bit version
+    execute_if<sizeof(index_key_t) == 8>::execute([&]() {
+        //gpu_chunked_radix_partition_int64_int64<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args);
+        gpu_chunked_laswwc_radix_partition_int64_int64<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+        //gpu_chunked_sswwc_radix_partition_v2_int64_int64<<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(*state.radix_partition_args, device_properties.sharedMemPerBlock);
+    });
 
 #ifdef DEBUG_INTERMEDIATE_STATE
     cudaDeviceSynchronize();
@@ -340,7 +368,7 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     dump_task_assignments(state);
 #endif
 
-    partitioned_lookup_kernel<Tuple<index_key_t, int32_t>><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
+    partitioned_lookup_kernel<rel_tuple_t><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
 }
 
 template<class IndexType>

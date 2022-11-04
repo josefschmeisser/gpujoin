@@ -133,3 +133,21 @@ struct type_name<std::allocator<T>> {
         return "std::allocator";
     }
 };
+
+template<bool condition>
+struct execute_if {
+};
+
+template<>
+struct execute_if<false> {
+    template<class Func>
+    static void execute(Func&& f) {}
+};
+
+template<>
+struct execute_if<true> {
+    template<class Func>
+    static void execute(Func&& f) {
+        f();
+    }
+};
