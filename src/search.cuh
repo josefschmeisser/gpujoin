@@ -253,11 +253,13 @@ __device__ device_size_t cooperative_linear_search(bool active, T x, const T* ar
     return lower_bound;
 }
 
+/*
 template<unsigned... Is>
 __device__ constexpr auto split_impl(std::integer_sequence<unsigned, Is...> s, unsigned window_size) {// -> std::array<unsigned, s.size()> {
-    std::array<int, s.size()> offsets{};
+    std::array<unsigned, sizeof...(Is)> offsets{};
     //((offsets[Is] = Is*window_size/s.size()), ...);
-    (void) (int[]) {(offsets[Is] = Is*window_size/s.size(), 0)...};
+    //(void) (int[]) {(offsets[Is] = Is*window_size/s.size(), 0)...};
+    (void) (int[]) {(offsets[Is] = Is*window_size/sizeof...(Is), 0)...};
     return offsets;
 }
 
@@ -266,13 +268,37 @@ __device__ constexpr std::array<unsigned, Co_Op_Extent> split() {
     return split_impl(std::make_integer_sequence<unsigned, Co_Op_Extent>{}, WindowSize);
 }
 
+template<class T, size_t size>
+__device__ const T& array_at(const std::array<T, size>& a, size_t idx) {
+    return *(reinterpret_cast<const T*>(&a));
+}
+*/
+
+template<unsigned Co_Op_Extent, unsigned WindowLength>
+struct splitter {
+    __device__ constexpr splitter() : arr() {
+        const unsigned step = WindowLength/Co_Op_Extent;
+        for (unsigned i = 0; i < Co_Op_Extent; ++i) {
+            arr[i] = i*step;
+        }
+    }
+
+    __device__ constexpr unsigned operator[] (unsigned pos) const {
+        return arr[pos];
+    }
+
+    unsigned arr[Co_Op_Extent];
+};
+
 template<class T, unsigned Co_Op_Extent, unsigned WindowSize>
 __device__ __forceinline__ device_size_t cooperative_binary_search_stride(T x, const T* arr, const device_size_t size, const uint32_t group_mask) {
     const unsigned my_lane_id = lane_id();
     const unsigned thread_offset = my_lane_id - __ffs(group_mask);
-    static constexpr auto window_offsets = split<Co_Op_Extent, WindowSize/sizeof(T)>();
-    static constexpr auto window_offset = window_offsets[thread_offset];
-
+    //constexpr auto window_offsets = split<Co_Op_Extent, WindowSize/sizeof(T)>();
+    //static const std::array<unsigned, Co_Op_Extent> window_offsets{}; // split<Co_Op_Extent, WindowSize/sizeof(T)>();
+    constexpr auto window_offsets = splitter<Co_Op_Extent, WindowSize/sizeof(T)>();
+    const auto window_offset = window_offsets[thread_offset]; // array_at(window_offsets, thread_offset);// window_offsets[thread_offset];
+    printf("lane: %u offset: %u\n", my_lane_id, window_offset);
     uint32_t matches_mask = 0u;
     device_size_t lower = 0;
     device_size_t count = size;
@@ -295,6 +321,7 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(T x, c
     }
 
     count = window_offsets[__clz(matches_mask) - __clz(group_mask)];
+    // TODO count = array_at(window_offsets, __clz(matches_mask) - __clz(group_mask));
     return branch_free_binary_search(x, arr + lower, count);
 
     // alternatively: linear search with all threads
@@ -335,3 +362,14 @@ __device__ device_size_t cooperative_binary_search(bool active, T x, const T* ar
     assert(!active || lower_bound >= size || arr[lower_bound] >= x);
     return lower_bound;
 }
+
+struct cooperative_binary_search_algorithm {
+    static constexpr const char* name() {
+        return "cooperative_binary_search";
+    }
+
+    template<class T>
+    __device__ __forceinline__ device_size_t operator() (bool active, T x, const T* arr, const device_size_t size) const {
+        return cooperative_binary_search(active, x, arr, size);
+    }
+};
