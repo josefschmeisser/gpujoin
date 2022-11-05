@@ -148,6 +148,7 @@ __device__ device_size_t branch_free_binary_search(T x, const T* arr, const devi
     device_size_t ret = (arr[mid] < x) * (size - mid);
     for (unsigned step = 1; step <= steps; ++step) {
         mid >>= 1;
+        assert(ret + mid < size);
         ret += (arr[ret + mid] < x) ? mid : 0;
     }
     ret += (arr[ret] < x) ? 1 : 0;
@@ -294,7 +295,7 @@ struct splitter {
 
 template<class T, unsigned Co_Op_Extent, unsigned WindowSize>
 __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool is_leader, T x, const T* arr, const device_size_t size, const uint32_t group_mask) {
-printf("input array %p\n", arr);
+//printf("input array %p\n", arr);
 //assert(arr & (__ffs(sizeof(T)) - 1) == 0);
     const unsigned my_lane_id = lane_id();
     const unsigned thread_offset = my_lane_id - (__ffs(group_mask) - 1);
@@ -303,7 +304,7 @@ printf("input array %p\n", arr);
     constexpr unsigned window_length = WindowSize/sizeof(T);
     constexpr auto window_offsets = splitter<Co_Op_Extent, WindowSize/sizeof(T)>();
     const unsigned thread_window_offset = window_offsets[thread_offset]; // array_at(window_offsets, thread_offset);// window_offsets[thread_offset];
-printf("lane: %u thread_window_offset: %u\n", my_lane_id, thread_window_offset);
+//printf("lane: %u thread_window_offset: %u\n", my_lane_id, thread_window_offset);
 
     uint32_t matches_mask = 0u;
     device_size_t lower = 0;
@@ -320,11 +321,11 @@ max_stream_portion = (max_stream_portion + ALIGN_BYTES - 1) & -ALIGN_BYTES;
         //const device_size_t pos = min(window_offset + mid - (mid & WindowSize), size - 1); // align to cache line boundary // TODO check
        // const device_size_t pos = min(window_offset + mid, size - 1); // align to cache line boundary // TODO check
 
-printf("lane: %u: step: %lu, original_mid: %lu, mid: %lu\n", my_lane_id, step, lower + step, mid);
+//printf("lane: %u: step: %lu, original_mid: %lu, mid: %lu\n", my_lane_id, step, lower + step, mid);
         const auto lane_mid = min(mid + thread_window_offset, size - 1);
         const auto r = arr[lane_mid] < x; // TODO cmp(arr[pos], x);
         matches_mask = __ballot_sync(group_mask, r);
-if (thread_offset == 0) printf("lane: %u: group_mask: %x, matches_mask: %x\n", my_lane_id, group_mask, matches_mask);
+//if (thread_offset == 0) printf("lane: %u: group_mask: %x, matches_mask: %x\n", my_lane_id, group_mask, matches_mask);
         if (matches_mask == group_mask) {
             lower = mid + window_length;
             count -= step + 1;
@@ -337,21 +338,34 @@ if (thread_offset == 0) printf("lane: %u: group_mask: %x, matches_mask: %x\n", m
         }
 //break;
     }
-
+/*
 //    count = window_offsets[__clz(matches_mask) - __clz(group_mask)];
 //const unsigned first_matching_lane = __clz(matches_mask) - __clz(group_mask);
 //const unsigned first_matching_lane = __ffs(group_mask) - __ffs(matches_mask);
 const unsigned first_matching_lane = (Co_Op_Extent - 1) - (__clz(matches_mask) - __clz(group_mask));
-count = window_offsets[first_matching_lane + 1]; // use sentinel if necessary
-printf("lane: %u: first_matching_lane: %u, count: %u, lower: %lu\n", my_lane_id, first_matching_lane, count, lower);
+count = window_offsets[first_matching_lane + 1]; // advance to the first missmatch; use sentinel if necessary
+//printf("lane: %u: first_matching_lane: %u, count: %u, lower: %lu\n", my_lane_id, first_matching_lane, count, lower);
     // TODO count = array_at(window_offsets, __clz(matches_mask) - __clz(group_mask));
 
     if (is_leader) {
+assert(lower + count <= size);
         //lower = lower + branch_free_binary_search(x, arr + lower, size - lower);
         lower = lower + branch_free_binary_search(x, arr + lower, count);
-printf("lane: %u: x: %lu, lower: %lu, arr[lower]: %lu\n", my_lane_id, x, lower, arr[lower]);
+//printf("lane: %u: x: %lu, lower: %lu, arr[lower]: %lu\n", my_lane_id, x, lower, arr[lower]);
         assert(arr[lower] == x);
     }
+*/
+
+    if (is_leader) {
+const unsigned first_matching_lane = (Co_Op_Extent - 1) - (__clz(matches_mask) - __clz(group_mask));
+lower += window_offsets[first_matching_lane];
+device_size_t upper = window_offsets[first_matching_lane + 1]; // advance to the first missmatch; use sentinel if necessary
+upper = min(size - lower, upper);
+//printf("lane: %u: x: %lu, arr[lower]: %lu, arr[upper]: %lu\n", my_lane_id, x, arr[lower + bound_l], arr[lower + upper]);
+lower = lower + linear_search(x, arr + lower, upper);
+        assert(arr[lower] == x);
+    }
+    
     return lower;
 
     // alternatively: linear search with all threads
@@ -372,7 +386,7 @@ __device__ device_size_t cooperative_binary_search(bool active, T x, const T* ar
     assert(my_lane_id >= first_thread);
     const int lane_offset = my_lane_id - first_thread;
 
-    printf("lane: %u x: %lu\n", my_lane_id, x);
+//printf("lane: %u x: %lu\n", my_lane_id, x);
     for (unsigned shift = 0; shift < THREAD_GROUP_SIZE; ++shift) {
         // advance leader position within thread group
         const unsigned leader = first_thread + shift;
