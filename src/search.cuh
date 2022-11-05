@@ -295,7 +295,6 @@ struct splitter {
 
 template<class T, unsigned Co_Op_Extent, unsigned WindowSize>
 __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool is_leader, T x, const T* arr, const device_size_t size, const uint32_t group_mask) {
-//printf("input array %p\n", arr);
     // validate alignment
     assert((reinterpret_cast<uintptr_t>(arr) & (sizeof(T) - 1)) == 0);
 
@@ -321,7 +320,7 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool i
         matches_mask = __ballot_sync(group_mask, r);
 //if (thread_offset == 0) printf("lane: %u: group_mask: %x, matches_mask: %x\n", my_lane_id, group_mask, matches_mask);
         if (matches_mask == group_mask) {
-            lower = mid + window_length;
+            lower = mid + window_length; // Note: window_offsets[-1] always references the very last element in the window
             count -= step + 1;
         } else if (matches_mask == 0u) {
             count = step;
@@ -331,23 +330,19 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool i
             break;
         }
     }
-/*
-    if (count == 0) {
-        return lower;
-    }
-*/
+
     assert(count > 0 || matches_mask == 0);
 
     if (is_leader && count > 0) {
 //printf("lane: %u: count: %lu, group_mask: %x, matches_mask: %x\n", my_lane_id, count, group_mask, matches_mask);
         const unsigned first_matching_lane = (Co_Op_Extent - 1) - (__clz(matches_mask) - __clz(group_mask)); // FIXME edge case with matches_mask = 0
-        const unsigned first_matching_lane_2 = __ffs(matches_mask ^ group_mask) - __ffs(group_mask);
+        //const unsigned first_matching_lane_2 = __ffs(matches_mask ^ group_mask) - __ffs(group_mask);
 //printf("lane: %u: 1: %u 2: %u\n", my_lane_id, first_matching_lane, first_matching_lane_2);
         lower += window_offsets[first_matching_lane];
         device_size_t upper = window_offsets[first_matching_lane + 1]; // advance to the first missmatch; use sentinel if necessary
         upper = min(size - lower, upper);
         lower = lower + linear_search(x, arr + lower, upper);
-        assert(arr[lower] == x);
+        //assert(arr[lower] == x);
     }
     
     return lower;
@@ -356,19 +351,17 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool i
 }
 
 
-template<class T, unsigned Co_Op_Degree = 3, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
+template<class T, unsigned Co_Op_Degree = 2, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
 __device__ device_size_t cooperative_binary_search(bool active, T x, const T* arr, const device_size_t size) {
     enum { THREAD_GROUP_SIZE  = 1 << Co_Op_Degree };
 
     const unsigned my_lane_id = lane_id();
     unsigned first_thread = THREAD_GROUP_SIZE*(my_lane_id >> Co_Op_Degree);
+    assert(my_lane_id >= first_thread);
+
     device_size_t lower_bound = size;
     const uint32_t group_mask = __funnelshift_l(FULL_MASK, 0, THREAD_GROUP_SIZE) << first_thread;
-
     //static constexpr uint32_t group_mask = ((1u << THREAD_GROUP_SIZE) - 1u) << leader;
-
-    assert(my_lane_id >= first_thread);
-    const int lane_offset = my_lane_id - first_thread;
 
 //printf("lane: %u x: %lu\n", my_lane_id, x);
     for (unsigned shift = 0; shift < THREAD_GROUP_SIZE; ++shift) {
@@ -377,7 +370,6 @@ __device__ device_size_t cooperative_binary_search(bool active, T x, const T* ar
         const auto leader_active = __shfl_sync(group_mask, active, leader);
         if (!leader_active) continue;
 
-//        int key_idx = lane_offset - THREAD_GROUP_SIZE;
         const T leader_x = __shfl_sync(group_mask, x, leader);
         const T* leader_arr = reinterpret_cast<const T*>(__shfl_sync(group_mask, reinterpret_cast<uint64_t>(arr), leader));
         const device_size_t leader_size = __shfl_sync(group_mask, size, leader);
@@ -387,10 +379,8 @@ __device__ device_size_t cooperative_binary_search(bool active, T x, const T* ar
         if (is_leader) {
             lower_bound = leader_lower_bound;
         }
-
-        //break;
     }
-//assert(arr[lower_bound] == x);
+
     assert(!active || lower_bound <= size || arr[lower_bound] >= x);
     return lower_bound;
 }
