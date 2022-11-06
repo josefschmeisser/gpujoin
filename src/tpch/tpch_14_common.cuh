@@ -20,7 +20,7 @@ using tid_t = uint32_t;
 // index structure types:
 using btree_type = btree_index<indexed_t, tid_t, device_index_allocator, host_allocator>;
 using harmonia_type = harmonia_index<indexed_t, tid_t, device_index_allocator, host_allocator>;
-using lower_bound_type = lower_bound_index<indexed_t, tid_t, device_index_allocator, host_allocator>;
+using binary_search_type = binary_search_index<indexed_t, tid_t, device_index_allocator, host_allocator>;
 using radix_spline_type = radix_spline_index<indexed_t, tid_t, device_index_allocator, host_allocator>;
 using no_op_type = no_op_index<indexed_t, tid_t, device_index_allocator, host_allocator>;
 

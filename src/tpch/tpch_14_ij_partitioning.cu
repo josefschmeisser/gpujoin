@@ -238,6 +238,6 @@ __global__ void partitioned_ij_lookup(const partitioned_ij_lookup_args args, con
 
 template __global__ void partitioned_ij_lookup<btree_type::device_index_t>(const partitioned_ij_lookup_args args, const btree_type::device_index_t index_structure);
 template __global__ void partitioned_ij_lookup<harmonia_type::device_index_t>(const partitioned_ij_lookup_args args, const harmonia_type::device_index_t index_structure);
-template __global__ void partitioned_ij_lookup<lower_bound_type::device_index_t>(const partitioned_ij_lookup_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void partitioned_ij_lookup<binary_search_type::device_index_t>(const partitioned_ij_lookup_args args, const binary_search_type::device_index_t index_structure);
 template __global__ void partitioned_ij_lookup<radix_spline_type::device_index_t>(const partitioned_ij_lookup_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void partitioned_ij_lookup<no_op_type::device_index_t>(const partitioned_ij_lookup_args args, const no_op_type::device_index_t index_structure);

@@ -41,7 +41,7 @@ using rel_tuple_t = Tuple<index_key_t, dummy_payload_t>;
 
 static const int num_streams = 2;
 static const int block_size = 128;// 64;
-static int grid_size = 0;//1;
+static int grid_size = 0;
 static const uint32_t radix_bits = 11;// 10;
 static const uint32_t ignore_bits = 4;//3;
 
@@ -414,6 +414,6 @@ void partitioning_approach<IndexType>::operator()(query_data& d) {
 
 template void partitioning_approach<btree_type>::operator()(query_data& d);
 template void partitioning_approach<harmonia_type>::operator()(query_data& d);
-template void partitioning_approach<lower_bound_type>::operator()(query_data& d);
+template void partitioning_approach<binary_search_type>::operator()(query_data& d);
 template void partitioning_approach<radix_spline_type>::operator()(query_data& d);
 template void partitioning_approach<no_op_type>::operator()(query_data& d);

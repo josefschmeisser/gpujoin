@@ -33,7 +33,7 @@ using namespace oneapi::tbb;
 
 using btree_type = btree_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 using harmonia_type = harmonia_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
-using lower_bound_type = lower_bound_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
+using binary_search_type = binary_search_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 using radix_spline_type = radix_spline_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 using no_op_type = no_op_index<index_key_t, value_t, device_index_allocator, host_allocator_t>;
 

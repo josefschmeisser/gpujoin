@@ -83,7 +83,7 @@ __global__ void ij_plain_kernel(const ij_args args, const IndexStructureType ind
 
 template __global__ void ij_plain_kernel<btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
 template __global__ void ij_plain_kernel<harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
-template __global__ void ij_plain_kernel<lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_plain_kernel<binary_search_type::device_index_t>(const ij_args args, const binary_search_type::device_index_t index_structure);
 template __global__ void ij_plain_kernel<radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void ij_plain_kernel<no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
@@ -360,7 +360,7 @@ __global__ void ij_pbws(const ij_args args, const IndexStructureType index_struc
 
 template __global__ void ij_pbws<256, 10, btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
 template __global__ void ij_pbws<256, 10, harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
-template __global__ void ij_pbws<256, 10, lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_pbws<256, 10, binary_search_type::device_index_t>(const ij_args args, const binary_search_type::device_index_t index_structure);
 template __global__ void ij_pbws<256, 10, radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void ij_pbws<256, 10, no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
@@ -404,7 +404,7 @@ __global__ void ij_lookup_kernel(const ij_args args, const IndexStructureType in
 
 template __global__ void ij_lookup_kernel<btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
 template __global__ void ij_lookup_kernel<harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
-template __global__ void ij_lookup_kernel<lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_lookup_kernel<binary_search_type::device_index_t>(const ij_args args, const binary_search_type::device_index_t index_structure);
 template __global__ void ij_lookup_kernel<radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void ij_lookup_kernel<no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 
@@ -560,7 +560,7 @@ __global__ void ij_np_lane_refill_scan_lookup(const ij_args args, const IndexStr
 
 template __global__ void ij_np_lane_refill_scan_lookup<256, btree_type::device_index_t>(const ij_args args, const btree_type::device_index_t index_structure);
 template __global__ void ij_np_lane_refill_scan_lookup<256, harmonia_type::device_index_t>(const ij_args args, const harmonia_type::device_index_t index_structure);
-template __global__ void ij_np_lane_refill_scan_lookup<256, lower_bound_type::device_index_t>(const ij_args args, const lower_bound_type::device_index_t index_structure);
+template __global__ void ij_np_lane_refill_scan_lookup<256, binary_search_type::device_index_t>(const ij_args args, const binary_search_type::device_index_t index_structure);
 template __global__ void ij_np_lane_refill_scan_lookup<256, radix_spline_type::device_index_t>(const ij_args args, const radix_spline_type::device_index_t index_structure);
 template __global__ void ij_np_lane_refill_scan_lookup<256, no_op_type::device_index_t>(const ij_args args, const no_op_type::device_index_t index_structure);
 

@@ -350,7 +350,6 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool i
     // alternatively: linear search with all threads?
 }
 
-
 template<class T, unsigned Co_Op_Degree = 2, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
 __device__ device_size_t cooperative_binary_search(bool active, T x, const T* arr, const device_size_t size) {
     enum { THREAD_GROUP_SIZE  = 1 << Co_Op_Degree };

@@ -541,10 +541,10 @@ int main(int argc, char** argv) {
     cudaDeviceGetAttribute(&num_sms, cudaDevAttrMultiProcessorCount, 0);// devId);
 
     if (argc < 2) {
-        printf("%s <tpch dataset path> <index type: {0: btree, 1: harmonia, 2: radixspline, 3: lowerbound>\n", argv[0]);
+        printf("%s <tpch dataset path> <index type: {0: btree, 1: harmonia, 2: radix_spline, 3: binary_search>\n", argv[0]);
         return 0;
     }
-    enum IndexType : unsigned { btree, harmonia, radixspline, lowerbound, nop } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
+    enum IndexType : unsigned { btree, harmonia, radix_spline, binary_search, nop } index_type { static_cast<IndexType>(std::stoi(argv[2])) };
 
 #ifdef SKIP_SORT
     std::cout << "skip sort step: yes" << std::endl;
@@ -565,15 +565,15 @@ int main(int argc, char** argv) {
             load_and_run_ij<index_type>(argv[1]);
             break;
         }
-        case IndexType::radixspline: {
-            printf("using radixspline\n");
+        case IndexType::radix_spline: {
+            printf("using radix_spline\n");
             using index_type = radix_spline_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
             load_and_run_ij<index_type>(argv[1]);
             break;
         }
-        case IndexType::lowerbound: {
-            printf("using lower bound search\n");
-            using index_type = lower_bound_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
+        case IndexType::binary_search: {
+            printf("using binar search\n");
+            using index_type = binary_search_index<indexed_t, payload_t, device_index_allocator, host_allocator>;
             load_and_run_ij<index_type>(argv[1]);
             break;
         }

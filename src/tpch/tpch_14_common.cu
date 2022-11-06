@@ -70,8 +70,8 @@ struct query_data {
             case index_type_enum::harmonia:
                 index_structure = std::make_unique<harmonia_type>();
                 break;
-            case index_type_enum::lower_bound:
-                index_structure = std::make_unique<lower_bound_type>();
+            case index_type_enum::binary_search:
+                index_structure = std::make_unique<binary_search_type>();
                 break;
             case index_type_enum::radix_spline:
                 index_structure = std::make_unique<radix_spline_type>();
@@ -140,8 +140,8 @@ struct approach_dispatcher : public abstract_approach_dispatcher {
             case index_type_enum::harmonia:
                 Func<harmonia_type>()(m, d);
                 break;
-            case index_type_enum::lower_bound:
-                Func<lower_bound_type>()(m, d);
+            case index_type_enum::binary_search:
+                Func<binary_search_type>()(m, d);
                 break;
             case index_type_enum::radix_spline:
                 Func<radix_spline_type>()(m, d);

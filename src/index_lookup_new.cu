@@ -61,8 +61,8 @@ void query_data::create_index() {
         case index_type_enum::harmonia:
             index_structure = build_index<index_key_t, harmonia_type>(indexed, d_indexed.data());
             break;
-        case index_type_enum::lower_bound:
-            index_structure = build_index<index_key_t, lower_bound_type>(indexed, d_indexed.data());
+        case index_type_enum::binary_search:
+            index_structure = build_index<index_key_t, binary_search_type>(indexed, d_indexed.data());
             break;
         case index_type_enum::radix_spline:
             index_structure = build_index<index_key_t, radix_spline_type>(indexed, d_indexed.data());
@@ -111,8 +111,8 @@ struct approach_dispatcher : public abstract_approach_dispatcher {
             case index_type_enum::harmonia:
                 Func<harmonia_type>()(d);
                 break;
-            case index_type_enum::lower_bound:
-                Func<lower_bound_type>()(d);
+            case index_type_enum::binary_search:
+                Func<binary_search_type>()(d);
                 break;
             case index_type_enum::radix_spline:
                 Func<radix_spline_type>()(d);
@@ -175,13 +175,6 @@ static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>
     { "partitioning", std::make_shared<approach_dispatcher<partitioning_approach>>() }
 };
 
-/*
-template<class LowerBoundIndex>
-struct search_algorithm_name {
-    static constexpr char value = LowerBoundIndex::index_configuration_t::search_algorithm::name;
-};
-*/
-
 static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs, const query_data& qd) {
     const auto& config = get_experiment_config();
 
@@ -189,11 +182,11 @@ static void add_index_configuration_description(std::vector<std::pair<std::strin
         case index_type_enum::btree:
             pairs.emplace_back("index_lookup_algorithm", std::string(btree_type::index_configuration_t::cooperative_lookup_algorithm_type::name()));
             break;
-        case index_type_enum::lower_bound:
-            pairs.emplace_back("index_search_algorithm", std::string(lower_bound_type::index_configuration_t::cooperative_search_algorithm_type::name()));
+        case index_type_enum::binary_search:
+            pairs.emplace_back("index_search_algorithm", std::string(binary_search_type::index_configuration_t::cooperative_search_algorithm_type::name()));
             break;
         case index_type_enum::radix_spline:
-            pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_lower_bound_search_algorithm_type::name()));
+            pairs.emplace_back("index_search_algorithm", std::string(radix_spline_type::index_configuration_t::cooperative_search_algorithm_type::name()));
             break;
     }
 

@@ -22,7 +22,7 @@ Reads to members of these structs are therefore cached and can futhermore be bro
 */
 
 /*
-enum class index_type_enum : unsigned { btree, harmonia, lower_bound, radix_spline, no_op };
+enum class index_type_enum : unsigned { btree, harmonia, binary_search, radix_spline, no_op };
 
 index_type_enum parse_index_type(const std::string& index_name);
 */
@@ -144,10 +144,8 @@ struct type_name<btree_index<Key, Value, DeviceAllocator, HostAllocator>> {
 };
 
 template<class SearchAlgorithm>
-struct pseudo_cooperative_lower_bound_search_algorithm {
-    //static constexpr char name[] = "pseudo_ooperative_lower_bound_search";
+struct pseudo_cooperative_search_algorithm {
     static constexpr const char* name() {
-        //return "pseudo_cooperative_lower_bound_search";
         return SearchAlgorithm::name();
     }
 
@@ -159,8 +157,8 @@ struct pseudo_cooperative_lower_bound_search_algorithm {
 };
 
 struct default_radix_spline_index_configuration {
-    using lower_bound_search_algorithm_type = branchy_lower_bound_search_algorithm;
-    using cooperative_lower_bound_search_algorithm_type = pseudo_cooperative_lower_bound_search_algorithm<lower_bound_search_algorithm_type>;
+    using search_algorithm_type = branchy_lower_bound_search_algorithm;
+    using cooperative_search_algorithm_type = pseudo_cooperative_search_algorithm<search_algorithm_type>;
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_radix_spline_index_configuration>
@@ -181,26 +179,26 @@ struct radix_spline_index : public abstract_index<Key> {
 
         [[deprecated]]
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            static const typename IndexConfiguration::lower_bound_search_algorithm_type lower_bound_search_algorithm{};
+            static const typename IndexConfiguration::search_algorithm_type search_algorithm{};
 
             const double estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
             const device_size_t begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
             const device_size_t end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
 
             const device_size_t bound_size = end - begin;
-            const device_size_t pos = begin + lower_bound_search_algorithm(key, &d_column_[begin], bound_size);
+            const device_size_t pos = begin + search_algorithm(key, &d_column_[begin], bound_size);
             return (pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            static const typename IndexConfiguration::cooperative_lower_bound_search_algorithm_type lower_bound_search_algorithm{};
+            static const typename IndexConfiguration::cooperative_search_algorithm_type search_algorithm{};
 
             const double estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
             const device_size_t begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
             const device_size_t end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
 
             const device_size_t bound_size = end - begin;
-            const device_size_t pos = begin + lower_bound_search_algorithm(active, key, &d_column_[begin], bound_size);
+            const device_size_t pos = begin + search_algorithm(active, key, &d_column_[begin], bound_size);
             return (active && pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
     } device_index;
@@ -304,10 +302,8 @@ struct type_name<harmonia_index<Key, Value, DeviceAllocator, HostAllocator>> {
 };
 
 template<class SearchAlgorithm>
-struct pseudo_cooperative_search_algorithm {
-    //static constexpr char name[] = "pseudo_cooperative_search";
+struct binary_search_index_pseudo_cooperative_search_algorithm {
     static constexpr const char* name() {
-        //return "pseudo_cooperative_search";
         return SearchAlgorithm::name();
     }
 
@@ -318,15 +314,15 @@ struct pseudo_cooperative_search_algorithm {
     }
 };
 
-struct default_lower_bound_index_configuration {
+struct default_binary_search_index_configuration {
     //using search_algorithm_type = branch_free_binary_search_algorithm;
-    using search_algorithm_type = branchy_binary_search_algorithm;
-    //using cooperative_search_algorithm_type = pseudo_cooperative_search_algorithm<search_algorithm_type>;
+    using search_algorithm_type = branchy_lower_bound_search_algorithm;
+    //using cooperative_search_algorithm_type = binary_search_index_pseudo_cooperative_search_algorithm<search_algorithm_type>;
     using cooperative_search_algorithm_type = cooperative_binary_search_algorithm;
 };
 
-template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_lower_bound_index_configuration>
-struct lower_bound_index : public abstract_index<Key> {
+template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_binary_search_index_configuration>
+struct binary_search_index : public abstract_index<Key> {
     using key_t = Key;
     using value_t = Value;
     using index_configuration_t = IndexConfiguration;
@@ -367,9 +363,9 @@ struct lower_bound_index : public abstract_index<Key> {
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration>
-struct type_name<lower_bound_index<Key, Value, DeviceAllocator, HostAllocator, IndexConfiguration>> {
+struct type_name<binary_search_index<Key, Value, DeviceAllocator, HostAllocator, IndexConfiguration>> {
     static const char* value() {
-        return "lower_bound";
+        return "binary_search";
     }
 };
 
