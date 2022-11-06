@@ -20,6 +20,8 @@ struct abstract_device_array {
 
     abstract_device_array(const abstract_device_array&) = delete;
 
+    virtual ~abstract_device_array() = default;
+
     T* data() { return ptr_; }
 
     T* release() {
@@ -43,7 +45,7 @@ struct device_array : abstract_device_array<T> {
 
     device_array(const device_array&) = delete;
 
-    ~device_array() {
+    ~device_array() override {
         if (this->ptr_) {
             allocator_.deallocate(this->ptr_, sizeof(T)*this->size_);
         }
@@ -57,6 +59,8 @@ struct device_array<T, void> : abstract_device_array<T> {
     using value_type = T;
 
     device_array(T* ptr, size_t size) : abstract_device_array<T>(ptr, size) {}
+
+    ~device_array() override = default;
 
     std::unique_ptr<abstract_device_array<T>> to_host_accessible() const override;
 };
@@ -97,6 +101,8 @@ struct device_array_wrapper {
     device_array_wrapper(T* ptr, size_t size, Allocator allocator) {
         device_array_ = std::make_unique<device_array<T, Allocator>>(ptr, size, allocator);
     }
+
+    ~device_array_wrapper() = default;
 
 private:
     device_array_wrapper(std::unique_ptr<abstract_device_array<T>>&& device_array) {
