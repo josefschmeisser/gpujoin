@@ -673,7 +673,7 @@ struct ij_partitioning_approach {
 #endif
 
         // calculate radix partition kernel shared memory requirement
-        const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
+        //const auto required_shared_mem_bytes_2 = gpu_prefix_sum::fanout(radix_bits) * sizeof(uint32_t);
 
         // regarding the use of 64 bit keys, see the not in tpch_14_ij_partitioning.cuh
         static_assert(std::is_same<partitioning_indexed_t, int64_t>::value);
