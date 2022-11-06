@@ -320,7 +320,7 @@ struct pseudo_cooperative_search_algorithm {
 
 struct default_lower_bound_index_configuration {
     //using search_algorithm_type = branch_free_binary_search_algorithm;
-    //using search_algorithm_type = branchy_binary_search_algorithm;
+    using search_algorithm_type = branchy_binary_search_algorithm;
     //using cooperative_search_algorithm_type = pseudo_cooperative_search_algorithm<search_algorithm_type>;
     using cooperative_search_algorithm_type = cooperative_binary_search_algorithm;
 };

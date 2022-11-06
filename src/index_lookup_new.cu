@@ -34,6 +34,7 @@ query_data::query_data() {
         printf("sorting lookups...\n");
         oneapi::tbb::parallel_sort(lookup_keys.begin(), lookup_keys.end());
     }
+    //std::cout << "lookups: " << stringify(lookup_keys.begin(), lookup_keys.end()) << std::endl;
 
     // allocate result vector
     d_tids = create_device_array<value_t>(config.num_lookups);
