@@ -333,10 +333,11 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool i
 
     assert(count > 0 || matches_mask == 0);
 
-    if (is_leader && count > 0) {
+    if (is_leader && count > 0 && matches_mask != 0) {
 //printf("lane: %u: count: %lu, group_mask: %x, matches_mask: %x\n", my_lane_id, count, group_mask, matches_mask);
-        const unsigned first_matching_lane = (Co_Op_Extent - 1) - (__clz(matches_mask) - __clz(group_mask)); // FIXME edge case with matches_mask = 0
-        //const unsigned first_matching_lane_2 = __ffs(matches_mask ^ group_mask) - __ffs(group_mask);
+        // matches_mask has to be non-zero otherwise the following will produce an arithmetic underflow
+        //const unsigned first_matching_lane = (Co_Op_Extent - 1) - (__clz(matches_mask) - __clz(group_mask));
+        const unsigned first_matching_lane = __ffs(matches_mask ^ group_mask) - __ffs(group_mask) - 1;
 //printf("lane: %u: 1: %u 2: %u\n", my_lane_id, first_matching_lane, first_matching_lane_2);
         lower += window_offsets[first_matching_lane];
         device_size_t upper = window_offsets[first_matching_lane + 1]; // advance to the first missmatch; use sentinel if necessary
