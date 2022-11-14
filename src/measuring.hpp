@@ -24,11 +24,8 @@ struct experiment_description {
 };
 
 struct measurement {
-    //std::string short_commit_hash;
     std::vector<decltype(std::chrono::high_resolution_clock::now())> timestamps;
-    //double full_duration_ms;
-    //uint32_t timestamp;
-    //uint64_t count;
+    std::string str_rep;
 };
 
 measuring_settings& get_settings();
@@ -37,8 +34,12 @@ void write_out_measurement(const experiment_description& d, const measurement& m
 
 void record_timestamp(measurement& m);
 
-template<class Func>
-void measure(const experiment_description& d, Func func) {
+struct nop_validator {
+    bool operator() () { return true; }
+};
+
+template<class Func, class Validator = nop_validator>
+void measure(const experiment_description& d, Func func, Validator validator = nop_validator{}) {
     for (unsigned i = 0; i < warm_up_rounds; ++i) {
         measurement m;
         func(m);
@@ -50,7 +51,11 @@ void measure(const experiment_description& d, Func func) {
         func(m);
         record_timestamp(m);
 
-        write_out_measurement(d, m);
+        if (validator()) {
+            write_out_measurement(d, m);
+        } else {
+            std::cerr << "invalid measurement" << std::endl;
+        }
     }
 };
 

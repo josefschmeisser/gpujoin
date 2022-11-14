@@ -238,11 +238,12 @@ void execute_approach(std::string approach_name) {
 
     const auto experiment_desc = create_experiment_description(qd);
     index_type_enum index_type = parse_index_type(config.index_type);
+    auto validator = [&qd]() {
+        return qd.validate_results();
+    };
     measure(experiment_desc, [&](auto& measurement) {
         approaches.at(approach_name)->run(qd, index_type);
-    });
-
-    qd.validate_results();
+    }, validator);
 }
 
 void execute_benchmark_scenario(std::string scenario) {
