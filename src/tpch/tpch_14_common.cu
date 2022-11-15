@@ -36,6 +36,8 @@ struct query_data {
     part_table_plain_t* part_device;
     std::unique_ptr<part_table_plain_t> part_device_ptrs;
 
+    int64_t result = 0;
+
     void load_database() {
         const auto& config = get_experiment_config();
 
@@ -96,21 +98,23 @@ static const std::map<size_t, int64_t> expected_results {
     { 59986050, 16647594 }
 };
 
-static void validate_results(int64_t r, const query_data& qd) {
+static bool validate_results(const query_data& qd) {
     std::cout << "lineitem_size: " << qd.lineitem_size << std::endl;
     const auto it = expected_results.find(qd.lineitem_size);
     if (it != expected_results.end()) {
-        if (it->second != r) {
+        if (it->second != qd.result) {
             std::cerr << "invalid query result" << std::endl;
-            exit(1);
+            return false;
         }
     } else {
         std::cerr << "unable to validate result" << std::endl;
+        return false;
     }
+    return true;
 }
 
 template<class T>
-void validate_and_print_results(const T& d_mutable_state, const query_data& qd) {
+void process_results(const T& d_mutable_state, query_data& qd) {
     // Fetch result
     const auto r = d_mutable_state.to_host_accessible();
     const auto& state = r.data()[0];
@@ -123,7 +127,8 @@ void validate_and_print_results(const T& d_mutable_state, const query_data& qd) 
     int64_t result = 100*numerator/denominator;
     printf("query result: %ld.%ld\n", result/1'000'000, result%1'000'000);
 
-    validate_results(result, qd);
+    //validate_results(result, qd);
+    qd.result = result;
 }
 
 struct abstract_approach_dispatcher {
@@ -193,7 +198,7 @@ measuring::record_timestamp(m);
         hj_probe_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        validate_and_print_results(d_mutable_state, d);
+        process_results(d_mutable_state, d);
     }
 };
 
@@ -225,7 +230,7 @@ struct ij_plain_approach {
         ij_plain_kernel<<<num_blocks, config.block_size>>>(args, index_structure.device_index);
         cudaDeviceSynchronize();
 
-        validate_and_print_results(d_mutable_state, d);
+        process_results(d_mutable_state, d);
     }
 };
 
@@ -261,7 +266,7 @@ struct ij_pbws_approach {
         ij_pbws<BLOCK_THREADS, ITEMS_PER_THREAD><<<num_blocks, BLOCK_THREADS>>>(args, index_structure.device_index);
         cudaDeviceSynchronize();
 
-        validate_and_print_results(d_mutable_state, d);
+        process_results(d_mutable_state, d);
     }
 };
 
@@ -326,7 +331,7 @@ struct ij_nplfplain_approach {
         ij_join_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        validate_and_print_results(d_mutable_state, d);
+        process_results(d_mutable_state, d);
     }
 };
 
@@ -376,7 +381,7 @@ struct abstract_ij_non_pipelined_approach {
         JoinKernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        validate_and_print_results(d_mutable_state, d);
+        process_results(d_mutable_state, d);
     }*/
 };
 
@@ -438,7 +443,7 @@ struct ij_np_lf_lr_plain_approach : public abstract_ij_non_pipelined_approach<In
         ij_join_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 
-        validate_and_print_results(base_type::d_mutable_state, d);
+        process_results(base_type::d_mutable_state, d);
     }
 };
 
@@ -728,7 +733,7 @@ struct ij_partitioning_approach {
             results.global_denominator += state.global_denominator;
         }
 
-        validate_and_print_results(results, d);
+        process_results(results, d);
     }
 };
 
@@ -793,7 +798,10 @@ void execute_approach(std::string approach_name) {
 
     const auto experiment_desc = create_experiment_description();
     index_type_enum index_type = parse_index_type(config.index_type);
+    auto validator = [&qd]() {
+        return validate_results(qd);
+    };
     measure(experiment_desc, [&](auto& measurement) {
         approaches.at(approach_name)->run(measurement, qd, index_type);
-    });
+    }, validator);
 }
