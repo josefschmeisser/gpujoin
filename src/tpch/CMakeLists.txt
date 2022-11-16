@@ -26,12 +26,13 @@ target_sources(cuda_tpch_14 PRIVATE
     ../indexes.cpp
 )
 set_target_properties(cuda_tpch_14 PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-target_include_directories(cuda_tpch_14 PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
-)
-target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub)
+#target_include_directories(cuda_tpch_14 PUBLIC
+#    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/>
+#    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
+#    #$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
+#    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/contrib/numa-gpu/target/debug/build/sql-ops-750ae6baca9a95b7/out/>
+#)
+target_link_libraries(cuda_tpch_14 tpch_common numa pthread radixspline cub fast_interconnects)
 # additional nvcc flags
 target_compile_options(cuda_tpch_14 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
 #target_compile_options(cuda_tpch_14 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")

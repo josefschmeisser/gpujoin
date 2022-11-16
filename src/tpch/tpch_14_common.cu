@@ -6,7 +6,7 @@
 #include <string>
 #include <memory>
 
-#include <numa-gpu/sql-ops/include/gpu_common.h>
+#include <fast-interconnects/gpu_common.h>
 #include "gpu_radix_partition.cuh"
 
 #include "config.hpp"

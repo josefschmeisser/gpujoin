@@ -1,8 +1,8 @@
 #pragma once
 
-#include <numa-gpu/sql-ops/include/gpu_common.h>
-#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
-#include <numa-gpu/sql-ops/include/prefix_scan_state.h>
+#include <fast-interconnects/gpu_common.h>
+#include <fast-interconnects/gpu_radix_partition.h>
+#include <fast-interconnects/prefix_scan_state.h>
 
 #include "common.hpp"
 #include "tpch_14_common.cuh"

@@ -2,8 +2,8 @@
 #include "gpu_radix_partition.cuh"
 
 // Combine the following two files into this single compilation unit in order to avoid using Relocatable Device Code (-rdc=true).
-#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
-#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
+#include <fast-interconnects_src/gpu_common.cu>
+#include <fast-interconnects_src/radix_partition.cu>
 
 __global__ void partitioned_consumer_assign_tasks(partitioned_consumer_assign_tasks_args args) {
     const auto fanout = 1U << args.radix_bits;

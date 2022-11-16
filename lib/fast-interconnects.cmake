@@ -18,12 +18,14 @@ ExternalProject_Add(
     TIMEOUT 10
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ${CARGO} build --manifest-path=<SOURCE_DIR>/Cargo.toml --target-dir=<BINARY_DIR>
-    INSTALL_COMMAND ""
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E create_symlink <SOURCE_DIR>/sql-ops/include <INSTALL_DIR>/usr/local/include/fast-interconnects
+        COMMAND ${CMAKE_COMMAND} -E create_symlink <SOURCE_DIR>/sql-ops/cudautils <INSTALL_DIR>/usr/local/include/fast-interconnects_src
 )
 
 # Fetch paths
 ExternalProject_Get_Property(fast_interconnects_src SOURCE_DIR)
 ExternalProject_Get_Property(fast_interconnects_src BINARY_DIR)
+ExternalProject_Get_Property(fast_interconnects_src INSTALL_DIR)
 
 #message(STATUS "FAST_INTERCONNECTS INSTALL_DIR: ${INSTALL_DIR} BINARY_DIR: ${BINARY_DIR} SOURCE_DIR: ${SOURCE_DIR}")
 
@@ -31,7 +33,11 @@ ExternalProject_Get_Property(fast_interconnects_src BINARY_DIR)
 file(GLOB_RECURSE GENERATED_HEADERS CONFIGURE_DEPENDS "${BINARY_DIR}/debug/build/sql-ops-*/*.h")
 
 set(FAST_INTERCONNECTS_INCLUDE_DIRS "")
-list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${SOURCE_DIR})
+#list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${SOURCE_DIR})
+#list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${SOURCE_DIR}/sql-ops/include)
+list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${INSTALL_DIR}/usr/local/include)
+# files in fast-interconnects include local one without any prefix, hence we need the following:
+list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${INSTALL_DIR}/usr/local/include/fast-interconnects)
 foreach(_HEADER_FILE ${GENERATED_HEADERS})
     get_filename_component(_DIR ${_HEADER_FILE} PATH)
     #message(STATUS "header: ${_HEADER_FILE} dir: ${_DIR}")

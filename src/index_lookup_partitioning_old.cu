@@ -7,7 +7,7 @@
 
 #include <cub/util_debug.cuh>
 
-#include <numa-gpu/sql-ops/include/gpu_common.h>
+#include <fast-interconnects/gpu_common.h>
 
 #include "cuda_utils.cuh"
 #include "cuda_allocator.hpp"

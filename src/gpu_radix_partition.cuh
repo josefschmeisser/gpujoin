@@ -3,7 +3,7 @@
 #ifdef GPU_CACHE_LINE_SIZE
 #undef GPU_CACHE_LINE_SIZE
 #endif
-#include <gpu_radix_partition.h>
+#include <fast-interconnects/gpu_radix_partition.h>
 
 extern "C" __launch_bounds__(1024, 2) __global__
     void gpu_contiguous_prefix_sum_int32(PrefixSumArgs args);
