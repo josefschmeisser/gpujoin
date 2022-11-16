@@ -23,36 +23,27 @@ ExternalProject_Add(
 )
 
 # Fetch paths
-ExternalProject_Get_Property(fast_interconnects_src SOURCE_DIR)
 ExternalProject_Get_Property(fast_interconnects_src BINARY_DIR)
 ExternalProject_Get_Property(fast_interconnects_src INSTALL_DIR)
 
-#message(STATUS "FAST_INTERCONNECTS INSTALL_DIR: ${INSTALL_DIR} BINARY_DIR: ${BINARY_DIR} SOURCE_DIR: ${SOURCE_DIR}")
-
-# Locate the constants.h header which is auto generated
-file(GLOB_RECURSE GENERATED_HEADERS CONFIGURE_DEPENDS "${BINARY_DIR}/debug/build/sql-ops-*/*.h")
-
+# Collect include directories
 set(FAST_INTERCONNECTS_INCLUDE_DIRS "")
-#list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${SOURCE_DIR})
-#list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${SOURCE_DIR}/sql-ops/include)
 list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${INSTALL_DIR}/usr/local/include)
 # files in fast-interconnects include local one without any prefix, hence we need the following:
 list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${INSTALL_DIR}/usr/local/include/fast-interconnects)
+
+# Locate the constants.h header which is auto generated
+file(GLOB_RECURSE GENERATED_HEADERS CONFIGURE_DEPENDS "${BINARY_DIR}/debug/build/sql-ops-*/*.h")
 foreach(_HEADER_FILE ${GENERATED_HEADERS})
     get_filename_component(_DIR ${_HEADER_FILE} PATH)
-    #message(STATUS "header: ${_HEADER_FILE} dir: ${_DIR}")
     list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${_DIR})
 endforeach()
-#list (REMOVE_DUPLICATES Foo_INCLUDE_DIRS)
-
+list(REMOVE_DUPLICATES FAST_INTERCONNECTS_INCLUDE_DIRS)
 
 message(STATUS "FAST_INTERCONNECTS_INCLUDE_DIRS: ${FAST_INTERCONNECTS_INCLUDE_DIRS}")
-#set(FAST_INTERCONNECTS_INCLUDE_DIR ${INSTALL_DIR}/usr/local/include)
-#file(MAKE_DIRECTORY ${FAST_INTERCONNECTS_INCLUDE_DIR})
 
 add_library(fast_interconnects INTERFACE)
-#set_property(TARGET fast_interconnects PROPERTY IMPORTED_LOCATION ${FAST_INTERCONNECTS_LIBRARY_PATH})
 set_property(TARGET fast_interconnects APPEND PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${FAST_INTERCONNECTS_INCLUDE_DIRS})
 
-# Dependencies
+# Set up dependencies
 add_dependencies(fast_interconnects fast_interconnects_src)
