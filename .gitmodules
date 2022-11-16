@@ -1,3 +1,0 @@
-[submodule "numa-gpu"]
-	path = contrib/numa-gpu
-	url = git@github.com:TU-Berlin-DIMA/numa-gpu.git

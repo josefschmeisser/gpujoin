@@ -1,4 +1,3 @@
-//#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
 #include "gpu_radix_partition.cuh"
 
 // Combine the following two files into this single compilation unit in order to avoid using Relocatable Device Code (-rdc=true).

@@ -24,9 +24,9 @@
 #include "partitioned_relation.hpp"
 
 #undef GPU_CACHE_LINE_SIZE
-#include <numa-gpu/sql-ops/include/gpu_radix_partition.h>
-#include <numa-gpu/sql-ops/cudautils/gpu_common.cu>
-#include <numa-gpu/sql-ops/cudautils/radix_partition.cu>
+#include <fast-interconnects/gpu_radix_partition.h>
+#include <fast-interconnects_src/gpu_common.cu>
+#include <fast-interconnects_src/radix_partition.cu>
 
 
 static const int num_streams = 2;

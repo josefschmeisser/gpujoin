@@ -78,12 +78,6 @@ add_executable(index_lookup
     src/gpu_radix_partition.cu
 )
 set_target_properties(index_lookup PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-#target_include_directories(index_lookup PUBLIC
-#    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
-#    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
-#    #$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
-#    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/debug/build/sql-ops-750ae6baca9a95b7/out/>
-#)
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline onetbb fast_interconnects)
 # additional nvcc flags
 target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
@@ -114,13 +108,6 @@ add_executable(index_lookup_partitioning
     src/index_lookup_config.cpp
     src/gpu_radix_partition.cu
 )
-#set_target_properties(index_lookup_partitioning PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-#target_include_directories(index_lookup_partitioning PUBLIC
-#    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/>
-#    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/sql-ops/include/>
-#    #$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/release/build/sql-ops-28848279f8667cf7/out/>
-#    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/contrib/numa-gpu/target/debug/build/sql-ops-750ae6baca9a95b7/out/>
-#)
 target_link_libraries(index_lookup_partitioning ${CUDART_LIBRARY} numa cub radixspline onetbb fast_interconnects)
 # additional nvcc flags
 target_compile_options(index_lookup_partitioning PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
