@@ -157,8 +157,10 @@ struct pseudo_cooperative_search_algorithm {
 };
 
 struct default_radix_spline_index_configuration {
-    using search_algorithm_type = branchy_lower_bound_search_algorithm;
+    //using search_algorithm_type = branchy_lower_bound_search_algorithm;
+    using search_algorithm_type = branch_free_lower_bound_search_algorithm;
     using cooperative_search_algorithm_type = pseudo_cooperative_search_algorithm<search_algorithm_type>;
+    //using cooperative_search_algorithm_type = cooperative_binary_search_algorithm;
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_radix_spline_index_configuration>
@@ -315,10 +317,10 @@ struct binary_search_index_pseudo_cooperative_search_algorithm {
 };
 
 struct default_binary_search_index_configuration {
-    //using search_algorithm_type = branch_free_binary_search_algorithm;
-    using search_algorithm_type = branchy_lower_bound_search_algorithm;
-    //using cooperative_search_algorithm_type = binary_search_index_pseudo_cooperative_search_algorithm<search_algorithm_type>;
-    using cooperative_search_algorithm_type = cooperative_binary_search_algorithm;
+    using search_algorithm_type = branch_free_lower_bound_search_algorithm;
+    //using search_algorithm_type = branchy_lower_bound_search_algorithm;
+    using cooperative_search_algorithm_type = binary_search_index_pseudo_cooperative_search_algorithm<search_algorithm_type>;
+    //using cooperative_search_algorithm_type = cooperative_binary_search_algorithm;
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration = default_binary_search_index_configuration>
