@@ -141,11 +141,12 @@ struct device_clz<uint64_t> {
  * @return lower bound position of `x` in `arr`.
  */
 template<class T>
-__device__ device_size_t branch_free_binary_search(T x, const T* arr, const device_size_t size) { // TODO rename? should be lower bound?
+__device__ device_size_t branch_free_lower_bound_search(T x, const T* arr, const device_size_t size) {
     static constexpr unsigned bit_count = sizeof(device_size_t)*8u - 1u;
     const unsigned steps = bit_count - device_clz<device_size_t>{}(size - 1);
     device_size_t mid = static_cast<device_size_t>(1u) << steps;
     device_size_t ret = (arr[mid] < x) * (size - mid);
+    //while (mid > 0) {
     for (unsigned step = 1; step <= steps; ++step) {
         mid >>= 1;
         assert(ret + mid < size);
@@ -156,15 +157,14 @@ __device__ device_size_t branch_free_binary_search(T x, const T* arr, const devi
     return ret;
 }
 
-struct branch_free_binary_search_algorithm {
-    //static constexpr char name[] = "branch_free_binary_search";
+struct branch_free_lower_bound_search_algorithm {
     static constexpr const char* name() {
-        return "branch_free_binary_search";
+        return "branch_free_lower_bound_search";
     }
 
     template<class T>
     __device__ __forceinline__ device_size_t operator() (T x, const T* arr, const device_size_t size) const {
-        return branch_free_binary_search(x, arr, size);
+        return branch_free_lower_bound_search(x, arr, size);
     }
 };
 
@@ -345,13 +345,13 @@ __device__ __forceinline__ device_size_t cooperative_binary_search_stride(bool i
         lower = lower + linear_search(x, arr + lower, upper);
         //assert(arr[lower] == x);
     }
-    
+
     return lower;
 
     // alternatively: linear search with all threads?
 }
 
-template<class T, unsigned Co_Op_Degree = 2, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
+template<class T, unsigned Co_Op_Degree = 3, unsigned WindowSize = GPU_CACHE_LINE_SIZE>
 __device__ device_size_t cooperative_binary_search(bool active, T x, const T* arr, const device_size_t size) {
     enum { THREAD_GROUP_SIZE  = 1 << Co_Op_Degree };
 
