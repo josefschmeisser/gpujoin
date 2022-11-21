@@ -25,9 +25,14 @@ struct experiment_config {
     dataset_type dataset = dataset_type::sparse;
     lookup_pattern_type lookup_pattern = lookup_pattern_type::uniform;
     bool sorted_lookups = false;
+    unsigned partitioning_approach_ignore_bits = 4;
+    bool partitioning_approach_dynamic_bit_range = true;
 };
 
-// types
+// constants:
+static const uint32_t radix_bits = 11;
+
+// types:
 /*
 using index_key_t = uint32_t;
 using value_t = uint32_t;

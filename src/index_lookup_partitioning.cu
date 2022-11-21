@@ -42,8 +42,8 @@ using rel_tuple_t = Tuple<index_key_t, dummy_payload_t>;
 static const int num_streams = 2;
 static const int block_size = 128;// 64;
 static int grid_size = 0;
-static const uint32_t radix_bits = 11;// 10;
-static const uint32_t ignore_bits = 4;//3;
+//static const uint32_t radix_bits = 11;// 10;
+//static const uint32_t ignore_bits = 4;//3;
 
 // 48 kiB shared memory:
 // laswwc max 8 bits
@@ -90,6 +90,7 @@ struct stream_state {
 };
 
 std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, uint32_t num_lookups, value_t* d_dst_tids) {
+    const auto& config = get_experiment_config();
     device_exclusive_allocator<int> device_allocator;
     auto state = std::make_unique<stream_state>();
     CubDebugExit(cudaStreamCreate(&state->stream));
@@ -121,7 +122,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
         0, // not used
         state->partitioned_relation_inst.padding_length(),
         radix_bits,
-        ignore_bits,
+        config.partitioning_approach_ignore_bits,
         // State
         state->d_prefix_scan_state.data(),
         state->partition_offsets_inst.local_offsets.data(),
@@ -136,7 +137,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
         num_lookups,
         state->partitioned_relation_inst.padding_length(),
         radix_bits,
-        ignore_bits,
+        config.partitioning_approach_ignore_bits,
         state->partition_offsets_inst.local_offsets.data(),
         //state->partition_offsets_inst.offsets.data(),
         // State
@@ -155,7 +156,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
         state->partition_offsets_inst.offsets.data(),
         state->d_task_assignments.data(),
         radix_bits,
-        ignore_bits,
+        config.partitioning_approach_ignore_bits,
         //state->d_dst_tids.data()
         d_dst_tids
     });

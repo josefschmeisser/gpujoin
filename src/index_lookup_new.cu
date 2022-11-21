@@ -1,5 +1,6 @@
 #include "index_lookup.cuh"
 
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <stdexcept>
@@ -23,7 +24,7 @@ using namespace measuring;
 
 
 query_data::query_data() {
-    const auto& config = get_experiment_config();
+    auto& config = get_experiment_config();
 
     // generate datasets
     printf("generating datasets...\n");
@@ -36,6 +37,11 @@ query_data::query_data() {
     }
     //std::cout << "lookups: " << stringify(lookup_keys.begin(), lookup_keys.end()) << std::endl;
 
+    if (config.partitioning_approach_dynamic_bit_range) {
+        // indexed is guaranteed to be sorted
+        config.partitioning_approach_ignore_bits = static_cast<unsigned>(std::log2(indexed.last())) - radix_bits;
+        printf("config.partitioning_approach_ignore_bits: %d\n", config.partitioning_approach_ignore_bits);
+    }
     // allocate result vector
     d_tids = create_device_array<value_t>(config.num_lookups);
 
@@ -215,6 +221,11 @@ static void create_common_experiment_description_pairs_2(std::vector<std::pair<s
 
     if (config.lookup_pattern == lookup_pattern_type::zipf) {
         pairs.emplace_back(std::string("zipf_factor"), std::to_string(config.zipf_factor));
+    }
+
+    if (config.approach == "partitioning") {
+        pairs.emplace_back(std::string("partitioning_approach_ignore_bits"), std::to_string(config.partitioning_approach_ignore_bits));
+        pairs.emplace_back(std::string("partitioning_approach_dynamic_bit_range"), std::to_string(config.partitioning_approach_dynamic_bit_range));
     }
 }
 
