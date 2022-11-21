@@ -39,7 +39,8 @@ query_data::query_data() {
 
     if (config.partitioning_approach_dynamic_bit_range) {
         // indexed is guaranteed to be sorted
-        config.partitioning_approach_ignore_bits = static_cast<unsigned>(std::log2(indexed.last())) - radix_bits;
+        const unsigned msb = static_cast<unsigned>(std::log2(indexed.back()));
+        config.partitioning_approach_ignore_bits = (msb > radix_bits) ? msb - radix_bits : config.partitioning_approach_ignore_bits;
         printf("config.partitioning_approach_ignore_bits: %d\n", config.partitioning_approach_ignore_bits);
     }
     // allocate result vector
