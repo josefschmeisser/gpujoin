@@ -41,7 +41,7 @@ void write_out_measurement(const experiment_description& d, const measurement& m
         << "  approach: " << d.approach << "\n"
         //<< "  duration: " << m.duration_ms << "\n"
         << "  dt_prefix_sum: " << stringify(duration_prefix_sum.begin(), duration_prefix_sum.end()) << "\n"
-        << "  timestamp: " << seconds << "\n";
+        << "  timestamp: !int64 " << seconds << "\n";
 
     for (const auto& misc_pair : d.other) {
         entry << "  " << misc_pair.first << ": " << misc_pair.second << "\n";

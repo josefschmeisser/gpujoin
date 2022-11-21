@@ -197,7 +197,7 @@ static void add_index_configuration_description(std::vector<std::pair<std::strin
             break;
     }
 
-    pairs.emplace_back("index_size", std::to_string(qd.index_structure->memory_consumption()));
+    pairs.emplace_back("index_size", "!int64 " + std::to_string(qd.index_structure->memory_consumption()));
 }
 
 static void create_common_experiment_description_pairs_2(std::vector<std::pair<std::string, std::string>>& pairs) {
@@ -207,8 +207,8 @@ static void create_common_experiment_description_pairs_2(std::vector<std::pair<s
     pairs.emplace_back(std::string("index_type"), config.index_type);
     pairs.emplace_back(std::string("dataset"), tmpl_to_string(config.dataset));
     pairs.emplace_back(std::string("lookup_pattern"), tmpl_to_string(config.lookup_pattern));
-    pairs.emplace_back(std::string("num_elements"), std::to_string(config.num_elements));
-    pairs.emplace_back(std::string("num_lookups"), std::to_string(config.num_lookups));
+    pairs.emplace_back(std::string("num_elements"), "!int64 " + std::to_string(config.num_elements));
+    pairs.emplace_back(std::string("num_lookups"), "!int64 " + std::to_string(config.num_lookups));
     pairs.emplace_back(std::string("sorted_lookups"), std::to_string(config.sorted_lookups));
         // allocators:
     pairs.emplace_back(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value()));
