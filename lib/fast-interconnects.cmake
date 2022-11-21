@@ -9,6 +9,11 @@ ENDIF()
 
 set(FAST_INTERCONNECTS_PREFIX "fast-interconnects")
 
+message(STATUS "nvcc: ${CMAKE_CUDA_COMPILER} cuda root: ${CUDA_TOOLKIT_ROOT_DIR}")
+
+get_filename_component(_NVCC_DIR ${CMAKE_CUDA_COMPILER} PATH)
+message(STATUS "nvcc dir: ${_NVCC_DIR}")
+
 # Get FAST_INTERCONNECTS
 ExternalProject_Add(
     fast_interconnects_src
@@ -17,8 +22,10 @@ ExternalProject_Add(
     GIT_TAG "84c181a"
     TIMEOUT 10
     CONFIGURE_COMMAND ""
-    BUILD_COMMAND ${CARGO} build --manifest-path=<SOURCE_DIR>/Cargo.toml --target-dir=<BINARY_DIR>
-    INSTALL_COMMAND ${CMAKE_COMMAND} -E create_symlink <SOURCE_DIR>/sql-ops/include <INSTALL_DIR>/usr/local/include/fast-interconnects
+    #BUILD_COMMAND ${CMAKE_COMMAND} -E env PATH=${_NVCC_DIR}:$ENV{PATH}  ${CMAKE_COMMAND} -E environment # [=[echo $PATH]=]
+    BUILD_COMMAND ${CMAKE_COMMAND} -E env PATH=${_NVCC_DIR}:$ENV{PATH} ${CARGO} build --manifest-path=<SOURCE_DIR>/Cargo.toml --target-dir=<BINARY_DIR>
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E make_directory <INSTALL_DIR>/usr/local/include
+        COMMAND ${CMAKE_COMMAND} -E create_symlink <SOURCE_DIR>/sql-ops/include <INSTALL_DIR>/usr/local/include/fast-interconnects
         COMMAND ${CMAKE_COMMAND} -E create_symlink <SOURCE_DIR>/sql-ops/cudautils <INSTALL_DIR>/usr/local/include/fast-interconnects_src
 )
 
@@ -29,7 +36,7 @@ ExternalProject_Get_Property(fast_interconnects_src INSTALL_DIR)
 # Collect include directories
 set(FAST_INTERCONNECTS_INCLUDE_DIRS "")
 list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${INSTALL_DIR}/usr/local/include)
-# files in fast-interconnects include local one without any prefix, hence we need the following:
+# Files in fast-interconnects include local ones without any prefix, hence we need the following:
 list(APPEND FAST_INTERCONNECTS_INCLUDE_DIRS ${INSTALL_DIR}/usr/local/include/fast-interconnects)
 
 # Locate the constants.h header which is auto generated
