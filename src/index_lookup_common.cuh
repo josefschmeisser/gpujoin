@@ -268,10 +268,12 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
         unsigned old;
         do {
             if (lane_id == 0) {
-                old = atomic_add_sat(&buffer_idx, 32u, valid_items);
+                //old = atomic_add_sat(&buffer_idx, 32u, valid_items);
+                old = atomicAdd(&buffer_idx, 32u);
             }
             old = __shfl_sync(FULL_MASK, old, 0);
-            unsigned actual_count = min(valid_items - old, 32);
+            //unsigned actual_count = min(valid_items - old, 32);
+            unsigned actual_count = (old > valid_items) ? 0 : valid_items - old;
             //if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
 
             if (actual_count == 0) break;
