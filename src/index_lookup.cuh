@@ -16,6 +16,8 @@ struct query_data {
     device_array_wrapper<index_key_t> d_lookup_keys;
     device_array_wrapper<value_t> d_tids;
 
+    unsigned dataset_max_bits;
+
     query_data();
 
     void create_index();

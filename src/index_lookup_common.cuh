@@ -210,6 +210,9 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     const int warp_id = threadIdx.x / 32;
     (void)warp_id;
 
+    constexpr size_t shared_mem_required = sizeof(TempStorage) + sizeof(buffer) + sizeof(in_buffer_pos) + sizeof(buffer_idx);
+    //if (lane_id == 0) printf("shared_mem_required: %lu\n", shared_mem_required);
+
     const unsigned tile_size = min(n, (n + gridDim.x - 1) / gridDim.x);
     unsigned tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
     const unsigned tid_limit = min(tid + tile_size, n);
@@ -240,6 +243,8 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
         for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
             const unsigned pos = threadIdx.x*ITEMS_PER_THREAD + j;
             buffer[pos] = input_thread_data[j];
+            //if (tid + pos >= n) printf("tid + pos = %lu >= n\n", tid + pos);
+            //assert(tid + pos < n);
             in_buffer_pos[pos] = tid + pos;
         }
 
@@ -248,6 +253,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 #if 1
         // we only perform the sort step when the buffer is completely filled
         if (valid_items == ITEMS_PER_ITERATION) {
+            //if (lane_id == 0) printf("sorting...\n");
             using key_array_t = index_key_t[ITEMS_PER_THREAD];
             using value_array_t = uint32_t[ITEMS_PER_THREAD];
 
@@ -256,6 +262,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
             value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
 
+            assert(max_bits > 4);
             BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, 4, max_bits);
 
              __syncthreads();
@@ -283,6 +290,9 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             uint32_t assoc_tid = 0;
             index_key_t element;
             if (active) {
+                //printf("warp: %d lane: %d - old: %u ITEMS_PER_ITERATION: %u\n", warp_id, lane_id, old, ITEMS_PER_ITERATION);
+                //if (old + lane_id >= ITEMS_PER_ITERATION) printf("old + lane_id: %lu\n", old + lane_id);
+                assert(old + lane_id < ITEMS_PER_ITERATION);
                 assoc_tid = in_buffer_pos[old + lane_id];
                 element = buffer[old + lane_id];
                 //printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
@@ -291,6 +301,8 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             value_t tid_b = index_structure.cooperative_lookup(active, element);
             if (active) {
                 //printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+                //if (assoc_tid >= n) printf("assoc_id: %lu\n", assoc_tid);
+                assert(assoc_tid < n);
                 tids[assoc_tid] = tid_b;
             }
 

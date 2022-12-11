@@ -37,12 +37,13 @@ query_data::query_data() {
     }
     //std::cout << "lookups: " << stringify(lookup_keys.begin(), lookup_keys.end()) << std::endl;
 
+    // indexed is guaranteed to be sorted
+    dataset_max_bits = static_cast<unsigned>(std::log2(indexed.back()));
     if (config.partitioning_approach_dynamic_bit_range) {
-        // indexed is guaranteed to be sorted
-        const unsigned msb = static_cast<unsigned>(std::log2(indexed.back()));
-        config.partitioning_approach_ignore_bits = (msb > radix_bits) ? msb - radix_bits : config.partitioning_approach_ignore_bits;
+        config.partitioning_approach_ignore_bits = (dataset_max_bits > radix_bits) ? dataset_max_bits - radix_bits : config.partitioning_approach_ignore_bits;
         printf("config.partitioning_approach_ignore_bits: %d\n", config.partitioning_approach_ignore_bits);
     }
+
     // allocate result vector
     d_tids = create_device_array<value_t>(config.num_lookups);
 
