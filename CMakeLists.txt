@@ -3,10 +3,8 @@ cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 project(gpujoin LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 14)
-
 set(ENABLE_PERFBENCHMARKING false)
 
-#set(CUDA_SEPARABLE_COMPILATION ON)
 find_package(CUDA)
 
 # put predefined cmake projects in their own solution folder
@@ -21,22 +19,10 @@ endif()
 set(MY_CUDA_TARGET "pascal" CACHE STRING "CUDA target architecture chosen by the user at CMake configure time")
 set_property(CACHE MY_CUDA_TARGET PROPERTY STRINGS pascal volta)
 
-if(false)
-message(STATUS "current: ${CMAKE_CUDA_FLAGS}")
-if("${MY_CUDA_TARGET}" STREQUAL "pascal")
-    string(APPEND CMAKE_CUDA_FLAGS " -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61")
-elseif("${MY_CUDA_TARGET}" STREQUAL "volta")
-    string(APPEND CMAKE_CUDA_FLAGS " -gencode=arch=compute_70,code=sm_70")
-endif()
-message(STATUS "selected target architecture: ${MY_CUDA_TARGET}")
-message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
-endif()
-
-if(true)
+# Set CUDA target architectures
 #set(CMAKE_CUDA_ARCHITECTURES 60 61 70 CACHE STRING "CUDA architectures")
-set(CMAKE_CUDA_ARCHITECTURES 60)
-message(STATUS "current: ${CMAKE_CUDA_FLAGS}")
-endif()
+#set(CMAKE_CUDA_ARCHITECTURES 60)
+message(STATUS "CUDA target architectures: ${CMAKE_CUDA_FLAGS}")
 
 # TODO cmake 3.17: use FindCUDAToolkit()
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
@@ -80,7 +66,8 @@ add_executable(index_lookup
 set_target_properties(index_lookup PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline onetbb fast_interconnects)
 # additional nvcc flags
-target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
+target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+#target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas="-v">)
 #target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
 # debug flag
 #target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
