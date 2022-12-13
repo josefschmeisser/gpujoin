@@ -161,17 +161,58 @@ template<class IndexType>
 struct blockwise_sorting_approach {
     void operator()(query_data& d) {
         const auto& config = get_experiment_config();
+        const auto& device_properties = get_device_properties(0);
 
-        const int num_blocks = 3 * get_device_properties(0).multiProcessorCount;; // TODO optimize
+        constexpr unsigned block_size = 256;
+        constexpr unsigned elements_per_thread = 16;
+        const int num_blocks = 3 * device_properties.multiProcessorCount; // TODO optimize
         printf("numblocks: %d\n", num_blocks);
 
         printf("executing kernel...\n");
         IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
-        if (config.block_size != 256) {
+        if (config.block_size != block_size) {
             std::cerr << "invalid block size for this approach" << std::endl;
             throw 0;
         }
+        /*
         lookup_kernel_with_sorting_v1<256, 4><<<num_blocks, 256>>>(index_structure.device_index, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data(), d.dataset_max_bits);
+        cudaDeviceSynchronize();
+        */
+        
+/* 
+struct bws_lookup_args {
+    // Input
+    device_size_t rel_length;
+    index_key_t* __restrict__ keys
+    unsigned max_bits;
+    device_size_t shared_mem_available;
+    
+    index_key_t* __restrict__ buffer = nullptr;
+    uint32_t* __restrict__ in_buffer_pos = nullptr;
+    
+    // Output
+    value_t* __restrict__ tids;
+};*/
+
+        auto buffer = create_device_array<index_key_t>(num_blocks * block_size * elements_per_thread);
+        auto in_buffer_pos = create_device_array<uint32_t>(num_blocks * block_size * elements_per_thread);
+
+        const auto shared_mem = device_properties.sharedMemPerBlock;
+        bws_lookup_args args {
+            d.lookup_keys.size(),
+            d.d_lookup_keys.data(),
+            d.dataset_max_bits,
+            shared_mem,
+            /*
+            nullptr,
+            nullptr,
+            */
+            buffer.data(), // TODO switch dynamically
+            in_buffer_pos.data(),
+            d.d_tids.data()
+        };
+
+        bws_lookup<block_size, elements_per_thread><<<num_blocks, block_size, shared_mem>>>(index_structure.device_index, args);
         cudaDeviceSynchronize();
     }
 };

@@ -313,6 +313,184 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
     }
 }
 
+
+
+
+
+
+struct bws_lookup_args {
+    // Input
+    device_size_t rel_length;
+    index_key_t* __restrict__ keys;
+    unsigned max_bits;
+    device_size_t shared_mem_available;
+    
+    index_key_t* __restrict__ buffer = nullptr;
+    uint32_t* __restrict__ in_buffer_pos = nullptr;
+    
+    // Output
+    value_t* __restrict__ tids;
+};
+
+
+template<
+    unsigned BLOCK_THREADS,
+    unsigned ITEMS_PER_THREAD,
+    class    IndexStructureType>
+__global__ void bws_lookup(const IndexStructureType index_structure, const bws_lookup_args args) {
+    enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
+
+    // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
+    typedef cub::BlockLoad<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, cub::BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+
+    //typedef cub::BlockRadixSort<uint64_t, BLOCK_THREADS, ITEMS_PER_THREAD> BlockRadixSortT;
+    using BlockRadixSortT = cub::BlockRadixSort<index_key_t, BLOCK_THREADS, ITEMS_PER_THREAD, uint32_t>;
+
+    extern __shared__ uint8_t smem[];
+
+    struct smem_struct {
+        union TempStorage {
+            // Allocate shared memory for BlockLoad
+            typename BlockLoad::TempStorage load;
+
+            typename BlockRadixSortT::TempStorage sort;
+        } temp_storage;
+
+        uint32_t buffer_idx;
+    };
+
+    smem_struct* smem_data = reinterpret_cast<smem_struct*>(smem);
+
+    // sort buffer
+    index_key_t* buffer = nullptr;
+    // tid mapping
+    uint32_t* in_buffer_pos = nullptr;
+
+    if (args.buffer != nullptr) {
+        const device_size_t block_offset = blockIdx.x * ITEMS_PER_ITERATION;
+        buffer = args.buffer + block_offset;
+        in_buffer_pos = args.in_buffer_pos + block_offset;
+    } else {
+        //printf("use shared memory\n");
+        // check shared memory requirements
+        constexpr size_t shared_mem_required = sizeof(smem_struct) + sizeof(buffer) + sizeof(in_buffer_pos);
+        //if (lane_id == 0) printf("shared_mem_required: %lu\n", shared_mem_required);
+        assert(shared_mem_required < args.shared_mem_available);
+
+        buffer = reinterpret_cast<index_key_t*>(smem + sizeof(smem_struct));
+        in_buffer_pos = reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(buffer) + ITEMS_PER_ITERATION*sizeof(index_key_t));
+    }
+
+    const int lane_id = threadIdx.x % 32;
+    const int warp_id = threadIdx.x / 32;
+    (void)warp_id;
+
+    const device_size_t tile_size = min(args.rel_length, (args.rel_length + gridDim.x - 1) / gridDim.x);
+    device_size_t tid = blockIdx.x * tile_size; // first tid where cub::BlockLoad starts scanning (has to be the same for all threads in this block)
+    const device_size_t tid_limit = min(tid + tile_size, args.rel_length);
+
+    //if (lane_id == 0) printf("warp: %d tile_size: %d\n", warp_id, tile_size);
+
+    const device_size_t iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
+
+    index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO omit this
+
+    for (device_size_t i = 0; i < iteration_count; ++i) {
+        //if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);
+
+        uint32_t valid_items = static_cast<uint32_t>(min(static_cast<device_size_t>(ITEMS_PER_ITERATION), tid_limit - tid));
+        //if (lane_id == 0) printf("warp: %d valid_items: %d\n", warp_id, valid_items);
+
+        // Load a segment of consecutive items that are blocked across threads
+        BlockLoad(smem_data->temp_storage.load).Load(args.keys + tid, input_thread_data, valid_items);
+
+        __syncthreads();
+
+        // reset shared memory variables
+        if (lane_id == 0) {
+            smem_data->buffer_idx = 0;
+        }
+
+        #pragma unroll
+        for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
+            const device_size_t pos = threadIdx.x*ITEMS_PER_THREAD + j;
+            buffer[pos] = input_thread_data[j];
+            //if (tid + pos >= n) printf("tid + pos = %lu >= n\n", tid + pos);
+            //assert(tid + pos < n);
+            in_buffer_pos[pos] = tid + pos;
+        }
+
+        __syncthreads();
+
+#if 1
+        // we only perform the sort step when the buffer is completely filled
+        if (valid_items == ITEMS_PER_ITERATION) {
+            //if (lane_id == 0) printf("sorting...\n");
+            using key_array_t = index_key_t[ITEMS_PER_THREAD];
+            using value_array_t = uint32_t[ITEMS_PER_THREAD];
+
+            index_key_t* thread_keys_raw = &buffer[threadIdx.x*ITEMS_PER_THREAD];
+            uint32_t* thread_values_raw = &in_buffer_pos[threadIdx.x*ITEMS_PER_THREAD];
+            key_array_t& thread_keys = reinterpret_cast<key_array_t&>(*thread_keys_raw);
+            value_array_t& thread_values = reinterpret_cast<value_array_t&>(*thread_values_raw);
+
+            assert(args.max_bits > 4);
+            BlockRadixSortT(smem_data->temp_storage.sort).Sort(thread_keys, thread_values, 4, args.max_bits);
+
+             __syncthreads();
+        }/* else {
+            //if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
+        }*/
+#endif
+
+        // empty buffer
+        uint32_t old;
+        do {
+            if (lane_id == 0) {
+                //old = atomic_add_sat(&buffer_idx, 32u, valid_items);
+                old = atomicAdd(&smem_data->buffer_idx, 32u);
+            }
+            old = __shfl_sync(FULL_MASK, old, 0);
+            //unsigned actual_count = min(valid_items - old, 32);
+            uint32_t actual_count = (old > valid_items) ? 0 : valid_items - old;
+            //if (lane_id == 0) printf("warp: %d iteration: %d - actual_count: %u\n", warp_id, i, actual_count);
+
+            if (actual_count == 0) break;
+
+            bool active = lane_id < actual_count;
+
+            uint32_t assoc_tid = 0;
+            index_key_t element;
+            if (active) {
+                //printf("warp: %d lane: %d - old: %u ITEMS_PER_ITERATION: %u\n", warp_id, lane_id, old, ITEMS_PER_ITERATION);
+                //if (old + lane_id >= ITEMS_PER_ITERATION) printf("old + lane_id: %lu\n", old + lane_id);
+                assert(old + lane_id < ITEMS_PER_ITERATION);
+                assoc_tid = in_buffer_pos[old + lane_id];
+                element = buffer[old + lane_id];
+                //printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
+            }
+
+            value_t tid_b = index_structure.cooperative_lookup(active, element);
+            if (active) {
+                //printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
+                //if (assoc_tid >= n) printf("assoc_id: %lu\n", assoc_tid);
+                assert(assoc_tid < args.rel_length);
+                args.tids[assoc_tid] = tid_b;
+            }
+
+            //printf("warp: %d lane: $d - element: %u\n", warp_id, lane_id, );
+        } while (true);
+
+        tid += valid_items;
+    }
+}
+
+
+
+
+
+
+
 template<class IndexType>
 std::vector<std::pair<std::string, std::string>> create_common_experiment_description_pairs() {
     const auto& config = get_experiment_config();
