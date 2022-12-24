@@ -2,6 +2,9 @@
 
 #include <limits>
 
+#include "cuda_utils.cuh"
+#include "device_definitions.hpp"
+
 // simple linear probing hash table
 // implementation is based on: https://github.com/nosferalatu/SimpleGPUHashTable
 template<class Key, class Value>
@@ -17,23 +20,13 @@ public:
 
     struct DeviceHandle {
         Entry* table = nullptr;
-        const uint32_t capacity;
-
-        // 32bit Murmur3 hash
-        __device__ uint32_t hash(Key k) {
-            static_assert(sizeof(Key) == 4);
-            k ^= k >> 16;
-            k *= 0x85ebca6b;
-            k ^= k >> 13;
-            k *= 0xc2b2ae35;
-            k ^= k >> 16;
-            return k & (capacity - 1);
-        }
+        const device_size_t capacity;
 
         __device__ void insert(Key key, Value value) {
-            uint32_t slot = hash(key);
+            device_size_t slot = murmur3_hash(key) & (capacity - 1);
             while (true) {
-                uint32_t prev = atomicCAS(&table[slot].key, emptyMarker, key);
+                //device_size_t prev = atomicCAS(&table[slot].key, emptyMarker, key);
+                device_size_t prev = tmpl_atomic_cas(&table[slot].key, emptyMarker, key);
                 if (prev == emptyMarker || prev == key) {
                     table[slot].value = value;
                     return;
@@ -43,7 +36,7 @@ public:
         }
 
         __device__ bool lookup(Key key, Value& value) {
-            uint32_t slot = hash(key);
+            device_size_t slot = murmur3_hash(key) & (capacity - 1);
             while (true) {
                 Entry* entry = &table[slot];
                 if (entry->key == key) {
@@ -57,15 +50,15 @@ public:
         }
     } deviceHandle;
 
-    static constexpr uint32_t calculateTableSize(uint32_t occupancyUpperBound) {
+    static constexpr device_size_t calculateTableSize(device_size_t occupancyUpperBound) {
         float sizeHint = static_cast<float>(occupancyUpperBound) / maxLoadFactor;
-        uint32_t n = static_cast<uint32_t>(std::ceil(std::log2(sizeHint))); // find n such that: 2^n >= sizeHint
-        uint32_t tableSize = 1ul << n;
+        device_size_t n = static_cast<device_size_t>(std::ceil(std::log2(sizeHint))); // find n such that: 2^n >= sizeHint
+        device_size_t tableSize = 1ul << n;
         return tableSize;
     }
 
-    LinearProbingHashTable(uint32_t occupancyUpperBound)
-        : deviceHandle{nullptr, calculateTableSize(occupancyUpperBound)}
+    LinearProbingHashTable(device_size_t occupancyUpperBound)
+        : deviceHandle{ nullptr, calculateTableSize(occupancyUpperBound) }
     {
         auto ret = cudaMalloc(&deviceHandle.table, deviceHandle.capacity*sizeof(Entry));
         assert(ret == cudaSuccess);

@@ -1,5 +1,11 @@
 #pragma once
 
+#define FULL_MASK 0xffffffff
+
+#ifndef GPU_CACHE_LINE_SIZE
+#define GPU_CACHE_LINE_SIZE 128
+#endif
+
 template<class CharType>
 __device__ int device_strcmp(const CharType* str_a, const CharType* str_b, unsigned len) {
     int match = 0;
@@ -53,8 +59,81 @@ __forceinline__ __device__ T round_up_pow2(T value) {
     return static_cast<T>(1) << (sizeof(T)*8 - __clz(value - 1));
 }
 
-#define FULL_MASK 0xffffffff
+// 32bit Murmur3 hash
+template <
+    class T,
+    std::enable_if_t<std::is_integral<T>::value && sizeof(T) == sizeof(uint32_t), int> = 0
+>
+__host__ __device__ uint32_t murmur3_hash(const T k) {
+    uint32_t ik = static_cast<uint32_t>(k);
 
-#ifndef GPU_CACHE_LINE_SIZE
-#define GPU_CACHE_LINE_SIZE 128
-#endif
+    ik ^= ik >> 16;
+    ik *= 0x85ebca6b;
+    ik ^= ik >> 13;
+    ik *= 0xc2b2ae35;
+    ik ^= ik >> 16;
+    return ik;
+}
+
+//    __device__ uint64_t hash(uint64_t k)
+//template<class T>
+//__device__ std::enable_if_t<std::is_integral<T>::value && sizeof(T) == sizeof(uint64_t), T> hash(const T k) {
+
+// 64bit Murmur3 hash
+template <
+    class T,
+    std::enable_if_t<std::is_integral<T>::value && sizeof(T) == sizeof(uint64_t), int> = 0
+>
+__host__ __device__ uint64_t murmur3_hash(const T k) {
+    uint64_t ik = static_cast<uint64_t>(k);
+
+    ik ^= ik >> 33;
+    ik *= 0xff51afd7ed558ccd;
+    ik ^= ik >> 33;
+    ik *= 0xc4ceb9fe1a85ec53;
+    ik ^= ik >> 33;
+
+    return ik;
+}
+
+// maps integral integer types to their respective atomicCAS input types
+template <class T, class T2 = void>
+struct to_atomic_cas_input;
+
+// 16bit integral types
+template <class T>
+struct to_atomic_cas_input<
+    T,
+    typename std::enable_if<std::is_integral<T>::value && sizeof(T) == sizeof(uint16_t)>::type
+> {
+    using type = unsigned short int;
+};
+
+// 32bit integral types
+template <class T>
+struct to_atomic_cas_input<
+    T,
+    typename std::enable_if<std::is_integral<T>::value && sizeof(T) == sizeof(uint32_t)>::type
+> {
+    using type = unsigned int;
+};
+
+// 64bit integral types
+template <class T>
+struct to_atomic_cas_input<
+    T,
+    typename std::enable_if<std::is_integral<T>::value && sizeof(T) == sizeof(uint64_t)>::type
+> {
+    using type = unsigned long long int;
+};
+
+template <class T>
+__device__ T tmpl_atomic_cas(T* address, T compare, T val) {
+    using input_type = typename to_atomic_cas_input<T>::type;
+    static_assert(sizeof(input_type) == sizeof(T));
+    return atomicCAS(
+        reinterpret_cast<input_type*>(address),
+        static_cast<input_type>(compare),
+        static_cast<input_type>(val)
+    );
+}
