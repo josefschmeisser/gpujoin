@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -11,6 +13,7 @@
 #include <type_traits>
 #include <random>
 #include <iostream>
+#include <functional>
 
 #include <cub/util_debug.cuh>
 
@@ -31,7 +34,7 @@
 
 namespace harmonia {
 
-using child_ref_t = uint32_t;
+using child_ref_t = uint32_t; // TODO use device_size_t ?
 
 // only contains the upper tree levels; stored in constant memory
 // retain some space for kernel launch arguments (those are also stored in constant memory)
@@ -49,9 +52,12 @@ struct harmonia_tree {
     using key_t = Key;
     using value_t = Value;
 
-    static const unsigned max_depth = 16;
+    static constexpr unsigned max_depth = 16;
+    static constexpr key_t max_key = std::numeric_limits<key_t>::max();
     static_assert(fanout < std::numeric_limits<unsigned>::max());
     static constexpr unsigned max_keys = fanout - 1; // per node
+
+    static unsigned constexpr get_max_keys() noexcept { return max_keys; }
 
     std::vector<key_t, HostAllocator<key_t>> keys;
     std::vector<child_ref_t, HostAllocator<child_ref_t>> children;
@@ -77,144 +83,172 @@ struct harmonia_tree {
         device_array_wrapper<value_t> values_guard;
     };
 
-    struct intermediate_node {
+    struct node_description {
+        //unsigned level = 0;
         bool is_leaf = false;
-        device_size_t count = 0;
-        key_t keys[max_keys];
+        size_t count = 0;
+        size_t key_start_range = 0; // TODO remove
+        //size_t key_end_range = 0;
+        // either children offsets or value offsets
+        //size_t payload_start_range = 0;
+        child_ref_t child_ref_start = 0; // TODO remove
+        //size_t payload_end_range = 0;
+        //key_t keys[max_keys];
+        /*
         union {
-            intermediate_node* children[fanout];
+            node_description* children[fanout];
             value_t values[max_keys];
         };
+        */
     };
 
-    using tree_level_t = std::vector<std::unique_ptr<intermediate_node>>;
+    struct level_data {
+        std::vector<node_description> nodes;
+        // number of nodes on the upper level which point to this level
+        //size_t parent_reference_count = 0;
+        size_t key_count = 0;
+        size_t node_count_prefix_sum = 0; // exclusive prefix sum
+        size_t key_count_prefix_sum = 0; // exclusive prefix sum
+    };
+/*
+    using tree_level_t = std::vector<std::unique_ptr<node_description>>;
     using tree_levels_t = std::vector<std::unique_ptr<tree_level_t>>;
+*/
+    template<class VectorType>
+    __host__ std::vector<level_data> gather_tree_info(const VectorType& input) {
+        std::vector<level_data> levels;
+        levels.reserve(6);
 
-    __host__ key_t max_key(const intermediate_node& subtree) {
-        if (subtree.is_leaf) {
-            return subtree.keys[subtree.count - 1];
-        }
-        return max_key(*subtree.children[subtree.count]);
-    }
+        // in the first phase we count the pages on each level
+        size_t current_key_count = input.size();
+        while (true) {
+            //level_data& current_level_info = levels.emplace_back({});
+            //levels.emplace_back({});
+            levels.emplace(levels.begin());
+            //level_data& current_level_info = levels.back();
+            level_data& current_level_info = levels.front();
+            current_level_info.key_count = current_key_count;
 
-    __host__ void add(intermediate_node& node, key_t key, value_t value) {
-        node.keys[node.count] = key;
-        node.values[node.count] = value;
-        node.count += 1;
-    }
+            const size_t page_count = gather_level_info(current_level_info);
+            assert(page_count > 0);
+            current_level_info.nodes.reserve(page_count);
 
-    __host__ void add(intermediate_node& node, key_t key, intermediate_node* child) {
-        node.keys[node.count] = key;
-        node.children[node.count] = child;
-        node.count += 1;
-    }
-
-    __host__ void construct_inner_nodes(tree_levels_t& tree_levels) {
-        const auto& lower_level = tree_levels.back();
-
-        if (lower_level->size() == 1) {
-            return;
-        }
-
-        auto current_level = std::make_unique<tree_level_t>();
-        auto node = std::make_unique<intermediate_node>();
-        node->is_leaf = false;
-        node->keys[0] = std::numeric_limits<key_t>::max();
-
-        for (uint64_t i = 0; i < lower_level->size() - 1; i++) {
-            auto& curr = lower_level->at(i);
-            if (node->count >= max_keys) {
-                node->children[node->count] = curr.get();
-                current_level->push_back(std::move(node));
-                node = std::make_unique<intermediate_node>();
-                node->is_leaf = false;
-                node->keys[0] = std::numeric_limits<key_t>::max();
-            } else {
-                key_t sep = max_key(*curr);
-                add(*node, sep, curr.get());
+            current_key_count = page_count - 1; // TODO check
+            if (page_count == 1) {
+                break;
             }
         }
-        node->children[node->count] = lower_level->back().get();
-        current_level->push_back(std::move(node));
 
-        tree_levels.push_back(std::move(current_level));
 
-        construct_inner_nodes(tree_levels);
+        return levels;
+    }
+
+    __host__ size_t gather_level_info(const level_data& l) {
+        const auto page_count = (l.key_count + max_keys - 1) / max_keys;
+        return page_count;
+    }
+
+    __host__ void create_node_descriptions(std::vector<level_data>& levels) {
+        unsigned level_index = 0;
+        size_t current_key_index = 0;
+        size_t current_children_index = 0;
+        size_t current_value_index = 0;
+        for (auto& level : levels) {
+            const bool is_leaf_level = (level_index == levels.size() - 1);
+
+            size_t keys_remaining = level.key_count;
+            while (keys_remaining > 0) {
+                //node_description& node = level.nodes.emplace_back({});
+                level.nodes.emplace_back();
+                node_description& node = level.nodes.back();
+
+                node.is_leaf = is_leaf_level;
+                node.count = std::min<size_t>(max_keys, keys_remaining);
+                node.key_start_range = current_key_index;
+                //current_key_index += max_keys;
+                current_key_index += node.count;
+                //node.key_end_range = current_key_index;
+
+                //keys_remaining -= std::min(max_keys, keys_remaining);
+                keys_remaining -= node.count;
+            }
+
+            level_index += 1;
+        }
+    }
+
+    __host__ key_t get_largest_key(const std::vector<level_data>& tree_levels, unsigned level_idx, size_t node_idx) {
+        assert(tree_levels.size() > level_idx);
+
+        const auto& level = tree_levels[level_idx];
+        const auto& node = level.nodes[node_idx];
+
+        if (tree_levels.size() - 1 == level_idx) {
+            const size_t keys_start = max_keys*(level.node_count_prefix_sum + node_idx);
+            return keys[keys_start + node.count - 1];
+        }
+
+        size_t child_node_idx = fanout*node_idx; // TODO check
+        return get_largest_key(tree_levels, level_idx + 1, child_node_idx);
+    }
+
+    __host__ void populate_inner_nodes(const std::vector<level_data>& tree_levels, const size_t current_level) {
+
+        const auto& lower_level_data = tree_levels.at(current_level + 1);
+        assert(lower_level_data.nodes.size() > 1);
+
+        const auto& current_level_data = tree_levels.at(current_level);
+
+        // TODO check
+        const size_t parent_level_node_count = (current_level > 0) ? tree_levels.at(current_level - 1).node_count_prefix_sum : 0;
+
+        const size_t level_keys_start = parent_level_node_count * max_keys;
+        size_t next_key_idx = 0;
+
+        // populate key array
+        for (size_t i = 0; i < lower_level_data.nodes.size() - 1; ++i) {
+            key_t sep = get_largest_key(tree_levels, current_level + 1, i);
+            std::cout << "sep: " << sep << std::endl;
+            keys[level_keys_start + next_key_idx] = sep;
+            next_key_idx += 1;
+        }
+
+        // populate children array
+        auto current_key_count_prefix_sum = 1 + current_level_data.key_count_prefix_sum;
+        for (size_t node_idx = 0; node_idx < current_level_data.nodes.size(); ++node_idx) {
+            const auto global_node_idx = parent_level_node_count + node_idx;
+            const auto node_key_count = (node_idx < current_level_data.nodes.size() - 1) ? max_keys : (current_level_data.key_count - node_idx*max_keys);
+            children[global_node_idx] = current_key_count_prefix_sum;
+            current_key_count_prefix_sum += node_key_count + 1;
+        }
+
+        if (current_level == 0) return;
+
+        // ascend to next level
+        populate_inner_nodes(tree_levels, current_level - 1);
     }
 
     template<class Vector>
-    __host__ tree_levels_t construct_levels(const Vector& input) {
-        uint64_t n = input.size();
+    __host__ void populate_leaf_nodes(std::vector<level_data>& tree_levels, const Vector& input) {
+        size_t children_offset = tree_levels.back().node_count_prefix_sum;
+        size_t key_count_prefix_sum = children_offset * max_keys;
+        std::copy(input.begin(), input.end(), keys.begin() + key_count_prefix_sum);
 
-        auto leaves = std::make_unique<tree_level_t>();
-        auto node = std::make_unique<intermediate_node>();
-        node->is_leaf = true;
+        child_ref_t values_prefix_sum = 0;
+        for (auto& node : tree_levels.back().nodes) {
+            children[children_offset] = values_prefix_sum;
 
-        // construct leaves
-        for (uint64_t i = 0; i < n; i++) {
-            auto k = input[i];
-            value_t value = i;
-            if (node->count >= max_keys) {
-                leaves->push_back(std::move(node));
-                node = std::make_unique<intermediate_node>();
-                node->is_leaf = true;
-            }
-            add(*node, k, value);
-        }
-        leaves->push_back(std::move(node));
-
-        tree_levels_t tree_levels;
-        tree_levels.push_back(std::move(leaves));
-
-        // recursively construct the remaining levels in bottom-up fashion
-        construct_inner_nodes(tree_levels);
-
-        return tree_levels;
-    }
-
-    __host__ void fill_underfull_node(intermediate_node& node) {
-        for (uint64_t i = 1; i < max_keys; ++i) {
-            if (node.keys[i - 1] > node.keys[i]) {
-                node.keys[i] = std::numeric_limits<key_t>::max();
-            }
+            // prepare next iteration
+            values_prefix_sum += max_keys;
+            children_offset += 1;
         }
     }
 
-    __host__ void store_nodes(tree_levels_t& tree_levels) {
-        uint64_t key_offset = 0;
-
-        // the keys are stored in breadth first order
-        for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
-            auto& tree_level = *(*it);
-            fill_underfull_node(*tree_level.back());
-
-            for (auto& node : tree_level) {
-                std::memcpy(&keys[key_offset], node->keys, sizeof(key_t)*max_keys);
-                key_offset += max_keys;
-            }
-        }
-    }
-
-    __host__ void store_structure(const tree_levels_t& tree_levels) {
-        uint64_t children_offset = 0;
-        child_ref_t prefix_sum = 1;
-
-        // levels are stored in reverse order since the tree was constructed in bottom-up fashion
-        for (auto it = std::rbegin(tree_levels); it != std::rend(tree_levels); ++it) {
-            auto& tree_level = *(*it);
-            if (tree_level.front()->is_leaf) {
-                child_ref_t values_prefix_sum = 0;
-                for (auto& node : tree_level) {
-                    children[children_offset++] = values_prefix_sum;
-                    values_prefix_sum += max_keys;
-                }
-            } else {
-                // write out the prefix sum array entries
-                for (auto& node : tree_level) {
-                    children[children_offset++] = prefix_sum;
-                    prefix_sum += node->count + 1;
-                }
-            }
+    template<class Vector>
+    __host__ void populate_nodes(std::vector<level_data>& tree_levels, const Vector& input) {
+        populate_leaf_nodes(tree_levels, input);
+        if (tree_levels.size() > 1) {
+            populate_inner_nodes(tree_levels, tree_levels.size() - 2);
         }
     }
 
@@ -222,17 +256,23 @@ struct harmonia_tree {
     __host__ void construct(const Vector& input) {
         assert(input.size() < std::numeric_limits<device_size_t>::max());
 
-        auto tree_levels = construct_levels(input);
-        auto& root = tree_levels.front()->front();
+        auto levels = gather_tree_info(input);
+        create_node_descriptions(levels);
 
-        // allocate arrays
-        // transform_reduce was introduced with c++17
-        //const auto node_count = std::transform_reduce(tree_levels.begin(), tree_levels.end(), 0, std::plus<>(), [](auto& level) { return level->size(); });
-        uint64_t node_count = 0;
-        for (const auto& level : tree_levels) {
-            node_count += level->size();
+        // prefix sum of all offsets over the levels in downward order
+        size_t total_node_count = 0;
+        size_t total_key_count = 0;
+        for (auto& level : levels) {
+            level.node_count_prefix_sum = total_node_count;
+            total_node_count += level.nodes.size();
+
+            level.key_count_prefix_sum = total_key_count;
+            total_key_count += level.key_count;
         }
 
+        // allocate memory for all the arrays
+        const auto& leaf_level = levels.back();
+        const auto node_count = leaf_level.node_count_prefix_sum + leaf_level.nodes.size();
         const auto key_array_size = max_keys*node_count;
         keys.resize(key_array_size);
         children.resize(node_count);
@@ -240,28 +280,26 @@ struct harmonia_tree {
             values.resize(input.size());
         }
 
-        store_nodes(tree_levels);
-        store_structure(tree_levels);
+        printf("arrays allocated\n");
 
-        if /*constexpr*/ (!Sorted_Only) {
-            // insert values
-            for (uint64_t i = 0; i < input.size(); ++i) {
-                values[i] = i;
-            }
-        }
+        // populate the entire key array with `max_key`
+        // so that underfull nodes do not require any special logic during lookup
+        std::fill(keys.begin(), keys.end(), key_t(max_key));
 
         // initialize remaining members
-        depth = tree_levels.size();
+        depth = levels.size();
         size = input.size();
 
-	if (depth > max_depth) throw std::runtime_error("max depth exceeded");
+        populate_nodes(levels, input);
+
+        if (depth > max_depth) throw std::runtime_error("max depth exceeded");
 
         if (input.size() < 1000*10) return;
 
         // optimize ntg sizes
         std::vector<key_t> key_sample;
         key_sample.reserve(1000);
-        // sample was introduced with c++17
+        // sample was introduced in c++17
         //std::sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
         simple_sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
         optimize_ntg(key_sample);
