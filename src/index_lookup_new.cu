@@ -1,3 +1,4 @@
+#include "device_definitions.hpp"
 #include "index_lookup.cuh"
 
 #include <cmath>
@@ -9,6 +10,7 @@
 
 #include <oneapi/tbb/parallel_sort.h>
 
+#include "generic_hj.cuh"
 #include "index_lookup_config.hpp"
 #include "index_lookup_common.cuh"
 #include "index_lookup_partitioning.cuh"
@@ -217,11 +219,45 @@ struct bws_lookup_args {
     }
 };
 
+template<class IndexType>
+struct hj_approach {
+    void operator()(query_data& d) {
+        const auto& config = get_experiment_config();
+
+        hj_ht_t ht(d.lookup_keys.size());
+        hj_mutable_state mutable_state {
+            ht.deviceHandle
+        };
+
+        auto d_mutable_state = create_device_array<hj_mutable_state>(1);
+        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
+
+        const hj_args args {
+            // Inputs
+            d.d_lookup_keys.data(),
+            d.lookup_keys.size(),
+            d.d_indexed.data(),
+            d.indexed.size(),
+            // State and outputs
+            d_mutable_state.data(),
+            d.d_tids.data()
+        };
+
+        int num_blocks = (d.d_lookup_keys.size() + config.block_size - 1) / config.block_size;
+        hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
+
+        num_blocks = (d.d_indexed.size() + config.block_size - 1) / config.block_size;
+        hj_probe_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
+        cudaDeviceSynchronize();
+    }
+};
+
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "plain", std::make_shared<approach_dispatcher<plain_approach>>() },
     { "bws", std::make_shared<approach_dispatcher<blockwise_sorting_approach>>() },
-    { "partitioning", std::make_shared<approach_dispatcher<partitioning_approach>>() }
+    { "partitioning", std::make_shared<approach_dispatcher<partitioning_approach>>() },
+    { "hj", std::make_shared<approach_dispatcher<hj_approach>>() }
 };
 
 static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs, const query_data& qd) {
