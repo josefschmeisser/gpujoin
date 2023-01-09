@@ -2,6 +2,8 @@
 
 #include <limits>
 
+#include <fast-interconnects/gpu_common.h>
+
 #include "cuda_utils.cuh"
 #include "device_definitions.hpp"
 
@@ -38,11 +40,21 @@ public:
         __device__ bool lookup(Key key, Value& value) {
             device_size_t slot = murmur3_hash(key) & (capacity - 1);
             while (true) {
+                /*
                 Entry* entry = &table[slot];
                 if (entry->key == key) {
                     value = entry->value;
                     return true;
                 } else if (entry->key == emptyMarker) {
+                    return false;
+                }
+                slot = (slot + 1) & (capacity - 1);*/
+                longlong2 tmp = ptx_load_cache_streaming(reinterpret_cast<longlong2 const *>(&table[slot]));
+                const Key slot_key = tmp.x;
+                if (slot_key == key) {
+                    value = tmp.y;
+                    return true;
+                } else if (slot_key == emptyMarker) {
                     return false;
                 }
                 slot = (slot + 1) & (capacity - 1);
