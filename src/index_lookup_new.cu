@@ -25,6 +25,16 @@
 using namespace measuring;
 
 
+template<class VectorType>
+static VectorType& choose_build_side(VectorType& indexed, VectorType& lookup_keys) {
+    return (indexed.size() > lookup_keys.size()) ? lookup_keys : indexed;
+}
+
+template<class VectorType>
+static VectorType& choose_probe_side(VectorType& indexed, VectorType& lookup_keys) {
+    return (indexed.size() > lookup_keys.size()) ? indexed : lookup_keys;
+}
+
 query_data::query_data() {
     auto& config = get_experiment_config();
 
@@ -86,18 +96,27 @@ void query_data::create_index() {
 }
 
 bool query_data::validate_results() {
+    const auto& config = get_experiment_config();
+
     auto h_tids = d_tids.to_host_accessible();
     auto h_tids_raw = h_tids.data();
 
+    auto* actual_indexed = &indexed;
+    auto* actual_lookup_keys = &lookup_keys;
+    if (config.approach == "hj") {
+        actual_indexed = &choose_build_side(indexed, lookup_keys);
+        actual_lookup_keys = &choose_probe_side(indexed, lookup_keys);
+    }
+
     // validate results
     printf("validating results...\n");
-    for (unsigned i = 0; i < lookup_keys.size(); ++i) {
-        if (h_tids_raw[i] > indexed.size()) {
-            std::cerr << "invalid tid: " << h_tids_raw[i] << ", at " << i << " from " << lookup_keys.size() << std::endl;
+    for (unsigned i = 0; i < actual_lookup_keys->size(); ++i) {
+        if (h_tids_raw[i] > actual_indexed->size()) {
+            std::cerr << "invalid tid: " << h_tids_raw[i] << ", at " << i << " from " << actual_lookup_keys->size() << std::endl;
             return false;
         }
-        if (lookup_keys[i] != indexed[h_tids_raw[i]]) {
-            std::cerr << "lookup_keys[" << i << "]: " << lookup_keys[i] << "indexed[h_tids[" << i << "]]: " << indexed[h_tids_raw[i]] << std::endl;
+        if (lookup_keys[i] != actual_indexed->at(h_tids_raw[i])) {
+            std::cerr << "lookup_keys[" << i << "]: " << actual_lookup_keys->at(i) << "indexed[h_tids[" << i << "]]: " << actual_indexed->at(h_tids_raw[i]) << std::endl;
             return false;
         }
     }
@@ -232,21 +251,24 @@ struct hj_approach {
         auto d_mutable_state = create_device_array<hj_mutable_state>(1);
         target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
 
+        // Choose the smaller relation as build side
+        auto& d_build_side = choose_build_side(d.d_indexed, d.d_lookup_keys);
+        auto& d_probe_side = choose_probe_side(d.d_indexed, d.d_lookup_keys);
         const hj_args args {
             // Inputs
-            d.d_lookup_keys.data(),
-            d.lookup_keys.size(),
-            d.d_indexed.data(),
-            d.indexed.size(),
+            d_build_side.data(),
+            d_build_side.size(),
+            d_probe_side.data(),
+            d_probe_side.size(),
             // State and outputs
             d_mutable_state.data(),
             d.d_tids.data()
         };
 
-        int num_blocks = (d.d_lookup_keys.size() + config.block_size - 1) / config.block_size;
+        int num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
-        num_blocks = (d.d_indexed.size() + config.block_size - 1) / config.block_size;
+        num_blocks = (d_probe_side.size() + config.block_size - 1) / config.block_size;
         hj_probe_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
     }
