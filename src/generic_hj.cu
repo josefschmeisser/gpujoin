@@ -13,7 +13,7 @@ __global__ void hj_build_kernel(const hj_args args) {
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
     for (size_t i = index; i < args.build_side_size; i += stride) {
-        printf("build_side_rel[i]: %lu i: %lu\n", build_side_rel[i], i);
+        //printf("build_side_rel[i]: %lu i: %lu\n", build_side_rel[i], i);
         ht.insert(build_side_rel[i], i);
     }
 }
@@ -34,7 +34,7 @@ __global__ void hj_probe_kernel(const hj_args args) {
         const auto k = probe_side_rel[i];
         bool match = ht.lookup(k, build_side_tid);
         if (match) {
-            printf("k: %lu build_side_tid: %lu\n", k, build_side_tid);
+            //printf("k: %lu build_side_tid: %lu\n", k, build_side_tid);
             //tids[build_side_tid] = build_side_rel[build_side_tid];
             tids[build_side_tid] = k;
         }

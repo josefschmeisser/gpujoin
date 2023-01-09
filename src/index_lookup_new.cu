@@ -101,7 +101,7 @@ bool query_data::validate_results() {
     auto h_tids = d_tids.to_host_accessible();
     auto h_tids_raw = h_tids.data();
 
-    std::cout << "h_tids: " << stringify(h_tids_raw, h_tids_raw + h_tids.size()) << std::endl;
+    //std::cout << "h_tids: " << stringify(h_tids_raw, h_tids_raw + h_tids.size()) << std::endl;
 
     auto* actual_indexed = &indexed;
     auto* actual_lookup_keys = &lookup_keys;
@@ -274,9 +274,8 @@ struct hj_approach {
             d.d_tids.data()
         };
 
-//printf("launching kernels...\n");
-        std::cout << "indexed: " << stringify(d.indexed.begin(), d.indexed.end()) << std::endl;
-        std::cout << "lookups: " << stringify(d.lookup_keys.begin(), d.lookup_keys.end()) << std::endl;
+        //std::cout << "indexed: " << stringify(d.indexed.begin(), d.indexed.end()) << std::endl;
+        //std::cout << "lookups: " << stringify(d.lookup_keys.begin(), d.lookup_keys.end()) << std::endl;
         int num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
