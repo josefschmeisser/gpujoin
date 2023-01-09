@@ -101,13 +101,16 @@ bool query_data::validate_results() {
     auto h_tids = d_tids.to_host_accessible();
     auto h_tids_raw = h_tids.data();
 
+    std::cout << "h_tids: " << stringify(h_tids_raw, h_tids_raw + h_tids.size()) << std::endl;
+
     auto* actual_indexed = &indexed;
     auto* actual_lookup_keys = &lookup_keys;
+/*
     if (config.approach == "hj") {
         actual_indexed = &choose_build_side(indexed, lookup_keys);
         actual_lookup_keys = &choose_probe_side(indexed, lookup_keys);
     }
-
+*/
     // validate results
     printf("validating results...\n");
     for (unsigned i = 0; i < actual_lookup_keys->size(); ++i) {
@@ -115,8 +118,9 @@ bool query_data::validate_results() {
             std::cerr << "invalid tid: " << h_tids_raw[i] << ", at " << i << " from " << actual_lookup_keys->size() << std::endl;
             return false;
         }
-        if (lookup_keys[i] != actual_indexed->at(h_tids_raw[i])) {
-            std::cerr << "lookup_keys[" << i << "]: " << actual_lookup_keys->at(i) << "indexed[h_tids[" << i << "]]: " << actual_indexed->at(h_tids_raw[i]) << std::endl;
+        if (actual_lookup_keys->at(i) != actual_indexed->at(h_tids_raw[i])) {
+            std::cerr << "h_tids_raw[" << i << "]: " << h_tids_raw[i] << std::endl;
+            std::cerr << "lookup_keys[" << i << "]: " << actual_lookup_keys->at(i) << " indexed[h_tids[" << i << "]]: " << actual_indexed->at(h_tids_raw[i]) << std::endl;
             return false;
         }
     }
@@ -252,8 +256,13 @@ struct hj_approach {
         target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
 
         // Choose the smaller relation as build side
+        /*
         auto& d_build_side = choose_build_side(d.d_indexed, d.d_lookup_keys);
         auto& d_probe_side = choose_probe_side(d.d_indexed, d.d_lookup_keys);
+        */
+        auto& d_build_side = d.d_lookup_keys;
+        auto& d_probe_side = d.d_indexed;
+
         const hj_args args {
             // Inputs
             d_build_side.data(),
@@ -265,6 +274,9 @@ struct hj_approach {
             d.d_tids.data()
         };
 
+//printf("launching kernels...\n");
+        std::cout << "indexed: " << stringify(d.indexed.begin(), d.indexed.end()) << std::endl;
+        std::cout << "lookups: " << stringify(d.lookup_keys.begin(), d.lookup_keys.end()) << std::endl;
         int num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
@@ -375,7 +387,7 @@ int main(int argc, char** argv) {
     } else {
         measuring_config.stdout_only = true;
     }
-    measuring_config.repetitions = 10;
+    measuring_config.repetitions = 1;
 /*
     if (config.execute_predefined_scenario) {
         execute_benchmark_scenario();

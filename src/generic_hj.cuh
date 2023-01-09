@@ -26,7 +26,7 @@ struct hj_args {
 };
 
 template<class KeyType>
-__global__ void hj_build_kernel(hj_args args);
+__global__ void hj_build_kernel(const hj_args args);
 
 template<class KeyType>
-__global__ void hj_probe_kernel(hj_args args);
+__global__ void hj_probe_kernel(const hj_args args);

@@ -48,7 +48,7 @@ void populate_densely(VectorType& v) {
 template<class T, class VectorType>
 void populate_uniformly(VectorType& v, uint64_t limit) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
-        std::mt19937 rng {r.begin()};
+        std::mt19937 rng {r.begin()}; // TODO check unique?
         std::uniform_int_distribution<T> lookup_distribution(0ul, limit - 1ul);
         std::generate(v.begin() + r.begin(), v.begin() + r.end(), [&]() { return lookup_distribution(rng); });
         /*
@@ -60,14 +60,57 @@ void populate_uniformly(VectorType& v, uint64_t limit) {
     });
 }
 
-template<class T, class VectorType>
-void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
-    if (max_bits < std::log2(2*v.size())) {
-        // increase sparsity by providing a larger value for max_bits
-        throw std::runtime_error("not sparse enough");
-    }
-    const std::size_t upper_limit = 1ul << (max_bits - 1u);
+inline size_t upper_limit_by_max_bits(unsigned max_bits) {
+    const size_t upper_limit = 1ul << (max_bits - 1u);
+    return upper_limit;
+}
 
+template<class T, class VectorType>
+void populate_uniquely_uniformly(VectorType& v, size_t upper_limit) {
+#if 0
+    // TODO: consider https://stackoverflow.com/a/6953958
+
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+    //oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, upper_limit), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+        //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
+        assert(r.size() > 0);
+
+        // create random keys
+        std::mt19937 rng {r.begin()};
+        std::uniform_int_distribution<T> key_distrib(0, upper_limit);
+        std::unordered_set<T> unique;
+        unique.reserve(r.size());
+
+        while (unique.size() < r.size()) {
+            const auto key = key_distrib(rng);
+            if (key >= r.begin() && key < r.end()) {
+                unique.insert(key);
+            }
+        }
+
+        std::copy(unique.begin(), unique.end(), v.begin() + r.begin());
+    });
+#endif
+    std::mt19937 rng {};
+    std::uniform_int_distribution<T> key_distrib(0, upper_limit - 1);
+    std::unordered_set<T> unique;
+    unique.reserve(v.size());
+
+    while (unique.size() < v.size()) {
+        const auto key = key_distrib(rng);
+        //assert(key < upper_limit);
+        if (key >= upper_limit) continue;
+        if (unique.count(key) < 1) {
+            //std::cout << "found: " << key << std::endl;
+            unique.insert(key);
+        }
+    }
+
+    std::copy(unique.begin(), unique.end(), v.begin());
+}
+
+template<class T, class VectorType>
+void populate_uniquely_uniformly_sorted(VectorType& v, size_t upper_limit) {
     // TODO: consider https://stackoverflow.com/a/6953958
 
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
@@ -77,9 +120,9 @@ void populate_uniquely_uniformly(VectorType& v, unsigned max_bits) {
         std::mt19937 rng {r.begin()};
         std::uniform_int_distribution<T> key_distrib(0, upper_limit);
         std::unordered_set<T> unique;
-        unique.reserve(v.size());
+        unique.reserve(v.size()); // TODO r.size() ?
 
-        while (unique.size() < v.size()) {
+        while (unique.size() < v.size()) { // TODO r.size() ?
             const auto key = key_distrib(rng);
             unique.insert(key);
         }
@@ -107,6 +150,13 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
 
     if (keys.size() - 1 > upper_limit) {
         throw std::runtime_error("resulting dataset would exceed the provided limit defined by 'max_bits'");
+    } else if (dt == dataset_type::sparse && max_bits < std::log2(2*keys.size())) {
+        // increase sparsity by providing a larger value for max_bits
+        throw std::runtime_error("index dataset not sparse enough");
+    }
+
+    if (lookup_pattern == lookup_pattern_type::uniform_unique && 2*keys.size() < lookups.size()) {
+        throw std::runtime_error("lookup dataset not sparse enough");
     }
 
     // generate dataset to be indexed
@@ -116,7 +166,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
             populate_densely<KeyType, VectorType>(keys);
             break;
         case dataset_type::sparse:
-            populate_uniquely_uniformly<KeyType, VectorType>(keys, max_bits);
+            populate_uniquely_uniformly_sorted<KeyType, VectorType>(keys, upper_limit_by_max_bits(max_bits));
             break;
         default:
             assert(false);
@@ -127,6 +177,9 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     switch (lookup_pattern) {
         case lookup_pattern_type::uniform:
             populate_uniformly<uint64_t, VectorType>(lookups, keys.size());
+            break;
+        case lookup_pattern_type::uniform_unique:
+            populate_uniquely_uniformly<uint64_t, VectorType>(lookups, keys.size());
             break;
         case lookup_pattern_type::zipf:
             populate_with_zipfian_pattern<uint64_t, VectorType>(lookups, keys.size(), zipf_factor);

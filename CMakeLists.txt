@@ -54,6 +54,7 @@ include_directories(
 #target_link_libraries(rs_lookup ${CUDART_LIBRARY} numa radixspline)
 
 add_executable(index_lookup
+    src/generic_hj.cu
     src/index_lookup_new.cu
     src/index_lookup_partitioning.cu
     src/measuring.cpp
