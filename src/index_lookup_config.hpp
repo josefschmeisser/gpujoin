@@ -9,7 +9,7 @@
 
 enum class dataset_type : unsigned { dense, sparse };
 
-enum class lookup_pattern_type : unsigned { uniform, zipf };
+enum class lookup_pattern_type : unsigned { uniform, uniform_unique, zipf };
 
 // experiment config with default constants
 struct experiment_config {
@@ -37,6 +37,7 @@ static const uint32_t radix_bits = 11;
 using index_key_t = uint32_t;
 using value_t = uint32_t;
 */
+
 using index_key_t = uint64_t;
 using value_t = uint64_t;
 

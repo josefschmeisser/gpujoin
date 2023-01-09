@@ -75,6 +75,8 @@ void parse_options(int argc, char** argv) {
     const auto lookup_pattern_str = result["lookup_pattern"].as<std::string>();
     if (lookup_pattern_str == "uniform") {
         config.lookup_pattern = lookup_pattern_type::uniform;
+    } else if (lookup_pattern_str == "uniform_unique") {
+        config.lookup_pattern = lookup_pattern_type::uniform_unique;
     } else if (lookup_pattern_str == "zipf") {
         config.lookup_pattern = lookup_pattern_type::zipf;
     } else {
