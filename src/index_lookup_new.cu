@@ -276,7 +276,7 @@ struct hj_approach {
 
         //std::cout << "indexed: " << stringify(d.indexed.begin(), d.indexed.end()) << std::endl;
         //std::cout << "lookups: " << stringify(d.lookup_keys.begin(), d.lookup_keys.end()) << std::endl;
-        int num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
+        size_t num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
         num_blocks = (d_probe_side.size() + config.block_size - 1) / config.block_size;

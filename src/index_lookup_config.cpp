@@ -15,7 +15,16 @@ std::string tmpl_to_string(const dataset_type& v) {
 
 template<>
 std::string tmpl_to_string(const lookup_pattern_type& v) {
-    return (v == lookup_pattern_type::uniform) ? "uniform" : "zipf";
+    switch (v) {
+        case lookup_pattern_type::uniform:
+            return "uniform";
+        case lookup_pattern_type::uniform_unique:
+            return "uniform_unique";
+        case lookup_pattern_type::zipf:
+            return "zipf";
+        default:
+            assert(false);
+    }
 }
 
 experiment_config& get_experiment_config() {
