@@ -13,3 +13,21 @@ target_compile_options(test_harmonia PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>
 
 add_executable(test_huge_page_allocator test_huge_page_allocator.cpp)
 target_link_libraries(test_huge_page_allocator gtest gtest_main pthread numa)
+
+
+
+
+
+
+add_executable(tester
+    main.cu
+)
+set_target_properties(tester PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+target_link_libraries(tester ${CUDART_LIBRARY} gtest cub) # numa cub radixspline onetbb fast_interconnects)
+# additional nvcc flags
+target_compile_options(tester PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+#target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas="-v">)
+#target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
+# debug flag
+#target_compile_options(index_lookup PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>")
+target_compile_options(tester PRIVATE "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo>")
