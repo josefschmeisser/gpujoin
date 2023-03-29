@@ -4,6 +4,7 @@
 
 #include "device_definitions.hpp"
 #include "LinearProbingHashTable.cuh"
+#include "index_lookup_config.hpp"
 
 //using hj_ht_t = LinearProbingHashTable<indexed_t, size_t>;
 using hj_ht_t = LinearProbingHashTable<index_key_t, device_size_t>;

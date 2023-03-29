@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #define FULL_MASK 0xffffffff
 
 #ifndef GPU_CACHE_LINE_SIZE
@@ -98,11 +100,11 @@ __host__ __device__ uint64_t murmur3_hash(const T k) {
 
 // maps integral integer types to their respective atomicCAS input types
 template <class T, class T2 = void>
-struct to_atomic_cas_input;
+struct to_cuda_atomic_input;
 
 // 16bit integral types
 template <class T>
-struct to_atomic_cas_input<
+struct to_cuda_atomic_input<
     T,
     typename std::enable_if<std::is_integral<T>::value && sizeof(T) == sizeof(uint16_t)>::type
 > {
@@ -111,7 +113,7 @@ struct to_atomic_cas_input<
 
 // 32bit integral types
 template <class T>
-struct to_atomic_cas_input<
+struct to_cuda_atomic_input<
     T,
     typename std::enable_if<std::is_integral<T>::value && sizeof(T) == sizeof(uint32_t)>::type
 > {
@@ -120,7 +122,7 @@ struct to_atomic_cas_input<
 
 // 64bit integral types
 template <class T>
-struct to_atomic_cas_input<
+struct to_cuda_atomic_input<
     T,
     typename std::enable_if<std::is_integral<T>::value && sizeof(T) == sizeof(uint64_t)>::type
 > {
@@ -128,8 +130,18 @@ struct to_atomic_cas_input<
 };
 
 template <class T>
+__device__ T tmpl_atomic_add(T* address, T val) {
+    using input_type = typename to_cuda_atomic_input<T>::type;
+    static_assert(sizeof(input_type) == sizeof(T));
+    return atomicAdd(
+        reinterpret_cast<input_type*>(address),
+        static_cast<input_type>(val)
+    );
+}
+
+template <class T>
 __device__ T tmpl_atomic_cas(T* address, T compare, T val) {
-    using input_type = typename to_atomic_cas_input<T>::type;
+    using input_type = typename to_cuda_atomic_input<T>::type;
     static_assert(sizeof(input_type) == sizeof(T));
     return atomicCAS(
         reinterpret_cast<input_type*>(address),

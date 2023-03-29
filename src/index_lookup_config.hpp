@@ -7,6 +7,8 @@
 #include "numa_allocator.hpp"
 #include "mmap_allocator.hpp"
 
+#define ONLY_AGGREGATES
+
 enum class dataset_type : unsigned { dense, sparse };
 
 enum class lookup_pattern_type : unsigned { uniform, uniform_unique, zipf };

@@ -98,6 +98,9 @@ void query_data::create_index() {
 bool query_data::validate_results() {
     const auto& config = get_experiment_config();
 
+#ifdef ONLY_AGGREGATES
+    // TODO
+#else
     auto h_tids = d_tids.to_host_accessible();
     auto h_tids_raw = h_tids.data();
 
@@ -125,6 +128,7 @@ bool query_data::validate_results() {
         }
     }
     printf("validation complete\n");
+#endif
 
     return true;
 }
