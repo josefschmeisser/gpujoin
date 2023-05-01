@@ -8,6 +8,7 @@ ExternalProject_Add(
     cucollections_src
     PREFIX ${CUCOLLECTIONS_PREFIX}
     GIT_REPOSITORY "https://github.com/NVIDIA/cuCollections.git"
+    GIT_TAG "dev"
     TIMEOUT 10
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
@@ -23,8 +24,8 @@ file(MAKE_DIRECTORY ${CUCOLLECTIONS_INCLUDE_DIR}) # https://gitlab.kitware.com/c
 # to propagte include directories via INTERFACE_INCLUDE_DIRECTORIES to targets.
 # By adding such a library through target_link_libraries() to a target,
 # the library's interface include directories will be propagated to the target.
-add_library(cucollections INTERFACE)
-set_target_properties(cucollections PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CUCOLLECTIONS_INCLUDE_DIR})
+add_library(cuCollections INTERFACE)
+set_target_properties(cuCollections PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CUCOLLECTIONS_INCLUDE_DIR})
 
 # Dependencies
-add_dependencies(cucollections cucollections_src)
+add_dependencies(cuCollections cucollections_src)
