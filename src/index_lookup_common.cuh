@@ -11,10 +11,10 @@
 #include <utility>
 #include <vector>
 
+#include <oneapi/tbb/parallel_for.h>
+
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_radix_sort.cuh>
-
-#include <oneapi/tbb/parallel_for.h>
 
 #include "utils.hpp"
 #include "zipf.hpp"
