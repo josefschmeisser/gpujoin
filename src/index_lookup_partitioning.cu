@@ -373,7 +373,7 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 }
 
 template<class IndexType>
-void partitioning_approach<IndexType>::operator()(query_data& d) {
+void partitioning_approach<IndexType>::operator()(query_data& d, measurement& m) {
     printf("partitioning_approach\n");
     const auto& config = get_experiment_config();
     const auto& device_properties = get_device_properties(0);
@@ -413,8 +413,8 @@ void partitioning_approach<IndexType>::operator()(query_data& d) {
     cudaDeviceSynchronize();
 }
 
-template void partitioning_approach<btree_type>::operator()(query_data& d);
-template void partitioning_approach<harmonia_type>::operator()(query_data& d);
-template void partitioning_approach<binary_search_type>::operator()(query_data& d);
-template void partitioning_approach<radix_spline_type>::operator()(query_data& d);
-template void partitioning_approach<no_op_type>::operator()(query_data& d);
+template void partitioning_approach<btree_type>::operator()(query_data& d, measurement& m);
+template void partitioning_approach<harmonia_type>::operator()(query_data& d, measurement& m);
+template void partitioning_approach<binary_search_type>::operator()(query_data& d, measurement& m);
+template void partitioning_approach<radix_spline_type>::operator()(query_data& d, measurement& m);
+template void partitioning_approach<no_op_type>::operator()(query_data& d, measurement& m);

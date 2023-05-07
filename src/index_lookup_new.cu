@@ -135,27 +135,27 @@ bool query_data::validate_results() {
 
 
 struct abstract_approach_dispatcher {
-    virtual void run(query_data& d, index_type_enum index_type) const = 0;
+    virtual void run(query_data& d, index_type_enum index_type, measurement& m) const = 0;
 };
 
 template<template<class T> class Func>
 struct approach_dispatcher : public abstract_approach_dispatcher {
-    void run(query_data& d, index_type_enum index_type) const override {
+    void run(query_data& d, index_type_enum index_type, measurement& m) const override {
         switch (index_type) {
             case index_type_enum::btree:
-                Func<btree_type>()(d);
+                Func<btree_type>()(d, m);
                 break;
             case index_type_enum::harmonia:
-                Func<harmonia_type>()(d);
+                Func<harmonia_type>()(d, m);
                 break;
             case index_type_enum::binary_search:
-                Func<binary_search_type>()(d);
+                Func<binary_search_type>()(d, m);
                 break;
             case index_type_enum::radix_spline:
-                Func<radix_spline_type>()(d);
+                Func<radix_spline_type>()(d, m);
                 break;
             case index_type_enum::no_op:
-                Func<no_op_type>()(d);
+                Func<no_op_type>()(d, m);
                 break;
             default:
                 assert(false);
@@ -165,14 +165,14 @@ struct approach_dispatcher : public abstract_approach_dispatcher {
 
 template<class IndexType>
 struct my_approach {
-    void operator()(query_data& d) {
+    void operator()(query_data& d, measurement& m) {
         printf("my approach %s\n", type_name<IndexType>::value());
     }
 };
 
 template<class IndexType>
 struct plain_approach {
-    void operator()(query_data& d) {
+    void operator()(query_data& d, measurement& m) {
         const auto& config = get_experiment_config();
 
         const int num_blocks = (config.num_lookups + config.block_size - 1) / config.block_size;
@@ -188,7 +188,7 @@ struct plain_approach {
 
 template<class IndexType>
 struct blockwise_sorting_approach {
-    void operator()(query_data& d) {
+    void operator()(query_data& d, measurement& m) {
         const auto& config = get_experiment_config();
         const auto& device_properties = get_device_properties(0);
 
@@ -248,7 +248,9 @@ struct bws_lookup_args {
 
 template<class IndexType>
 struct hj_approach {
-    void operator()(query_data& d) {
+    void operator()(query_data& d, measurement& m) {
+        record_timestamp(m);
+
         const auto& config = get_experiment_config();
 
         hj_ht_t ht(d.lookup_keys.size());
@@ -278,14 +280,25 @@ struct hj_approach {
             d.d_tids.data()
         };
 
+        record_timestamp(m);
         //std::cout << "indexed: " << stringify(d.indexed.begin(), d.indexed.end()) << std::endl;
         //std::cout << "lookups: " << stringify(d.lookup_keys.begin(), d.lookup_keys.end()) << std::endl;
         size_t num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
+        cudaDeviceSynchronize();
+        record_timestamp(m);
+
         num_blocks = (d_probe_side.size() + config.block_size - 1) / config.block_size;
         hj_probe_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
+
+        auto tmp = d_mutable_state.to_host_accessible();
+
+        double total_steps = tmp.data()->ht.counter;
+        double avg_steps = total_steps / d_probe_side.size();
+        printf("total_steps: %f avg_steps: %f\n", total_steps, avg_steps);
+        record_timestamp(m);
     }
 };
 
@@ -369,7 +382,7 @@ void execute_approach(std::string approach_name) {
         return qd.validate_results();
     };
     measure(experiment_desc, [&](auto& measurement) {
-        approaches.at(approach_name)->run(qd, index_type);
+        approaches.at(approach_name)->run(qd, index_type, measurement);
     }, validator);
 }
 
