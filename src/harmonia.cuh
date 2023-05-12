@@ -140,9 +140,8 @@ struct harmonia_tree {
             previous_page_count = page_count;
 
             //std::cout << "level current_key_count: " << current_key_count << " page_count: " << page_count << std::endl;
-            //current_key_count = page_count - 1; // TODO check
             current_key_count = std::floor(static_cast<float>(max_keys * page_count) / static_cast<float>(fanout));
-            std::cout << "next key count: " << current_key_count << std::endl;
+            //std::cout << "next key count: " << current_key_count << std::endl;
             if (page_count == 1) {
                 break;
             }
@@ -225,13 +224,15 @@ struct harmonia_tree {
         bool skipped = true;
         size_t next_key_idx = 0;
         for (size_t node_idx = 0; node_idx < lower_level_data.node_count - 1; ++node_idx) {
+            // The separator between two pages is implicitly given by their parent node.
+            // Hence, every `max_keys` keys one key can be omitted.
             if (!skipped && (next_key_idx % max_keys) == 0) {
                 skipped = true;
                 continue;
             }
 
             key_t sep = get_largest_key(tree_levels, current_level + 1, node_idx);
-            std::cout << "sep: " << sep << std::endl;
+            //std::cout << "sep: " << sep << std::endl;
             keys[level_keys_start + next_key_idx] = sep;
             next_key_idx += 1;
             skipped = false;
@@ -280,8 +281,8 @@ struct harmonia_tree {
                 children[children_offset++] = prefix_sum;
 
                 const auto node_key_count = (node_idx < level.node_count - 1) ? max_keys : (level.key_count - node_idx*max_keys);
-                std::cout << "node_key_count: " << node_key_count << " l k count: " << level.key_count << " node_idx: " << node_idx << " c: " << level.key_count - node_idx*max_keys << std::endl;
-                //prefix_sum += node->count + 1;
+                //std::cout << "node_key_count: " << node_key_count << " l k count: " << level.key_count << " node_idx: " << node_idx << " c: " << level.key_count - node_idx*max_keys << std::endl;
+
                 prefix_sum += node_key_count + 1;
             }
         }
@@ -304,7 +305,7 @@ struct harmonia_tree {
             values.resize(input.size());
         }
 
-        printf("arrays allocated\n");
+        //printf("arrays allocated\n");
 
         // populate the entire key array with `max_key`
         // so that underfull nodes do not require any special logic during lookup
