@@ -78,7 +78,8 @@ std::string tmpl_to_string(const T& value) {
 
 template<class InputIt>
 std::string stringify(InputIt first, InputIt last) {
-    auto comma_fold = [](std::string a, auto b) {
+    if (first == last) return std::string {};
+    auto comma_fold = [](std::string a, auto& b) -> std::string {
         return std::move(a) + ',' + tmpl_to_string(b);
     };
     return std::accumulate(std::next(first), last, tmpl_to_string(*first), comma_fold);
