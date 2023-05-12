@@ -37,6 +37,7 @@ include(lib/gtest.cmake)
 include(lib/cub.cmake)
 include(lib/oneTBB.cmake)
 include(lib/fast-interconnects.cmake)
+include(lib/cuCollections.cmake)
 
 # CUB does not use NDEBUG but rather DEBUG and _DEBUG, so we define the latter here
 add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
@@ -65,7 +66,7 @@ add_executable(index_lookup
     src/gpu_radix_partition.cu
 )
 set_target_properties(index_lookup PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline onetbb fast_interconnects)
+target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline onetbb fast_interconnects cuCollections)
 # additional nvcc flags
 target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
 #target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas="-v">)

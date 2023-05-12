@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-//#include <cuco/static_map.cuh>
+#include <cuco/static_map.cuh>
 
 #include "device_definitions.hpp"
 #include "LinearProbingHashTable.cuh"
