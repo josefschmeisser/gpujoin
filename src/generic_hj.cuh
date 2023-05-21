@@ -3,17 +3,11 @@
 #include <cstdint>
 
 #include "device_definitions.hpp"
-#include "LinearProbingHashTable.cuh"
+#include "linear_probing_hashtable.cuh"
 #include "index_lookup_config.hpp"
 
-//using hj_ht_t = LinearProbingHashTable<indexed_t, size_t>;
-using hj_ht_t = LinearProbingHashTable<index_key_t, device_size_t>;
-using hj_device_ht_t = hj_ht_t::DeviceHandle;
-
-struct hj_mutable_state {
-    // Ephemeral state
-    hj_device_ht_t ht;
-};
+using hj_ht_t = linear_probing_hashtable<index_key_t, device_size_t>;
+using hj_device_ht_t = hj_ht_t::device_handle;
 
 struct hj_args {
     // Inputs
@@ -21,8 +15,8 @@ struct hj_args {
     const device_size_t build_side_size;
     const void* __restrict__ const probe_side_rel;
     const device_size_t probe_side_size;
-    // State and outputs
-	hj_mutable_state* const state;
+    const hj_device_ht_t ht;
+    // Outputs
     value_t* __restrict__ tids;
 };
 

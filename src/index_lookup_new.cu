@@ -254,12 +254,13 @@ struct hj_approach {
         const auto& config = get_experiment_config();
 
         hj_ht_t ht(d.lookup_keys.size());
+        /*
         hj_mutable_state mutable_state {
             ht.deviceHandle
-        };
+        };*/
 
-        auto d_mutable_state = create_device_array<hj_mutable_state>(1);
-        target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
+        //auto d_mutable_state = create_device_array<hj_mutable_state>(1);
+        //target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
 
         // Choose the smaller relation as build side
         /*
@@ -275,8 +276,9 @@ struct hj_approach {
             d_build_side.size(),
             d_probe_side.data(),
             d_probe_side.size(),
+            ht._device_handle_inst,
             // State and outputs
-            d_mutable_state.data(),
+            //d_mutable_state.data(),
             d.d_tids.data()
         };
 
@@ -292,12 +294,12 @@ struct hj_approach {
         num_blocks = (d_probe_side.size() + config.block_size - 1) / config.block_size;
         hj_probe_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
-
+/*
         auto tmp = d_mutable_state.to_host_accessible();
 
         double total_steps = tmp.data()->ht.counter;
         double avg_steps = total_steps / d_probe_side.size();
-        printf("total_steps: %f avg_steps: %f\n", total_steps, avg_steps);
+        printf("total_steps: %f avg_steps: %f\n", total_steps, avg_steps);*/
         record_timestamp(m);
     }
 };
