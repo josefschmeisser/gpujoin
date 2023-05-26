@@ -252,6 +252,7 @@ struct hj_approach {
         record_timestamp(m);
 
         const auto& config = get_experiment_config();
+        const auto& device_properties = get_device_properties(0);
 
         hj_ht_t ht(d.lookup_keys.size());
         /*
@@ -285,13 +286,15 @@ struct hj_approach {
         record_timestamp(m);
         //std::cout << "indexed: " << stringify(d.indexed.begin(), d.indexed.end()) << std::endl;
         //std::cout << "lookups: " << stringify(d.lookup_keys.begin(), d.lookup_keys.end()) << std::endl;
-        size_t num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
+        //size_t num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
+        size_t num_blocks = 2 * device_properties.multiProcessorCount; // TODO optimiz
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
         cudaDeviceSynchronize();
         record_timestamp(m);
 
-        num_blocks = (d_probe_side.size() + config.block_size - 1) / config.block_size;
+        //num_blocks = (d_probe_side.size() + config.block_size - 1) / config.block_size;
+        num_blocks = 2 * device_properties.multiProcessorCount; // TODO optimiz
         hj_probe_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
 /*
