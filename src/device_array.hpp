@@ -227,7 +227,7 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
     }
 
     // allocate memory
-    array_allocator_type array_allocator = array_allocator;
+    array_allocator_type array_allocator;
     T* ptr = array_allocator.allocate(vec.size()); // allocators already take the target type size into account
 
     // we are limited to c++14, so no constexpr if here...
