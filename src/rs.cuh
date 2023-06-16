@@ -47,7 +47,9 @@ struct DeviceRadixSpline {
     size_t num_shift_bits_;
     size_t max_error_;
 
+    //rs_rt_entry_t* const radix_table_ = nullptr;
     rs_rt_entry_t* radix_table_;
+    //spline_point_t* const spline_points_ = nullptr;
     spline_point_t* spline_points_;
 };
 
@@ -97,7 +99,7 @@ template<class Key, class TargetAllocator>
 auto migrate_radix_spline(rs::RadixSpline<Key>& rs, DeviceRadixSpline<Key>& d_rs, TargetAllocator& target_allocator) {
     device_array_guard<Key> guard;
 
-    RawRadixSpline<Key>* rrs = reinterpret_cast<RawRadixSpline<Key>*>(&rs);
+    auto rrs = reinterpret_cast<RawRadixSpline<Key>*>(&rs);
     std::memcpy(&d_rs, &rs, sizeof(DeviceRadixSpline<Key>));
 
     // copy radix table
@@ -140,8 +142,10 @@ __device__ double get_estimate(const DeviceRadixSpline<Key>& rs, const Key key) 
 
     // find spline segment
     const auto index = get_spline_segment(rs, key);
-    const auto& down = rs.spline_points_[index - 1];
-    const auto& up = rs.spline_points_[index];
+    //const auto& down = rs.spline_points_[index - 1];
+    const rs::Coord<Key> down = rs.spline_points_[index - 1];
+    //const auto& up = rs.spline_points_[index];
+    const rs::Coord<Key> up = rs.spline_points_[index];
 
     // slope
     const double x_diff = up.x - down.x;

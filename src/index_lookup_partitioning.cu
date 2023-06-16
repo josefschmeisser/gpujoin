@@ -213,8 +213,8 @@ __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
     }
 }
 
-template<class TupleType, class IndexStructureType>
-__global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
+template<class TupleType, class IndexStructureType, class IndexStructureDeviceHandleType>
+__global__ void partitioned_lookup_kernel(const IndexStructureDeviceHandleType index_structure, const PartitionedLookupArgs args) {
     const auto fanout = 1U << args.radix_bits;
 
     for (uint32_t p = args.task_assignments[blockIdx.x]; p < args.task_assignments[blockIdx.x + 1U]; ++p) {
@@ -236,7 +236,7 @@ __global__ void partitioned_lookup_kernel(const IndexStructureType index_structu
         for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
             const bool active = i < partition_size;
             const TupleType tuple = active ? relation[i] : TupleType();
-            const auto tid = index_structure.cooperative_lookup(active, tuple.key);
+            const auto tid = IndexStructureType::device_cooperative_lookup(index_structure, active, tuple.key);
             if (active) {
                 args.tids[tuple.value] = tid;
             }
@@ -369,7 +369,8 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     dump_task_assignments(state);
 #endif
 
-    partitioned_lookup_kernel<rel_tuple_t><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
+    auto index_device_handle = index_structure.get_device_handle();
+    partitioned_lookup_kernel<rel_tuple_t, IndexStructureType, typename IndexStructureType::device_handle_t><<<grid_size, block_size, 0, state.stream>>>(index_device_handle, *state.partitioned_lookup_args);
 }
 
 template<class IndexType>

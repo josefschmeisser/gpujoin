@@ -206,8 +206,8 @@ std::unique_ptr<IndexStructureType> build_index(const VectorType& h_keys, KeyTyp
     return index;
 }
 
-template<class IndexStructureType>
-__global__ void lookup_kernel(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids) {
+template<class IndexStructureType, class IndexStructureDeviceHandleType>
+__global__ void lookup_kernel(const IndexStructureDeviceHandleType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
 #if 0
@@ -215,7 +215,7 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
     while (active_lanes) {
         bool active = i < n;
-        auto tid = index_structure.cooperative_lookup(active, keys[i]);
+        auto tid = cooperative_lookup(index_structure, active, keys[i]);
         if (active) {
             tids[i] = tid;
         }
@@ -227,7 +227,7 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     const int loop_limit = (n + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
     for (int i = index; i < loop_limit; i += stride) {
         const bool active = i < n;
-        const auto tid = index_structure.cooperative_lookup(active, keys[i]);
+        const auto tid = IndexStructureType::device_cooperative_lookup(index_structure, active, keys[i]);
         if (active) {
             tids[i] = tid;
         }

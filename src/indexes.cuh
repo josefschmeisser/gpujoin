@@ -134,6 +134,10 @@ struct btree_index : public abstract_index<Key> {
     __host__ size_t memory_consumption() const override {
         return h_tree_.tree_size_in_byte(h_tree_.root);
     }
+
+    __host__ virtual device_index_t get_device_handle() {
+        throw 0;
+    }
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator>
@@ -175,10 +179,11 @@ struct radix_spline_index : public abstract_index<Key> {
     rs::device_array_guard<key_t> guard_;
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
-    struct device_index_t {
-        const key_t* d_column_;
+    struct device_handle_t {
+        const key_t* const d_column_ = nullptr;
+        //const rs::DeviceRadixSpline<key_t> d_rs_;
         rs::DeviceRadixSpline<key_t> d_rs_;
-
+/*
         [[deprecated]]
         __device__ __forceinline__ value_t lookup(const key_t key) const {
             static const typename IndexConfiguration::search_algorithm_type search_algorithm{};
@@ -191,33 +196,44 @@ struct radix_spline_index : public abstract_index<Key> {
             const device_size_t pos = begin + search_algorithm(key, &d_column_[begin], bound_size);
             return (pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
+*/
+    } _device_handle_inst;
+    /*
+    struct device_handle {
+        entry* const table = nullptr;
+        const device_size_t capacity = 0u;
 
-        __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            static const typename IndexConfiguration::cooperative_search_algorithm_type search_algorithm{};
+        mutable_data* const mutable_data_ptr = nullptr;
+    } _device_handle_inst;
 
-            const double estimate = rs::cuda::get_estimate(d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
-            const device_size_t begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
-            const device_size_t end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
+    __device__ static void insert(const device_handle& handle_inst, Key key, Value value) {
+    */
 
-            const device_size_t bound_size = end - begin;
-            const device_size_t pos = begin + search_algorithm(active, key, &d_column_[begin], bound_size);
-            return (active && pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
-        }
-    } device_index;
+    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t& handle_inst, const bool active, const key_t key) {
+        static const typename IndexConfiguration::cooperative_search_algorithm_type search_algorithm{};
+
+        const double estimate = rs::cuda::get_estimate(handle_inst.d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
+        const device_size_t begin = (estimate < handle_inst.d_rs_.max_error_) ? 0 : (estimate - handle_inst.d_rs_.max_error_);
+        const device_size_t end = (estimate + handle_inst.d_rs_.max_error_ + 2 > handle_inst.d_rs_.num_keys_) ? handle_inst.d_rs_.num_keys_ : (estimate + handle_inst.d_rs_.max_error_ + 2);
+
+        const device_size_t bound_size = end - begin;
+        const device_size_t pos = begin + search_algorithm(active, key, &handle_inst.d_column_[begin], bound_size);
+        return (active && pos < handle_inst.d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
+    }
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         if (h_column.size() >= invalid_tid) {
             throw std::runtime_error("'value_t' does not suffice");
         }
 
-        device_index.d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
 
         // migrate radix spline
         const auto start = std::chrono::high_resolution_clock::now();
 
+        rs::DeviceRadixSpline<key_t> tmp_device_rs;
         DeviceAllocator<key_t> device_allocator;
-        guard_ = migrate_radix_spline(h_rs, device_index.d_rs_, device_allocator);
+        guard_ = migrate_radix_spline(h_rs, tmp_device_rs, device_allocator);
 
         const auto finish = std::chrono::high_resolution_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;
@@ -230,10 +246,18 @@ struct radix_spline_index : public abstract_index<Key> {
 
         auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline<key_t>*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
+        
+        // create device handle
+        device_handle_t tmp_handle { d_column, tmp_device_rs };
+        //_device_handle_inst.d_column_ = d_column;
     }
 
     __host__ size_t memory_consumption() const override {
         return memory_consumption_;
+    }
+
+    __host__ virtual device_handle_t get_device_handle() {
+        throw 0;
     }
 };
 
@@ -293,6 +317,10 @@ struct harmonia_index : public abstract_index<Key> {
             size += guard.values_guard.size()*sizeof(typename decltype(guard.values_guard)::value_type);
         }
         return size;
+    }
+
+    __host__ virtual device_index_t get_device_handle() {
+        throw 0;
     }
 };
 
@@ -362,6 +390,10 @@ struct binary_search_index : public abstract_index<Key> {
     __host__ size_t memory_consumption() const override {
         return 0;
     }
+
+    __host__ virtual device_index_t get_device_handle() {
+        throw 0;
+    }
 };
 
 template<class Key, class Value, template<class T> class DeviceAllocator, template<class T> class HostAllocator, class IndexConfiguration>
@@ -392,6 +424,10 @@ struct no_op_index : public abstract_index<Key> {
 
     __host__ size_t memory_consumption() const override {
         return 0;
+    }
+
+    __host__ virtual device_index_t get_device_handle() {
+        throw 0;
     }
 };
 
