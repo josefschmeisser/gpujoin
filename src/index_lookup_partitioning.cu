@@ -370,7 +370,7 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 #endif
 
     auto index_device_handle = index_structure.get_device_handle();
-    partitioned_lookup_kernel<rel_tuple_t, IndexStructureType, typename IndexStructureType::device_handle_t><<<grid_size, block_size, 0, state.stream>>>(index_device_handle, *state.partitioned_lookup_args);
+    partitioned_lookup_kernel<rel_tuple_t, IndexStructureType, typename IndexStructureType::device_handle_t<true>><<<grid_size, block_size, 0, state.stream>>>(index_device_handle, *state.partitioned_lookup_args);
 }
 
 template<class IndexType>

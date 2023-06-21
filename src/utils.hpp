@@ -152,3 +152,13 @@ struct execute_if<true> {
         f();
     }
 };
+
+template<class T, bool B>
+struct add_const_if;
+
+template<class T>
+struct add_const_if<T, true> { typedef const T type; };
+
+template<class T>
+struct add_const_if<T, false> { typedef T type; };
+

@@ -101,6 +101,7 @@ struct btree_index : public abstract_index<Key> {
     btree_t h_tree_;
     device_array_wrapper<typename btree_t::page> h_guard;
 
+    template<bool IsConst = false>
     struct device_handle_t {
         const typename btree_t::NodeBase* d_tree_;
 
@@ -113,9 +114,10 @@ struct btree_index : public abstract_index<Key> {
             return lookup_algorithm(btree_info_inst, d_tree_, key);
         }
         */
-    } _device_handle_inst;
+    };
+    device_handle_t<false> _device_handle_inst;
 
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t& handle_inst, const bool active, const key_t key) {
+    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         static const typename IndexConfiguration::cooperative_lookup_algorithm_type lookup_algorithm{};
         return lookup_algorithm(handle_inst.btree_info_inst, active, handle_inst.d_tree_, key);
     }
@@ -137,8 +139,10 @@ struct btree_index : public abstract_index<Key> {
         return h_tree_.tree_size_in_byte(h_tree_.root);
     }
 
-    __host__ device_handle_t& get_device_handle() {
-        return _device_handle_inst;
+    __host__ device_handle_t<true>& get_device_handle() {
+        //return _device_handle_inst;
+        auto handle = reinterpret_cast<device_handle_t<true>*>(&_device_handle_inst);
+        return *handle;
     }
 };
 
@@ -181,7 +185,10 @@ struct radix_spline_index : public abstract_index<Key> {
     rs::device_array_guard<key_t> guard_;
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
+    template<bool IsConst = false>
     struct device_handle_t {
+        //typename add_const_if<key_t* const, IsConst>::type d_column_ = nullptr;
+        //key_t* const d_column_ = nullptr;
         const key_t* const d_column_ = nullptr;
         //const rs::DeviceRadixSpline<key_t> d_rs_;
         rs::DeviceRadixSpline<key_t> d_rs_;
@@ -199,7 +206,9 @@ struct radix_spline_index : public abstract_index<Key> {
             return (pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
 */
-    } _device_handle_inst;
+    //} _device_handle_inst;
+    };
+    device_handle_t<false> _device_handle_inst;
     /*
     struct device_handle {
         entry* const table = nullptr;
@@ -211,7 +220,7 @@ struct radix_spline_index : public abstract_index<Key> {
     __device__ static void insert(const device_handle& handle_inst, Key key, Value value) {
     */
 
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t& handle_inst, const bool active, const key_t key) {
+    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         static const typename IndexConfiguration::cooperative_search_algorithm_type search_algorithm{};
 
         const double estimate = rs::cuda::get_estimate(handle_inst.d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
@@ -250,16 +259,21 @@ struct radix_spline_index : public abstract_index<Key> {
         assert(h_column.size() == rrs->num_keys_);
         
         // create device handle
-        device_handle_t tmp_handle { d_column, tmp_device_rs };
+        device_handle_t<false> tmp_handle { d_column, tmp_device_rs };
         //_device_handle_inst.d_column_ = d_column;
+
+        // TODO copy
     }
 
     __host__ size_t memory_consumption() const override {
         return memory_consumption_;
     }
 
-    __host__ device_handle_t& get_device_handle() {
-        return _device_handle_inst;
+    __host__ device_handle_t<true>& get_device_handle() {
+        //return _device_handle_inst;
+        //return device_handle_t<true> {};
+        auto handle = reinterpret_cast<device_handle_t<true>*>(&_device_handle_inst);
+        return *handle;
     }
 };
 
@@ -282,6 +296,7 @@ struct harmonia_index : public abstract_index<Key> {
     harmonia_t tree;
     typename harmonia_t::memory_guard_t guard;
 
+    template<bool IsConst = false>
     struct device_handle_t {
         typename harmonia_t::device_handle_t d_tree;
 
@@ -292,9 +307,10 @@ struct harmonia_index : public abstract_index<Key> {
             return invalid_tid;
         }
         */
-    } _device_handle_inst;
+    };
+    device_handle_t<false> _device_handle_inst;
 
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t& handle_inst, const bool active, const key_t key) {
+    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         //return harmonia_t::lookup<4>(active, d_tree, key);
         //return harmonia_t::ntg_lookup(active, d_tree, key);
         return harmonia_t::ntg_lookup_with_caching(active, handle_inst.d_tree, key);
@@ -303,7 +319,7 @@ struct harmonia_index : public abstract_index<Key> {
     __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* /*d_column*/) override {
         tree.construct(h_column);
 
-        // migrate harmonia spline
+        // migrate harmonia
         const auto start = std::chrono::high_resolution_clock::now();
 
         DeviceAllocator<key_t> device_allocator;
@@ -323,8 +339,10 @@ struct harmonia_index : public abstract_index<Key> {
         return size;
     }
 
-    __host__ device_handle_t& get_device_handle() {
-        return _device_handle_inst;
+    __host__ device_handle_t<true>& get_device_handle() {
+        //return _device_handle_inst;
+        auto handle = reinterpret_cast<device_handle_t<true>*>(&_device_handle_inst);
+        return *handle;
     }
 };
 
@@ -365,6 +383,7 @@ struct binary_search_index : public abstract_index<Key> {
 
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
+    template<bool IsConst = false>
     struct device_handle_t {
         const key_t* d_column;
         device_size_t d_size;
@@ -377,9 +396,10 @@ struct binary_search_index : public abstract_index<Key> {
             return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
         }
         */
-    } _device_handle_inst;
+    };
+    device_handle_t<false> _device_handle_inst;
 
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t& handle_inst, const bool active, const key_t key) {
+    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         static const typename IndexConfiguration::cooperative_search_algorithm_type cooperative_search_algorithm{};
         const auto pos = cooperative_search_algorithm(active, key, handle_inst.d_column, handle_inst.d_size);
         return (active && pos < handle_inst.d_size) ? static_cast<value_t>(pos) : invalid_tid;
@@ -397,8 +417,10 @@ struct binary_search_index : public abstract_index<Key> {
         return 0;
     }
 
-    __host__ device_handle_t& get_device_handle() {
-        return _device_handle_inst;
+    __host__ device_handle_t<true>& get_device_handle() {
+        //return _device_handle_inst;
+        auto handle = reinterpret_cast<device_handle_t<true>*>(&_device_handle_inst);
+        return *handle;
     }
 };
 
@@ -416,6 +438,7 @@ struct no_op_index : public abstract_index<Key> {
 
     static const value_t invalid_tid = std::numeric_limits<value_t>::max();
 
+    template<bool IsConst = false>
     struct device_handle_t {
         const key_t* d_column;
         device_size_t d_size;
@@ -424,10 +447,10 @@ struct no_op_index : public abstract_index<Key> {
         [[deprecated]]
         __device__ __forceinline__ value_t lookup(const key_t key) const { return invalid_tid; }
         */
+    };
+    device_handle_t<false> _device_handle_inst;
 
-    } _device_handle_inst;
-
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t& handle_inst, const bool active, const key_t key) {
+    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         return invalid_tid;
     }
 
@@ -437,8 +460,10 @@ struct no_op_index : public abstract_index<Key> {
         return 0;
     }
 
-    __host__ device_handle_t& get_device_handle() {
-        return _device_handle_inst;
+    __host__ device_handle_t<true>& get_device_handle() {
+        //return _device_handle_inst;
+        auto handle = reinterpret_cast<device_handle_t<true>*>(&_device_handle_inst);
+        return *handle;
     }
 };
 

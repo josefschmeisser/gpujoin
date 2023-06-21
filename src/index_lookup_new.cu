@@ -181,7 +181,7 @@ struct plain_approach {
         printf("executing kernel...\n");
         IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
         auto index_device_handle = index_structure.get_device_handle();
-        lookup_kernel<IndexType, typename IndexType::device_handle_t><<<num_blocks, config.block_size>>>(index_device_handle, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data());
+        lookup_kernel<IndexType, typename IndexType::device_handle_t<true>><<<num_blocks, config.block_size>>>(index_device_handle, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data());
 
         cudaDeviceSynchronize();
     }
