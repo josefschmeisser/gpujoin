@@ -162,3 +162,6 @@ struct add_const_if<T, true> { typedef const T type; };
 template<class T>
 struct add_const_if<T, false> { typedef T type; };
 
+template<class T, bool B>
+using add_const_if_t = typename add_const_if<T, B>::type;
+
