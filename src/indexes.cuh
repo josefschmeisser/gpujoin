@@ -246,9 +246,10 @@ struct radix_spline_index : public abstract_index<Key> {
         // migrate radix spline
         const auto start = std::chrono::high_resolution_clock::now();
 
-        rs::DeviceRadixSpline<key_t> tmp_device_rs;
+        //rs::DeviceRadixSpline<key_t> tmp_device_rs;
         DeviceAllocator<key_t> device_allocator;
-        guard_ = migrate_radix_spline(h_rs, tmp_device_rs, device_allocator);
+        //guard_ = migrate_radix_spline(h_rs, tmp_device_rs, device_allocator);
+        guard_ = migrate_radix_spline(h_rs, _device_handle_inst.d_rs_, device_allocator);
 
         const auto finish = std::chrono::high_resolution_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;
@@ -263,7 +264,7 @@ struct radix_spline_index : public abstract_index<Key> {
         assert(h_column.size() == rrs->num_keys_);
         
         // create device handle
-        device_handle_t<false> tmp_handle { d_column, tmp_device_rs };
+        //device_handle_t<false> tmp_handle { d_column, tmp_device_rs };
         //_device_handle_inst.d_column_ = d_column;
 
         // TODO copy
@@ -303,7 +304,7 @@ struct harmonia_index : public abstract_index<Key> {
     template<bool IsConst = false>
     struct device_handle_t {
         //typename harmonia_t::device_handle_t d_tree;
-        add_const_if_t<typename harmonia_t::device_handle_t, IsConst> d_tree;
+        add_const_if_t<typename harmonia_t::const_device_handle_t, IsConst> d_tree;
 
         /*
         [[deprecated]]
@@ -328,7 +329,9 @@ struct harmonia_index : public abstract_index<Key> {
         const auto start = std::chrono::high_resolution_clock::now();
 
         DeviceAllocator<key_t> device_allocator;
-        tree.create_device_handle(_device_handle_inst.d_tree, device_allocator, guard);
+        //tree.create_device_handle(_device_handle_inst.d_tree, device_allocator, guard);
+        auto tmp_handle = tree.create_device_handle(device_allocator, guard);
+        std::memcpy(&_device_handle_inst.d_tree, &tmp_handle, sizeof(_device_handle_inst.d_tree));
 
         const auto finish = std::chrono::high_resolution_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;

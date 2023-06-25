@@ -67,15 +67,18 @@ struct harmonia_tree {
     unsigned depth;
     std::vector<unsigned> ntg_degrees;
 
-    struct device_handle_t {
-        const key_t* __restrict__ keys;
-        const child_ref_t* __restrict__ children;
-        const value_t* __restrict__ values;
-        device_size_t size;
-        unsigned depth;
-        unsigned caching_depth;
-        unsigned ntg_degree[max_depth]; // ntg size for each level starting at the root level
+    template<bool IsConst>
+    struct device_handle_tmpl {
+        add_const_if_t<const key_t* __restrict__, IsConst> keys = nullptr;
+        add_const_if_t<const child_ref_t* __restrict__, IsConst> children = nullptr;
+        add_const_if_t<const value_t* __restrict__, IsConst> values = nullptr;
+        add_const_if_t<device_size_t, IsConst> size = 0;
+        add_const_if_t<unsigned, IsConst> depth = 0;
+        add_const_if_t<unsigned, IsConst> caching_depth = 0;
+        add_const_if_t<unsigned, IsConst> ntg_degree[max_depth] { 0 }; // ntg size for each level starting at the root level
     };
+    using device_handle_t = device_handle_tmpl<false>;
+    using const_device_handle_t = device_handle_tmpl<true>;
 
     struct memory_guard_t {
         device_array_wrapper<key_t> keys_guard;
@@ -408,7 +411,10 @@ struct harmonia_tree {
     }
 
     template<class DeviceAllocator>
-    __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
+    //__host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
+    __host__ const_device_handle_t create_device_handle(DeviceAllocator& device_allocator, memory_guard_t& guard) {
+        device_handle_t handle;
+
         // copy upper tree levels to device constant memory
         const auto caching_depth = copy_children_portion_to_cached_memory();
 
@@ -438,6 +444,10 @@ struct harmonia_tree {
         for (unsigned i = 0; i < ntg_degrees.size(); ++i) {
             handle.ntg_degree[i] = ntg_degrees[i];
         }
+
+        const_device_handle_t const_handle;
+        std::memcpy(&const_handle, &handle, sizeof(const_handle));
+        return const_handle;
     }
 
     // utilize the full warp for each query
@@ -586,7 +596,7 @@ struct harmonia_tree {
     // This has to be a function template so that it won't get compiled when Sorted_Only is false.
     // To make it a function template, we have to add the second predicate to std::enable_if_t which is dependent on the function template parameter.
     // And with the help of SFINAE only the correct implementation will get compiled.
-    __device__ static std::enable_if_t<Sorted_Only && Degree < 6, value_t> lookup(const bool active, const device_handle_t& tree, const key_t key) {
+    __device__ static std::enable_if_t<Sorted_Only && Degree < 6, value_t> lookup(const bool active, const const_device_handle_t& tree, const key_t key) {
 #ifndef NDEBUG
         __syncwarp();
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
@@ -615,7 +625,7 @@ struct harmonia_tree {
     }
 
     template<unsigned Degree = 2>
-    __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const device_handle_t& tree, key_t key) {
+    __device__ static std::enable_if_t<!Sorted_Only && Degree < 6, value_t> lookup(bool active, const const_device_handle_t& tree, key_t key) {
 #ifndef NDEBUG
         __syncwarp();
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
@@ -643,7 +653,7 @@ struct harmonia_tree {
         return not_found;
     }
 
-    __device__ static value_t ntg_lookup(const bool active, const device_handle_t& tree, const key_t key) {
+    __device__ static value_t ntg_lookup(const bool active, const const_device_handle_t& tree, const key_t key) {
 #ifndef NDEBUG
         __syncwarp();
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
@@ -670,7 +680,7 @@ struct harmonia_tree {
         return not_found;
     }
 
-    __device__ static value_t ntg_lookup_with_caching(const bool active, const device_handle_t& tree, const key_t key) {
+    __device__ static value_t ntg_lookup_with_caching(const bool active, const const_device_handle_t& tree, const key_t key) {
 #ifndef NDEBUG
         __syncwarp();
         assert(__activemask() == FULL_MASK); // ensure that all threads participate
