@@ -191,7 +191,7 @@ struct radix_spline_index : public abstract_index<Key> {
         //typename add_const_if<key_t* const, IsConst>::type d_column_ = nullptr;
         //key_t* const d_column_ = nullptr;
         //const key_t* const d_column_ = nullptr;
-        add_const_if_t<const key_t*, IsConst> d_column_;
+        add_const_if_t<const key_t* __restrict__, IsConst> d_column_;
 
         //const rs::DeviceRadixSpline<key_t> d_rs_;
         //rs::DeviceRadixSpline<key_t> d_rs_;
@@ -394,7 +394,7 @@ struct binary_search_index : public abstract_index<Key> {
     template<bool IsConst = false>
     struct device_handle_t {
         //const key_t* d_column;
-        add_const_if_t<const key_t*, IsConst> d_column;
+        add_const_if_t<const key_t* __restrict__, IsConst> d_column;
         //device_size_t d_size;
         add_const_if_t<device_size_t, IsConst> d_size;
 
@@ -451,7 +451,7 @@ struct no_op_index : public abstract_index<Key> {
     template<bool IsConst = false>
     struct device_handle_t {
         //const key_t* d_column;
-        add_const_if_t<const key_t*, IsConst> d_column;
+        add_const_if_t<const key_t* __restrict__, IsConst> d_column;
         //device_size_t d_size;
         add_const_if_t<device_size_t, IsConst> d_size;
 
