@@ -12,8 +12,8 @@
 
 #include "rs/multi_map.h"
 #include "device_array.hpp"
-//#include "device_definitions.hpp"
 #include "search.cuh"
+#include "utils.hpp"
 
 namespace rs {
 
@@ -35,23 +35,31 @@ struct RawRadixSpline {
     std::vector<spline_point_t> spline_points_;
 };
 
-template<class Key>
-struct DeviceRadixSpline {
+template<class Key, bool IsConst>
+//struct DeviceRadixSpline {
+struct device_radix_spline_tmpl {
     using key_t = Key;
     using spline_point_t = rs::Coord<key_t>;
 
-    key_t min_key_;
-    key_t max_key_;
-    size_t num_keys_;
-    size_t num_radix_bits_;
-    size_t num_shift_bits_;
-    size_t max_error_;
+    add_const_if_t<key_t, IsConst> min_key_ = { };
+    add_const_if_t<key_t, IsConst> max_key_ = { };
+    add_const_if_t<size_t, IsConst> num_keys_ = 0;
+    add_const_if_t<size_t, IsConst> num_radix_bits_ = 0;
+    add_const_if_t<size_t, IsConst> num_shift_bits_ = 0;
+    add_const_if_t<size_t, IsConst> max_error_ = 0;
 
-    //rs_rt_entry_t* const radix_table_ = nullptr;
-    rs_rt_entry_t* radix_table_;
-    //spline_point_t* const spline_points_ = nullptr;
-    spline_point_t* spline_points_;
+    add_const_if_t<const rs_rt_entry_t* __restrict__, IsConst> radix_table_ = nullptr;
+    add_const_if_t<const spline_point_t* __restrict__, IsConst> spline_points_ = nullptr;
 };
+
+template<class Key>
+using DeviceRadixSpline = device_radix_spline_tmpl<Key, false>;
+
+template<class Key>
+using device_radix_spline = device_radix_spline_tmpl<Key, false>;
+
+template<class Key>
+using const_device_radix_spline = device_radix_spline_tmpl<Key, true>;
 
 template<class Vector>
 auto build_radix_spline(const Vector& keys) {
@@ -118,7 +126,7 @@ auto migrate_radix_spline(rs::RadixSpline<Key>& rs, DeviceRadixSpline<Key>& d_rs
 namespace cuda {
 
 template<class Key>
-__device__ device_size_t get_spline_segment(const DeviceRadixSpline<Key>& rs, const Key key) {
+__device__ device_size_t get_spline_segment(const const_device_radix_spline<Key>& rs, const Key key) {
     const auto prefix = (key - rs.min_key_) >> rs.num_shift_bits_;
 
     const rs_rt_entry_t begin = rs.radix_table_[prefix];
@@ -136,7 +144,7 @@ __device__ device_size_t get_spline_segment(const DeviceRadixSpline<Key>& rs, co
 }
 
 template<class Key>
-__device__ double get_estimate(const DeviceRadixSpline<Key>& rs, const Key key) {
+__device__ double get_estimate(const const_device_radix_spline<Key>& rs, const Key key) {
     if (key <= rs.min_key_) return 0;
     if (key >= rs.max_key_) return rs.num_keys_ - 1;
 

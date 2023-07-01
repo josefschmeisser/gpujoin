@@ -195,7 +195,8 @@ struct radix_spline_index : public abstract_index<Key> {
 
         //const rs::DeviceRadixSpline<key_t> d_rs_;
         //rs::DeviceRadixSpline<key_t> d_rs_;
-        add_const_if_t<rs::DeviceRadixSpline<key_t>, IsConst> d_rs_;
+        //add_const_if_t<rs::DeviceRadixSpline<key_t>, IsConst> d_rs_;
+        add_const_if_t<typename rs::device_radix_spline_tmpl<key_t, IsConst>, IsConst> d_rs_;
 /*
         [[deprecated]]
         __device__ __forceinline__ value_t lookup(const key_t key) const {
@@ -234,6 +235,8 @@ struct radix_spline_index : public abstract_index<Key> {
         const device_size_t bound_size = end - begin;
         const device_size_t pos = begin + search_algorithm(active, key, &handle_inst.d_column_[begin], bound_size);
         return (active && pos < handle_inst.d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
+
+//        return invalid_tid;
     }
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
@@ -245,12 +248,8 @@ struct radix_spline_index : public abstract_index<Key> {
 
         // migrate radix spline
         const auto start = std::chrono::high_resolution_clock::now();
-
-        //rs::DeviceRadixSpline<key_t> tmp_device_rs;
         DeviceAllocator<key_t> device_allocator;
-        //guard_ = migrate_radix_spline(h_rs, tmp_device_rs, device_allocator);
         guard_ = migrate_radix_spline(h_rs, _device_handle_inst.d_rs_, device_allocator);
-
         const auto finish = std::chrono::high_resolution_clock::now();
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(finish - start).count()/1000.;
         std::cout << "radixspline migration time: " << duration << " ms\n";
@@ -262,12 +261,6 @@ struct radix_spline_index : public abstract_index<Key> {
 
         auto rrs __attribute__((unused)) = reinterpret_cast<const rs::RawRadixSpline<key_t>*>(&h_rs);
         assert(h_column.size() == rrs->num_keys_);
-        
-        // create device handle
-        //device_handle_t<false> tmp_handle { d_column, tmp_device_rs };
-        //_device_handle_inst.d_column_ = d_column;
-
-        // TODO copy
     }
 
     __host__ size_t memory_consumption() const override {
