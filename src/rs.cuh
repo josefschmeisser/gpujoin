@@ -165,6 +165,19 @@ __device__ double get_estimate(const const_device_radix_spline<Key>& rs, const K
     return key_diff * slope + down.y;
 }
 
+struct bounds {
+    device_size_t begin;
+    device_size_t end;
+};
+
+template<class Key>
+__device__ bounds find_bounds(const const_device_radix_spline<Key>& rs, const Key key) {
+    const double estimate = get_estimate(rs, key);
+    const device_size_t begin = (estimate < rs.max_error_) ? 0 : (estimate - rs.max_error_);
+    const device_size_t end = (estimate + rs.max_error_ + 2 > rs.num_keys_) ? rs.num_keys_ : (estimate + rs.max_error_ + 2);
+    return { begin, end };
+}
+
 }
 
 }

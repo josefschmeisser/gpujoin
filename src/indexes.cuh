@@ -228,15 +228,12 @@ struct radix_spline_index : public abstract_index<Key> {
     __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         static const typename IndexConfiguration::cooperative_search_algorithm_type search_algorithm{};
 
-        const double estimate = rs::cuda::get_estimate(handle_inst.d_rs_, key); // FIXME accessing this member by a pointer will result in uncached global loads
-        const device_size_t begin = (estimate < handle_inst.d_rs_.max_error_) ? 0 : (estimate - handle_inst.d_rs_.max_error_);
-        const device_size_t end = (estimate + handle_inst.d_rs_.max_error_ + 2 > handle_inst.d_rs_.num_keys_) ? handle_inst.d_rs_.num_keys_ : (estimate + handle_inst.d_rs_.max_error_ + 2);
-
+        auto bounds = rs::cuda::find_bounds(handle_inst.d_rs_, key);
+        const device_size_t begin = bounds.begin;
+        const device_size_t end = bounds.end;
         const device_size_t bound_size = end - begin;
         const device_size_t pos = begin + search_algorithm(active, key, &handle_inst.d_column_[begin], bound_size);
         return (active && pos < handle_inst.d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
-
-//        return invalid_tid;
     }
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
