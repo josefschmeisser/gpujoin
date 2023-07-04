@@ -238,8 +238,10 @@ __global__ void lookup_kernel(const IndexStructureDeviceHandleType index_structu
 template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
-    class    IndexStructureType>
-__global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids, unsigned max_bits) {
+    class    IndexStructureType,
+    class    IndexStructureDeviceHandleType>
+//__global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids, unsigned max_bits) {
+__global__ void lookup_kernel_with_sorting_v1(const IndexStructureDeviceHandleType index_structure, unsigned n, const index_key_t* __restrict__ keys, value_t* __restrict__ tids, unsigned max_bits) {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
@@ -351,7 +353,8 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
                 //printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
-            value_t tid_b = index_structure.cooperative_lookup(active, element);
+            //value_t tid_b = index_structure.cooperative_lookup(active, element);
+            const auto tid_b = IndexStructureType::device_cooperative_lookup(index_structure, active, element);
             if (active) {
                 //printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
                 //if (assoc_tid >= n) printf("assoc_id: %lu\n", assoc_tid);
@@ -389,8 +392,9 @@ struct bws_lookup_args {
 template<
     unsigned BLOCK_THREADS,
     unsigned ITEMS_PER_THREAD,
-    class    IndexStructureType>
-__global__ void bws_lookup(const IndexStructureType index_structure, const bws_lookup_args args) {
+    class    IndexStructureType,
+    class    IndexStructureDeviceHandleType>
+__global__ void bws_lookup(const IndexStructureDeviceHandleType index_structure, const bws_lookup_args args) {
     enum { ITEMS_PER_ITERATION = BLOCK_THREADS*ITEMS_PER_THREAD };
 
     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
@@ -523,7 +527,8 @@ __global__ void bws_lookup(const IndexStructureType index_structure, const bws_l
                 //printf("warp: %d lane: %d - tid: %u element: %u\n", warp_id, lane_id, assoc_tid, element);
             }
 
-            value_t tid_b = index_structure.cooperative_lookup(active, element);
+            //value_t tid_b = index_structure.cooperative_lookup(active, element);
+            const auto tid_b = IndexStructureType::device_cooperative_lookup(index_structure, active, element);
             if (active) {
                 //printf("warp: %d lane: %d - tid_b: %u\n", warp_id, lane_id, tid_b);
                 //if (assoc_tid >= n) printf("assoc_id: %lu\n", assoc_tid);

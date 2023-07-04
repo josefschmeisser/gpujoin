@@ -141,7 +141,7 @@ struct abstract_approach_dispatcher {
 template<template<class T> class Func>
 struct approach_dispatcher : public abstract_approach_dispatcher {
     void run(query_data& d, index_type_enum index_type, measurement& m) const override {
-        switch (index_type) {/*
+        switch (index_type) {
             case index_type_enum::btree:
                 Func<btree_type>()(d, m);
                 break;
@@ -150,13 +150,13 @@ struct approach_dispatcher : public abstract_approach_dispatcher {
                 break;
             case index_type_enum::binary_search:
                 Func<binary_search_type>()(d, m);
-                break;*/
+                break;
             case index_type_enum::radix_spline:
                 Func<radix_spline_type>()(d, m);
-                break;/*
+                break;
             case index_type_enum::no_op:
                 Func<no_op_type>()(d, m);
-                break;*/
+                break;
             default:
                 assert(false);
         }
@@ -199,7 +199,6 @@ struct blockwise_sorting_approach {
         printf("numblocks: %d\n", num_blocks);
 
         printf("executing kernel...\n");
-        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
         if (config.block_size != block_size) {
             std::cerr << "invalid block size for this approach" << std::endl;
             throw 0;
@@ -242,7 +241,14 @@ struct bws_lookup_args {
             d.d_tids.data()
         };
 
-        bws_lookup<block_size, elements_per_thread><<<num_blocks, block_size, shared_mem>>>(index_structure.device_index, args);
+
+        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+        auto index_device_handle = index_structure.get_device_handle();
+/*
+        lookup_kernel<IndexType, typename IndexType::device_handle_t<true>><<<num_blocks, config.block_size>>>(index_device_handle, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data());
+        */
+        //bws_lookup<block_size, elements_per_thread><<<num_blocks, block_size, shared_mem>>>(index_structure.device_index, args);
+        bws_lookup<block_size, elements_per_thread, IndexType, typename IndexType::device_handle_t<true>><<<num_blocks, block_size, shared_mem>>>(index_device_handle, args);
         cudaDeviceSynchronize();
     }
 };
@@ -311,9 +317,9 @@ struct hj_approach {
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "plain", std::make_shared<approach_dispatcher<plain_approach>>() },
-    //{ "bws", std::make_shared<approach_dispatcher<blockwise_sorting_approach>>() },
-    //{ "partitioning", std::make_shared<approach_dispatcher<partitioning_approach>>() },
-    //{ "hj", std::make_shared<approach_dispatcher<hj_approach>>() }
+    { "bws", std::make_shared<approach_dispatcher<blockwise_sorting_approach>>() },
+    { "partitioning", std::make_shared<approach_dispatcher<partitioning_approach>>() },
+    { "hj", std::make_shared<approach_dispatcher<hj_approach>>() }
 };
 
 static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs, const query_data& qd) {
