@@ -241,6 +241,7 @@ struct radix_spline_index : public abstract_index<Key> {
             throw std::runtime_error("'value_t' does not suffice");
         }
 
+        _device_handle_inst.d_column_ = d_column;
         auto h_rs = rs::build_radix_spline(h_column);
 
         // migrate radix spline
