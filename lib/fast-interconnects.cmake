@@ -2,17 +2,17 @@ include(ExternalProject)
 find_package(Git REQUIRED)
 #find_package(Rust REQUIRED) # TODO
 
-find_program(CARGO "cargo")
-IF(NOT CARGO)
-    message(FATAL_ERROR "cargo not found!")
-ENDIF()
+#find_program(CARGO "cargo")
+#IF(NOT CARGO)
+#    message(FATAL_ERROR "cargo not found!")
+#ENDIF()
 
 set(FAST_INTERCONNECTS_PREFIX "fast-interconnects")
 
-message(STATUS "nvcc: ${CMAKE_CUDA_COMPILER} cuda root: ${CUDA_TOOLKIT_ROOT_DIR}")
+#message(STATUS "nvcc: ${CMAKE_CUDA_COMPILER} cuda root: ${CUDA_TOOLKIT_ROOT_DIR}")
 
-get_filename_component(_NVCC_DIR ${CMAKE_CUDA_COMPILER} PATH)
-message(STATUS "nvcc dir: ${_NVCC_DIR}")
+#get_filename_component(_NVCC_DIR ${CMAKE_CUDA_COMPILER} PATH)
+#message(STATUS "nvcc dir: ${_NVCC_DIR}")
 
 # Get FAST_INTERCONNECTS
 ExternalProject_Add(
