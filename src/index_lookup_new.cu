@@ -1,7 +1,9 @@
+#include "device_array.hpp"
 #include "device_definitions.hpp"
 #include "index_lookup.cuh"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <map>
 #include <stdexcept>
@@ -133,33 +135,36 @@ bool query_data::validate_results() {
     return true;
 }
 
-
 struct abstract_approach_dispatcher {
-    virtual void run(query_data& d, index_type_enum index_type, measurement& m) const = 0;
+    virtual std::unique_ptr<abstract_approach> create(query_data& d, index_type_enum index_type) const = 0;
 };
 
-template<template<class T> class Func>
+template<template<class IndexType> class ApproachType>
 struct approach_dispatcher : public abstract_approach_dispatcher {
-    void run(query_data& d, index_type_enum index_type, measurement& m) const override {
+    std::unique_ptr<abstract_approach> create(query_data& d, index_type_enum index_type) const override {
+        std::unique_ptr<abstract_approach> approach;
+
         switch (index_type) {
             case index_type_enum::btree:
-                Func<btree_type>()(d, m);
+                approach = std::make_unique<ApproachType<btree_type>>();
                 break;
             case index_type_enum::harmonia:
-                Func<harmonia_type>()(d, m);
+                approach = std::make_unique<ApproachType<harmonia_type>>();
                 break;
             case index_type_enum::binary_search:
-                Func<binary_search_type>()(d, m);
+                approach = std::make_unique<ApproachType<binary_search_type>>();
                 break;
             case index_type_enum::radix_spline:
-                Func<radix_spline_type>()(d, m);
+                approach = std::make_unique<ApproachType<radix_spline_type>>();
                 break;
             case index_type_enum::no_op:
-                Func<no_op_type>()(d, m);
+                approach = std::make_unique<ApproachType<no_op_type>>();
                 break;
             default:
                 assert(false);
         }
+
+        return approach;
     }
 };
 
@@ -171,8 +176,12 @@ struct my_approach {
 };
 
 template<class IndexType>
-struct plain_approach {
-    void operator()(query_data& d, measurement& m) {
+struct plain_approach : abstract_approach {
+    void initialize(query_data& d) override {
+        // no-op
+    }
+
+    void run(query_data& d, measurement& m) override {
         const auto& config = get_experiment_config();
 
         const int num_blocks = (config.num_lookups + config.block_size - 1) / config.block_size;
@@ -187,46 +196,33 @@ struct plain_approach {
 };
 
 template<class IndexType>
-struct blockwise_sorting_approach {
-    void operator()(query_data& d, measurement& m) {
+struct blockwise_sorting_approach : abstract_approach {
+    static constexpr unsigned block_size = 256;
+    static constexpr unsigned elements_per_thread = 16;
+
+    device_array_wrapper<index_key_t> buffer;
+    device_array_wrapper<uint32_t> in_buffer_pos;
+    
+    void initialize(query_data& d) override {
         const auto& config = get_experiment_config();
         const auto& device_properties = get_device_properties(0);
 
-        constexpr unsigned block_size = 256;
-        constexpr unsigned elements_per_thread = 16;
         const int num_blocks = 3 * device_properties.multiProcessorCount; // TODO optimize
         printf("numblocks: %d\n", num_blocks);
-
-        printf("executing kernel...\n");
-        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
         if (config.block_size != block_size) {
             std::cerr << "invalid block size for this approach" << std::endl;
             throw 0;
         }
-        /*
-        lookup_kernel_with_sorting_v1<256, 4><<<num_blocks, 256>>>(index_structure.device_index, d.lookup_keys.size(), d.d_lookup_keys.data(), d.d_tids.data(), d.dataset_max_bits);
-        cudaDeviceSynchronize();
-        */
-        
-/* 
-struct bws_lookup_args {
-    // Input
-    device_size_t rel_length;
-    index_key_t* __restrict__ keys
-    unsigned max_bits;
-    device_size_t shared_mem_available;
-    
-    index_key_t* __restrict__ buffer = nullptr;
-    uint32_t* __restrict__ in_buffer_pos = nullptr;
-    
-    // Output
-    value_t* __restrict__ tids;
-};*/
 
-        auto buffer = create_device_array<index_key_t>(num_blocks * block_size * elements_per_thread);
-        auto in_buffer_pos = create_device_array<uint32_t>(num_blocks * block_size * elements_per_thread);
+        buffer = create_device_array<index_key_t>(num_blocks * block_size * elements_per_thread);
+        in_buffer_pos = create_device_array<uint32_t>(num_blocks * block_size * elements_per_thread);
+    }
 
+    void run(query_data& d, measurement& m) override {
+        const auto& device_properties = get_device_properties(0);
+        const int num_blocks = 3 * device_properties.multiProcessorCount; // TODO optimize
         const auto shared_mem = device_properties.sharedMemPerBlock;
+
         bws_lookup_args args {
             d.lookup_keys.size(),
             d.d_lookup_keys.data(),
@@ -236,10 +232,11 @@ struct bws_lookup_args {
             nullptr,
             nullptr,
             */
-            buffer.data(), // TODO switch dynamically
+            buffer.data(),
             in_buffer_pos.data(),
             d.d_tids.data()
         };
+        IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
 
         bws_lookup<block_size, elements_per_thread><<<num_blocks, block_size, shared_mem>>>(index_structure.device_index, args);
         cudaDeviceSynchronize();
@@ -247,27 +244,19 @@ struct bws_lookup_args {
 };
 
 template<class IndexType>
-struct hj_approach {
-    void operator()(query_data& d, measurement& m) {
+struct hj_approach : abstract_approach {
+    std::unique_ptr<hj_ht_t> ht;
+
+    void initialize(query_data& d) override {
+        ht = std::make_unique<hj_ht_t>(d.lookup_keys.size());
+    }
+
+    void run(query_data& d, measurement& m) override {
         record_timestamp(m);
 
         const auto& config = get_experiment_config();
         const auto& device_properties = get_device_properties(0);
 
-        hj_ht_t ht(d.lookup_keys.size());
-        /*
-        hj_mutable_state mutable_state {
-            ht.deviceHandle
-        };*/
-
-        //auto d_mutable_state = create_device_array<hj_mutable_state>(1);
-        //target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
-
-        // Choose the smaller relation as build side
-        /*
-        auto& d_build_side = choose_build_side(d.d_indexed, d.d_lookup_keys);
-        auto& d_probe_side = choose_probe_side(d.d_indexed, d.d_lookup_keys);
-        */
         auto& d_build_side = d.d_lookup_keys;
         auto& d_probe_side = d.d_indexed;
 
@@ -277,23 +266,19 @@ struct hj_approach {
             d_build_side.size(),
             d_probe_side.data(),
             d_probe_side.size(),
-            ht._device_handle_inst,
+            ht->_device_handle_inst,
             // State and outputs
             //d_mutable_state.data(),
             d.d_tids.data()
         };
 
         record_timestamp(m);
-        //std::cout << "indexed: " << stringify(d.indexed.begin(), d.indexed.end()) << std::endl;
-        //std::cout << "lookups: " << stringify(d.lookup_keys.begin(), d.lookup_keys.end()) << std::endl;
-        //size_t num_blocks = (d_build_side.size() + config.block_size - 1) / config.block_size;
         size_t num_blocks = 1 * device_properties.multiProcessorCount; // optimal on a V100
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
         cudaDeviceSynchronize();
         record_timestamp(m);
 
-        //num_blocks = (d_probe_side.size() + config.block_size - 1) / config.block_size;
         num_blocks = 4 * device_properties.multiProcessorCount; // optimal on a V100
         hj_probe_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
@@ -302,7 +287,8 @@ struct hj_approach {
 
         double total_steps = tmp.data()->ht.counter;
         double avg_steps = total_steps / d_probe_side.size();
-        printf("total_steps: %f avg_steps: %f\n", total_steps, avg_steps);*/
+        printf("total_steps: %f avg_steps: %f\n", total_steps, avg_steps);
+*/
         record_timestamp(m);
     }
 };
@@ -386,8 +372,12 @@ void execute_approach(std::string approach_name) {
     auto validator = [&qd]() {
         return qd.validate_results();
     };
+
+    auto approach_inst = approaches.at(approach_name)->create(qd, index_type);
+    approach_inst->initialize(qd);
+
     measure(experiment_desc, [&](auto& measurement) {
-        approaches.at(approach_name)->run(qd, index_type, measurement);
+        approach_inst->run(qd, measurement);
     }, validator);
 }
 
@@ -413,7 +403,8 @@ int main(int argc, char** argv) {
     if (config.execute_predefined_scenario) {
         execute_benchmark_scenario();
         return;
-    }*/
+    }
+*/
 
     execute_benchmark_scenario(config.scenario);
 

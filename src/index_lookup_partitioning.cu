@@ -373,8 +373,33 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
 }
 
 template<class IndexType>
-void partitioning_approach<IndexType>::operator()(query_data& d, measurement& m) {
-    printf("partitioning_approach\n");
+struct partitioning_approach<IndexType>::impl {
+    std::vector<std::unique_ptr<stream_state>> stream_states;
+};
+
+template<class IndexType>
+partitioning_approach<IndexType>::partitioning_approach()
+    : _p_impl{std::make_unique<impl>()}
+{}
+
+template partitioning_approach<btree_type>::partitioning_approach();
+template partitioning_approach<harmonia_type>::partitioning_approach();
+template partitioning_approach<binary_search_type>::partitioning_approach();
+template partitioning_approach<radix_spline_type>::partitioning_approach();
+template partitioning_approach<no_op_type>::partitioning_approach();
+
+template<class IndexType>
+partitioning_approach<IndexType>::~partitioning_approach() {}
+
+template partitioning_approach<btree_type>::~partitioning_approach();
+template partitioning_approach<harmonia_type>::~partitioning_approach();
+template partitioning_approach<binary_search_type>::~partitioning_approach();
+template partitioning_approach<radix_spline_type>::~partitioning_approach();
+template partitioning_approach<no_op_type>::~partitioning_approach();
+
+
+template<class IndexType>
+void partitioning_approach<IndexType>::initialize(query_data& d) {
     const auto& config = get_experiment_config();
     const auto& device_properties = get_device_properties(0);
 
@@ -392,29 +417,38 @@ void partitioning_approach<IndexType>::operator()(query_data& d, measurement& m)
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
 
-    std::vector<std::unique_ptr<stream_state>> stream_states;
-
     // create streams
     for (unsigned i = 0; i < num_streams; ++i) {
         size_t stream_portion = std::min(remaining, max_stream_portion);
         remaining -= stream_portion;
         printf("stream portion: %lu\n", stream_portion);
         auto state = create_stream_state(d_stream_lookup_keys, stream_portion, d_stream_tids);
-        stream_states.push_back(std::move(state));
+        _p_impl->stream_states.push_back(std::move(state));
 
         d_stream_lookup_keys += stream_portion;
         d_stream_tids += stream_portion;
     }
+}
+
+template void partitioning_approach<btree_type>::initialize(query_data& d);
+template void partitioning_approach<harmonia_type>::initialize(query_data& d);
+template void partitioning_approach<binary_search_type>::initialize(query_data& d);
+template void partitioning_approach<radix_spline_type>::initialize(query_data& d);
+template void partitioning_approach<no_op_type>::initialize(query_data& d);
+
+template<class IndexType>
+void partitioning_approach<IndexType>::run(query_data& d, measurement& m) {
+    const auto& device_properties = get_device_properties(0);
 
     IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
-    for (const auto& state : stream_states) {
+    for (const auto& state : _p_impl->stream_states) {
         run_on_stream(*state, index_structure, device_properties);
     }
     cudaDeviceSynchronize();
 }
 
-template void partitioning_approach<btree_type>::operator()(query_data& d, measurement& m);
-template void partitioning_approach<harmonia_type>::operator()(query_data& d, measurement& m);
-template void partitioning_approach<binary_search_type>::operator()(query_data& d, measurement& m);
-template void partitioning_approach<radix_spline_type>::operator()(query_data& d, measurement& m);
-template void partitioning_approach<no_op_type>::operator()(query_data& d, measurement& m);
+template void partitioning_approach<btree_type>::run(query_data& d, measurement& m);
+template void partitioning_approach<harmonia_type>::run(query_data& d, measurement& m);
+template void partitioning_approach<binary_search_type>::run(query_data& d, measurement& m);
+template void partitioning_approach<radix_spline_type>::run(query_data& d, measurement& m);
+template void partitioning_approach<no_op_type>::run(query_data& d, measurement& m);
