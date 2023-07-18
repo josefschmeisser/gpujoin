@@ -20,7 +20,6 @@
 
 #include "common.hpp"
 #include "cuda_utils.cuh"
-#include "LinearProbingHashTable.cuh"
 #include "cuda_allocator.hpp"
 #include "numa_allocator.hpp"
 #include "mmap_allocator.hpp"
