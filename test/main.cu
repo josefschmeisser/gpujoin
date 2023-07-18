@@ -145,24 +145,21 @@ TEST_F(HarmoniaTest, Lookup) {
     std::vector<uint32_t> keys(144);//87);
     std::iota(keys.begin(), keys.end(), 0);
 
-    //ASSERT_EQ(harmonia_type::max_keys, 4);
-  //  ASSERT_EQ(harmonia_type::get_max_keys(), 4);
 
     tree.construct(keys);
 
-    std::cout << "keys: " << stringify(tree.keys.begin(), tree.keys.end()) << std::endl;
-    std::cout << "children: " << stringify(tree.children.begin(), tree.children.end()) << std::endl;
+//    std::cout << "keys: " << stringify(tree.keys.begin(), tree.keys.end()) << std::endl;
+//    std::cout << "children: " << stringify(tree.children.begin(), tree.children.end()) << std::endl;
 
 #if 0
     const auto levels = tree.gather_tree_info(keys);
     dump_levels(levels, tree);
 #endif
 
-    //std::cout << "keys: " << stringify(tree.keys.begin(), tree.keys.end()) << std::endl;
+//    std::cout << "keys: " << stringify(tree.keys.begin(), tree.keys.end()) << std::endl;
     for (size_t i = 0; i < keys.size(); ++i) {
         const auto tid = tree.lookup(keys[i]);
         EXPECT_EQ(tid, i);
-        //std::cout << "tid: " << tid << std::endl;
     }
 }
 

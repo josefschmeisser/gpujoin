@@ -5,6 +5,8 @@
 #include <vector>
 #include <numeric>
 
+#include <gtest/gtest.h>
+
 #include "harmonia.cuh"
 #include "thirdparty/cub_test/test_util.h"
 
@@ -14,7 +16,7 @@ using namespace harmonia;
 template<class T> using harmonia_allocator = std::allocator<T>;
 
 void test_root_only() {
-    std::cout << "run test_root_only: ";
+//    std::cout << "run test_root_only: ";
     std::vector<uint32_t> keys(7);
     std::iota(keys.begin(), keys.end(), 0);
 
@@ -27,15 +29,14 @@ void test_root_only() {
 //        std::cout << "lookup: " << k << std::endl;
         auto tree_idx = tree.lookup(k);
 //        std::cout << "tree_idx: " << tree_idx << std::endl;
-        AssertEquals(tree_idx, i);
+        ASSERT_EQ(tree_idx, i);
         ++i;
     }
-    std::cout << "ok" << std::endl;
 }
 
 template<unsigned node_size = 8>
 void test_harmonia_host_lookup(unsigned n) {
-    std::cout << "run test_harmonia_host_lookup with n=" << n << ": ";
+//    std::cout << "run test_harmonia_host_lookup with n=" << n << ": ";
     std::vector<uint32_t> keys(n);
     std::iota(keys.begin(), keys.end(), 0);
 
@@ -48,10 +49,9 @@ void test_harmonia_host_lookup(unsigned n) {
 //        std::cout << "=== lookup: " << k << std::endl;
         auto tree_idx = tree.lookup(k);
 //        std::cout << "tree_idx: " << tree_idx << std::endl;
-        AssertEquals(tree_idx, i);
+        ASSERT_EQ(tree_idx, i);
         ++i;
     }
-    std::cout << "ok" << std::endl;
 }
 
 using harmonia_type = harmonia::harmonia_tree<
@@ -73,7 +73,7 @@ __global__ void lookup_kernel(const harmonia_handle& __restrict__ tree, unsigned
         auto tid = harmonia_type::lookup(active, tree, keys[i]);
         if (active) {
             tids[i] = tid;
-            printf("tids[%d] = %d\n", i, tids[i]);
+//            printf("tids[%d] = %d\n", i, tids[i]);
         }
 
         i += stride;
@@ -82,7 +82,7 @@ __global__ void lookup_kernel(const harmonia_handle& __restrict__ tree, unsigned
 }
 
 void test_harmonia_cuda_lookup(unsigned n) {
-    std::cout << "run test_harmonia_cuda_lookup with n=" << n << ": ";
+//    std::cout << "run test_harmonia_cuda_lookup with n=" << n << ": ";
     std::vector<uint32_t> keys(n);
     std::iota(keys.begin(), keys.end(), 0);
 
@@ -108,19 +108,23 @@ void test_harmonia_cuda_lookup(unsigned n) {
     h_values.reserve(n);
     cudaMemcpy(h_values.data(), d_values, sizeof(uint32_t)*n, cudaMemcpyDeviceToHost);
     for (unsigned i = 0; i < n; ++i) {
-        AssertEquals(h_values[i], i);
+        ASSERT_EQ(h_values[i], i);
     }
-    std::cout << "ok" << std::endl;
 }
 
-int main(int argc, char** argv) {
+TEST(test_harmonia, root_only) {
     test_root_only();
+}
+
+TEST(test_harmonia, host_lookup) {
     test_harmonia_host_lookup(15); // two tree levels
     test_harmonia_host_lookup(280); // three tree levels
     test_harmonia_host_lookup(2000); // test underfull nodes (nodes with one child and no separator)
+}
+
+TEST(test_harmonia, cuda_lookup) {
     test_harmonia_cuda_lookup(7); // root only
     test_harmonia_cuda_lookup(15); // two tree levels
     test_harmonia_cuda_lookup(280); // three tree levels
     test_harmonia_cuda_lookup(2000); // test underfull nodes (nodes with one child and no separator)
-    return 0;
 }
