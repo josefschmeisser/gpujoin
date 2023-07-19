@@ -46,14 +46,15 @@ __global__ void ij_plain_kernel(const ij_args args, const IndexStructureType ind
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < args.lineitem_size; i += stride) {
-        if (l_shipdate_column[i] < lower_shipdate ||
-            l_shipdate_column[i] >= upper_shipdate) {
-            continue;
-        }
+    const int loop_limit = (args.lineitem_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
+    for (int i = index; i < loop_limit; i += stride) {
+        bool active = i < args.lineitem_size;
 
-        auto payload = index_structure.lookup(l_partkey_column[i]); // FIXME use cooperative lookup
-        if (payload != invalid_tid) {
+        // TODO check what this compiles to
+        active &= l_shipdate_column[i] >= lower_shipdate && l_shipdate_column[i] >= upper_shipdate;
+
+        const auto payload = index_structure.cooperative_lookup(active, l_partkey_column[i]);
+        if (active && payload != invalid_tid) {
             const auto part_tid = reinterpret_cast<unsigned>(payload);
 
             const auto extendedprice = l_extendedprice_column[i];
@@ -69,14 +70,17 @@ __global__ void ij_plain_kernel(const ij_args args, const IndexStructureType ind
     }
 
     // reduce both sums
+    auto* global_numerator = &args.state->global_numerator;
+    auto* global_denominator = &args.state->global_denominator;
+
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
         numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
         denominator += __shfl_down_sync(FULL_MASK, denominator, offset);
     }
     if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&args.state->global_numerator, (unsigned long long int)numerator);
-        atomicAdd((unsigned long long int*)&args.state->global_denominator, (unsigned long long int)denominator);
+        tmpl_atomic_add(global_numerator, numerator);
+        tmpl_atomic_add(global_denominator, denominator);
     }
 }
 
@@ -372,13 +376,14 @@ __global__ void ij_lookup_kernel(const ij_args args, const IndexStructureType in
 
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < args.lineitem_size + 31; i += stride) {
-        tid_t payload = invalid_tid;
-        if (i < args.lineitem_size &&
-            l_shipdate_column[i] >= lower_shipdate &&
-            l_shipdate_column[i] < upper_shipdate) {
-            payload = index_structure.lookup(l_partkey_column[i]); // FIXME use cooperative lookup
-        }
+    const int loop_limit = (args.lineitem_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
+    for (int i = index; i < loop_limit; i += stride) {
+        bool active = i < args.lineitem_size;
+
+        // TODO check what this compiles to
+        active &= l_shipdate_column[i] >= lower_shipdate && l_shipdate_column[i] >= upper_shipdate;
+
+        const auto payload = index_structure.cooperative_lookup(active, l_partkey_column[i]);
 
         int match = payload != invalid_tid;
         unsigned mask = __ballot_sync(FULL_MASK, match);
@@ -438,6 +443,9 @@ __global__ void ij_join_kernel(const ij_args args) {
     }
 
     // reduce both sums
+    auto* global_numerator = &args.state->global_numerator;
+    auto* global_denominator = &args.state->global_denominator;
+
     #pragma unroll
     for (int offset = warpSize / 2; offset > 0; offset /= 2) {
         numerator += __shfl_down_sync(FULL_MASK, numerator, offset);
@@ -445,8 +453,8 @@ __global__ void ij_join_kernel(const ij_args args) {
     }
     //__reduce_add_sync() requires compute capability 8
     if (lane_id() == 0) {
-        atomicAdd((unsigned long long int*)&args.state->global_numerator, (unsigned long long int)numerator);
-        atomicAdd((unsigned long long int*)&args.state->global_denominator, (unsigned long long int)denominator);
+        tmpl_atomic_add(global_numerator, numerator);
+        tmpl_atomic_add(global_denominator, denominator);
     }
 }
 
