@@ -6,6 +6,7 @@
 #include "index_lookup_config.hpp"
 #include "device_array.hpp"
 #include "indexes.cuh"
+#include "measuring.hpp"
 
 struct query_data {
     std::unique_ptr<abstract_index<index_key_t>> index_structure;
@@ -23,4 +24,10 @@ struct query_data {
     void create_index();
 
     bool validate_results();
+};
+
+struct abstract_approach {
+    virtual void initialize(query_data& d) = 0;
+
+    virtual void run(query_data& d, measuring::measurement& m) = 0;
 };

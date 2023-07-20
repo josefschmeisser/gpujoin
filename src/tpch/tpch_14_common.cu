@@ -14,7 +14,7 @@
 #include "device_properties.hpp"
 #include "indexes.cuh"
 #include "utils.hpp"
-#include "LinearProbingHashTable.cuh"
+#include "linear_probing_hashtable.cuh"
 #include "measuring.hpp"
 #include "partitioned_relation.hpp"
 #include "tpch_14_hj.cuh"
@@ -173,9 +173,7 @@ struct hj_approach {
         const auto& config = get_experiment_config();
 
         hj_ht_t ht(d.part_size);
-        hj_mutable_state mutable_state {
-            ht.deviceHandle
-        };
+        hj_mutable_state mutable_state {};
 
         auto d_mutable_state = create_device_array<hj_mutable_state>(1);
         target_memcpy<device_exclusive_allocator<int>>()(d_mutable_state.data(), &mutable_state, sizeof(mutable_state));
@@ -186,6 +184,8 @@ struct hj_approach {
             d.lineitem_size,
             d.part_device,
             d.part_size,
+            //ht->_device_handle_inst,
+            ht._device_handle_inst,
             // State and outputs
             d_mutable_state.data()
         };
