@@ -9,7 +9,7 @@ template<class IndexType>
 struct partitioning_approach : abstract_approach {
     partitioning_approach();
 
-    ~partitioning_approach();
+    ~partitioning_approach() override;
 
     void initialize(query_data& d) override;
 

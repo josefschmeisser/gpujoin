@@ -169,14 +169,9 @@ struct approach_dispatcher : public abstract_approach_dispatcher {
 };
 
 template<class IndexType>
-struct my_approach {
-    void operator()(query_data& d, measurement& m) {
-        printf("my approach %s\n", type_name<IndexType>::value());
-    }
-};
-
-template<class IndexType>
 struct plain_approach : abstract_approach {
+    ~plain_approach() override = default;
+
     void initialize(query_data& d) override {
         // no-op
     }
@@ -202,7 +197,9 @@ struct blockwise_sorting_approach : abstract_approach {
 
     device_array_wrapper<index_key_t> buffer;
     device_array_wrapper<uint32_t> in_buffer_pos;
-    
+
+    ~blockwise_sorting_approach() override = default;
+
     void initialize(query_data& d) override {
         const auto& config = get_experiment_config();
         const auto& device_properties = get_device_properties(0);
@@ -246,6 +243,8 @@ struct blockwise_sorting_approach : abstract_approach {
 template<class IndexType>
 struct hj_approach : abstract_approach {
     std::unique_ptr<hj_ht_t> ht;
+
+    ~hj_approach() override = default;
 
     void initialize(query_data& d) override {
         ht = std::make_unique<hj_ht_t>(d.lookup_keys.size());
