@@ -27,6 +27,8 @@ struct query_data {
 };
 
 struct abstract_approach {
+    virtual ~abstract_approach() = default;
+
     virtual void initialize(query_data& d) = 0;
 
     virtual void run(query_data& d, measuring::measurement& m) = 0;

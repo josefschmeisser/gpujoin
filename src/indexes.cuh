@@ -31,6 +31,8 @@ template<class Key>
 struct abstract_index {
     using key_t = Key;
 
+    virtual ~abstract_index() = default;
+
     __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* d_column) = 0;
 
     __host__ virtual size_t memory_consumption() const = 0;
@@ -117,6 +119,8 @@ struct btree_index : public abstract_index<Key> {
         */
     };
     device_handle_t<false> _device_handle_inst;
+
+    ~btree_index() override = default;
 
     __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         static const typename IndexConfiguration::cooperative_lookup_algorithm_type lookup_algorithm{};
@@ -225,6 +229,8 @@ struct radix_spline_index : public abstract_index<Key> {
     __device__ static void insert(const device_handle& handle_inst, Key key, Value value) {
     */
 
+    ~radix_spline_index() override = default;
+
     __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         static const typename IndexConfiguration::cooperative_search_algorithm_type search_algorithm{};
 
@@ -306,6 +312,8 @@ struct harmonia_index : public abstract_index<Key> {
         */
     };
     device_handle_t<false> _device_handle_inst;
+
+    ~harmonia_index() override = default;
 
     __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         //return harmonia_t::lookup<4>(active, d_tree, key);
@@ -399,6 +407,8 @@ struct binary_search_index : public abstract_index<Key> {
         */
     };
     device_handle_t<false> _device_handle_inst;
+
+    ~binary_search_index() override = default;
 
     __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
         static const typename IndexConfiguration::cooperative_search_algorithm_type cooperative_search_algorithm{};

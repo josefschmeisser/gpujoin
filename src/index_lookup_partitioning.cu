@@ -390,7 +390,7 @@ template partitioning_approach<radix_spline_type>::partitioning_approach();
 template partitioning_approach<no_op_type>::partitioning_approach();
 
 template<class IndexType>
-partitioning_approach<IndexType>::~partitioning_approach() {}
+partitioning_approach<IndexType>::~partitioning_approach() = default;
 
 template partitioning_approach<btree_type>::~partitioning_approach();
 template partitioning_approach<harmonia_type>::~partitioning_approach();
