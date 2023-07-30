@@ -114,20 +114,11 @@ struct btree_index : public abstract_index<Key> {
             return lookup_algorithm(btree_info_inst, d_tree_, key);
         }
 
-<<<<<<< HEAD
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
             static const typename IndexConfiguration::cooperative_lookup_algorithm_type lookup_algorithm{};
             return lookup_algorithm(btree_info_inst, active, d_tree_, key);
         }
     } device_index;
-=======
-    ~btree_index() override = default;
-
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
-        static const typename IndexConfiguration::cooperative_lookup_algorithm_type lookup_algorithm{};
-        return lookup_algorithm(handle_inst.btree_info_inst, active, handle_inst.d_tree_, key);
-    }
->>>>>>> 5ab8556 (add missing destructors)
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         h_tree_.construct(h_column, 0.7);
@@ -210,26 +201,11 @@ struct radix_spline_index : public abstract_index<Key> {
             const device_size_t begin = (estimate < d_rs_.max_error_) ? 0 : (estimate - d_rs_.max_error_);
             const device_size_t end = (estimate + d_rs_.max_error_ + 2 > d_rs_.num_keys_) ? d_rs_.num_keys_ : (estimate + d_rs_.max_error_ + 2);
 
-<<<<<<< HEAD
             const device_size_t bound_size = end - begin;
             const device_size_t pos = begin + search_algorithm(active, key, &d_column_[begin], bound_size);
             return (active && pos < d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
         }
     } device_index;
-=======
-    ~radix_spline_index() override = default;
-
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
-        static const typename IndexConfiguration::cooperative_search_algorithm_type search_algorithm{};
-
-        auto bounds = rs::cuda::find_bounds(handle_inst.d_rs_, key);
-        const device_size_t begin = bounds.begin;
-        const device_size_t end = bounds.end;
-        const device_size_t bound_size = end - begin;
-        const device_size_t pos = begin + search_algorithm(active, key, &handle_inst.d_column_[begin], bound_size);
-        return (active && pos < handle_inst.d_rs_.num_keys_) ? static_cast<value_t>(pos) : invalid_tid;
-    }
->>>>>>> 5ab8556 (add missing destructors)
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         if (h_column.size() >= invalid_tid) {
@@ -291,22 +267,12 @@ struct harmonia_index : public abstract_index<Key> {
             return invalid_tid;
         }
 
-<<<<<<< HEAD
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
             //return harmonia_t::lookup<4>(active, d_tree, key);
             //return harmonia_t::ntg_lookup(active, d_tree, key);
             return harmonia_t::ntg_lookup_with_caching(active, d_tree, key);
         }
     } device_index;
-=======
-    ~harmonia_index() override = default;
-
-    __device__ __forceinline__ static value_t device_cooperative_lookup(const device_handle_t<true>& handle_inst, const bool active, const key_t key) {
-        //return harmonia_t::lookup<4>(active, d_tree, key);
-        //return harmonia_t::ntg_lookup(active, d_tree, key);
-        return harmonia_t::ntg_lookup_with_caching(active, handle_inst.d_tree, key);
-    }
->>>>>>> 5ab8556 (add missing destructors)
 
     __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* /*d_column*/) override {
         tree.construct(h_column);
@@ -379,8 +345,6 @@ struct binary_search_index : public abstract_index<Key> {
             const auto pos = search_algorithm(key, d_column, d_size);
             return (pos < d_size) ? static_cast<value_t>(pos) : invalid_tid;
         }
-
-        ~binary_search_index() override = default;
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
             static const typename IndexConfiguration::cooperative_search_algorithm_type cooperative_search_algorithm{};
