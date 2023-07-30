@@ -47,7 +47,7 @@ struct device_array : abstract_device_array<T> {
 
     ~device_array() override {
         if (this->ptr_) {
-            allocator_.deallocate(this->ptr_, sizeof(T)*this->size_);
+            allocator_.deallocate(this->ptr_, this->size_);
         }
     }
 
