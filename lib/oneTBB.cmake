@@ -9,7 +9,7 @@ ExternalProject_Add(
     onetbb_src
     PREFIX ${ONETBB_PREFIX}
     GIT_REPOSITORY "https://github.com/oneapi-src/oneTBB.git"
-    GIT_TAG v2021.5.0
+    GIT_TAG v2021.9.0
     TIMEOUT 10
     CMAKE_ARGS
         "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
