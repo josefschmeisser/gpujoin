@@ -15,6 +15,7 @@
 
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_radix_sort.cuh>
+#undef _Float16
 
 #include "utils.hpp"
 #include "zipf.hpp"

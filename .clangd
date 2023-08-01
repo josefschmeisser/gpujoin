@@ -1,0 +1,14 @@
+CompileFlags:
+  Remove:
+  - -forward-unknown-to-host-compiler
+  - --generate-code*
+  - -gencode=*
+  - --options-file
+  - -rdc=*
+  - -Xcompiler*
+  Add:
+  - -xc++
+  - --cuda-path=/opt/cuda
+  - --cuda-gpu-arch=sm_75
+  - -I/opt/cuda/include
+

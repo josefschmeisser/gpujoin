@@ -4,6 +4,7 @@
 
 #include <cuda_runtime.h>
 #include <cub/util_debug.cuh>
+#undef _Float16
 
 namespace gpu_prefix_sum {
 
