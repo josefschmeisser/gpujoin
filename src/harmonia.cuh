@@ -16,6 +16,7 @@
 #include <functional>
 
 #include <cub/util_debug.cuh>
+#undef _Float16
 
 #include "utils.hpp"
 #include "cuda_utils.cuh"

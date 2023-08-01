@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include <cub/util_debug.cuh>
+#undef _Float16
 
 #include "utils.hpp"
 

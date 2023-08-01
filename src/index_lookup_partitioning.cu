@@ -10,6 +10,7 @@
 #include <string>
 
 #include <cub/util_debug.cuh>
+#undef _Float16
 
 #include <fast-interconnects/gpu_common.h>
 
