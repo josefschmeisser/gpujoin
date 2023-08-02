@@ -165,25 +165,6 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
     return state;
 }
 
-template<class IndexStructureType>
-__global__ void lookup_kernel(const IndexStructureType index_structure, device_size_t n, const rel_tuple_t* __restrict__ relation, value_t* __restrict__ tids) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-
-    int i = index;
-    uint32_t active_lanes = __ballot_sync(FULL_MASK, i < n);
-    while (active_lanes) {
-        bool active = i < n;
-        auto tid = index_structure.cooperative_lookup(active, relation[i].key);
-        if (active) {
-            tids[i] = tid;
-        }
-
-        i += stride;
-        active_lanes = __ballot_sync(FULL_MASK, i < n);
-    }
-}
-
 // TODO replace
 __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
     const auto fanout = 1U << args.radix_bits;
@@ -215,8 +196,9 @@ __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
 }
 
 template<class TupleType, class IndexStructureType, class IndexStructureDeviceHandleType>
-__global__ void partitioned_lookup_kernel(const IndexStructureDeviceHandleType index_structure, const PartitionedLookupArgs args) {
+__global__ void partitioned_lookup_kernel(const IndexStructureDeviceHandleType index_structure_handle, const PartitionedLookupArgs args) {
     const auto fanout = 1U << args.radix_bits;
+    const auto local_handle = index_structure_handle;
 
     for (uint32_t p = args.task_assignments[blockIdx.x]; p < args.task_assignments[blockIdx.x + 1U]; ++p) {
         const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel) + args.rel_partition_offsets[p];
@@ -237,7 +219,7 @@ __global__ void partitioned_lookup_kernel(const IndexStructureDeviceHandleType i
         for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
             const bool active = i < partition_size;
             const TupleType tuple = active ? relation[i] : TupleType();
-            const auto tid = IndexStructureType::device_cooperative_lookup(index_structure, active, tuple.key);
+            const auto tid = IndexStructureType::device_cooperative_lookup(local_handle, active, tuple.key);
             if (active) {
                 args.tids[tuple.value] = tid;
             }

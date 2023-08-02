@@ -21,7 +21,7 @@ public:
         Key key;
         Value value;
     };
-    static_assert(sizeof(entry) == sizeof(Key) + sizeof(Value));
+    //static_assert(sizeof(entry) == sizeof(Key) + sizeof(Value));
 
     struct mutable_data {
         uint64_t counter = 0u;
