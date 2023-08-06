@@ -173,8 +173,8 @@ auto create_device_array(size_t size, Allocator& allocator) {
     return device_array_wrapper<T>(ptr, size, array_allocator);
 }
 
-template<class T, class OutputAllocator, class InputAllocator>
-auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocator& allocator) {
+template<typename T, class InputAllocator, typename OutputAllocator, template <typename, typename> class VectorType>
+auto create_device_array_from(VectorType<T, InputAllocator>& vec, OutputAllocator& device_allocator) {
     using array_allocator_type = typename OutputAllocator::template rebind<T>::other;
 
     // check if rebinding is sufficient
@@ -199,8 +199,8 @@ auto create_device_array_from(std::vector<T, InputAllocator>& vec, OutputAllocat
     }
 }
 
-template<class T, class OutputAllocator>
-auto create_device_array_from(std::vector<T, OutputAllocator>& vec, OutputAllocator& allocator) {
+template<typename T, class InputAllocator, typename OutputAllocator, template <typename, typename> class VectorType>
+auto create_device_array_from(VectorType<T, OutputAllocator>& vec, OutputAllocator& device_allocator) {
     return device_array_wrapper<T>::create_reference_only(vec.data(), vec.size());
 }
 
