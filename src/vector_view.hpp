@@ -43,6 +43,10 @@ struct vector_view {
 
     const auto end() const noexcept { return arr_ + size_; }
 
+    T* data() noexcept { return arr_; }
+
+    const T* data() const noexcept { return arr_; }
+
 private:
     T* arr_;
     const size_t size_;

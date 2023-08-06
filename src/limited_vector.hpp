@@ -51,6 +51,22 @@ struct limited_vector {
 
     size_t capacity() const noexcept { return limit_; }
 
+    T& operator[](int idx) noexcept { return vec_[idx]; }
+
+    const T& operator[](int idx) const noexcept { return vec_[idx]; }
+
+    auto begin() noexcept { return vec_; }
+
+    const auto begin() const noexcept { return vec_; }
+
+    auto end() noexcept { return vec_ + size_; }
+
+    const auto end() const noexcept { return vec_ + size_; }
+
+    T* data() noexcept { return vec_; }
+
+    const T* data() const noexcept { return vec_; }
+
 private:
     T* vec_;
     size_t size_;
