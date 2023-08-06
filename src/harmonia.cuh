@@ -22,6 +22,7 @@
 #include "cuda_utils.cuh"
 #include "device_array.hpp"
 #include "device_definitions.hpp"
+#include "limited_vector.hpp"
 
 #ifndef FULL_MASK
 #define FULL_MASK 0xffffffff
@@ -60,9 +61,9 @@ struct harmonia_tree {
 
     static unsigned constexpr get_max_keys() noexcept { return max_keys; }
 
-    std::vector<key_t, HostAllocator<key_t>> keys;
-    std::vector<child_ref_t, HostAllocator<child_ref_t>> children;
-    std::vector<value_t, HostAllocator<value_t>> values;
+    limited_vector<key_t, HostAllocator<key_t>> keys;
+    limited_vector<child_ref_t, HostAllocator<child_ref_t>> children;
+    limited_vector<value_t, HostAllocator<value_t>> values;
 
     device_size_t size;
     unsigned depth;
@@ -300,10 +301,14 @@ struct harmonia_tree {
         const auto& leaf_level = levels.back();
         const auto node_count = leaf_level.node_count_prefix_sum + leaf_level.node_count;
         const auto key_array_size = max_keys*node_count;
-        keys.resize(key_array_size);
-        children.resize(node_count);
+
+        decltype(keys) new_keys(key_array_size);
+        keys.swap(new_keys);
+        decltype(children) new_children(node_count);
+        children.swap(new_children);
         if /*constexpr*/ (!Sorted_Only) {
-            values.resize(input.size());
+            decltype(values) new_values(input.size());
+            values.swap(new_values);
         }
 
         //printf("arrays allocated\n");
