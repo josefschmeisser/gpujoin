@@ -302,16 +302,14 @@ struct harmonia_tree {
         const auto node_count = leaf_level.node_count_prefix_sum + leaf_level.node_count;
         const auto key_array_size = max_keys*node_count;
 
-        decltype(keys) new_keys(key_array_size);
+        decltype(keys) new_keys(key_array_size, key_array_size);
         keys.swap(new_keys);
-        decltype(children) new_children(node_count);
+        decltype(children) new_children(node_count, node_count);
         children.swap(new_children);
         if /*constexpr*/ (!Sorted_Only) {
-            decltype(values) new_values(input.size());
+            decltype(values) new_values(input.size(), input.size());
             values.swap(new_values);
         }
-
-        //printf("arrays allocated\n");
 
         // populate the entire key array with `max_key`
         // so that underfull nodes do not require any special logic during lookup
@@ -544,6 +542,7 @@ struct harmonia_tree {
                 key_idx += ntg_size;
 
                 key_t value;
+                // TODO check if omitting this if statement while increasing the key array size accordingly leads to any performance difference
                 if (key_idx < max_keys) value = leader_arr[key_idx];
                 matches = __ballot_sync(window_mask, key_idx < max_keys && value >= leader_x);
                 advance = key_idx - lane_offset + ntg_size < max_keys; // termination criterion
