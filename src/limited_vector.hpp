@@ -11,24 +11,24 @@ struct limited_vector {
     using value_type = T;
 
     limited_vector() noexcept
-        : vec_(nullptr), limit_(0), size_(0) {}
+        : arr_(nullptr), limit_(0), size_(0) {}
 
-    limited_vector(size_t limit)
-        : limit_(limit), size_(0)
+    limited_vector(size_t limit, size_t count = 0)
+        : limit_(limit), size_(count)
     {
         static Allocator allocator;
-        vec_ = allocator.allocate(limit);
+        arr_ = allocator.allocate(limit);
     }
 
     ~limited_vector() {
         static Allocator allocator;
-        if (vec_) {
-            allocator.deallocate(vec_, limit_);
+        if (arr_) {
+            allocator.deallocate(arr_, limit_);
         }
     }
 
     void swap(my_type& other) noexcept {
-        std::swap(vec_, other.vec_);
+        std::swap(arr_, other.arr_);
         std::swap(size_, other.size_);
         std::swap(limit_, other.limit_);
     }
@@ -39,36 +39,58 @@ struct limited_vector {
             throw std::runtime_error("limited_vector capacity exceeded");
         }
 
-        new (&vec_[size_++]) T(args...);
+        new (&arr_[size_++]) T(args...);
         assert(size_ <= limit_);
     }
 
-    T& back() noexcept { return vec_[size_ - 1]; }
+    T& front() noexcept {
+        assert(size_ > 0);
+        return arr_[0];
+    }
 
-    const T& back() const noexcept { return vec_[size_ - 1]; }
+    const T& front() const noexcept {
+        assert(size_ > 0);
+        return arr_[0];
+    }
+
+    T& back() noexcept {
+        assert(size_ > 0);
+        return arr_[size_ - 1];
+    }
+
+    const T& back() const noexcept {
+        assert(size_ > 0);
+        return arr_[size_ - 1];
+    }
 
     size_t size() const noexcept { return size_; }
 
     size_t capacity() const noexcept { return limit_; }
 
-    T& operator[](int idx) noexcept { return vec_[idx]; }
+    T& operator[](int idx) noexcept {
+        assert(idx < size_);
+        return arr_[idx];
+    }
 
-    const T& operator[](int idx) const noexcept { return vec_[idx]; }
+    const T& operator[](int idx) const noexcept {
+        assert(idx < size_);
+        return arr_[idx];
+    }
 
-    auto begin() noexcept { return vec_; }
+    auto begin() noexcept { return arr_; }
 
-    const auto begin() const noexcept { return vec_; }
+    const auto begin() const noexcept { return arr_; }
 
-    auto end() noexcept { return vec_ + size_; }
+    auto end() noexcept { return arr_ + size_; }
 
-    const auto end() const noexcept { return vec_ + size_; }
+    const auto end() const noexcept { return arr_ + size_; }
 
-    T* data() noexcept { return vec_; }
+    T* data() noexcept { return arr_; }
 
-    const T* data() const noexcept { return vec_; }
+    const T* data() const noexcept { return arr_; }
 
 private:
-    T* vec_;
+    T* arr_;
     size_t size_;
     size_t limit_;
 };

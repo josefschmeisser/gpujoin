@@ -19,21 +19,39 @@ struct vector_view {
 
     ~vector_view() = default;
 
-    T& front() noexcept { return arr_[0]; }
+    T& front() noexcept {
+        assert(size_ > 0);
+        return arr_[0];
+    }
 
-    const T& front() const noexcept { return arr_[0]; }
+    const T& front() const noexcept {
+        assert(size_ > 0);
+        return arr_[0];
+    }
 
-    T& back() noexcept { return arr_[size_ - 1]; }
+    T& back() noexcept {
+        assert(size_ > 0);
+        return arr_[size_ - 1];
+    }
 
-    const T& back() const noexcept { return arr_[size_ - 1]; }
+    const T& back() const noexcept {
+        assert(size_ > 0);
+        return arr_[size_ - 1];
+    }
 
     size_type size() const noexcept { return size_; }
 
     size_type capacity() const noexcept { return size_; }
 
-    T& operator[](int idx) noexcept { return arr_[idx]; }
+    T& operator[](int idx) noexcept {
+        assert(idx < size_);
+        return arr_[idx];
+    }
 
-    const T& operator[](int idx) const noexcept { return arr_[idx]; }
+    const T& operator[](int idx) const noexcept {
+        assert(idx < size_);
+        return arr_[idx];
+    }
 
     auto begin() noexcept { return arr_; }
 
