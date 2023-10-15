@@ -118,7 +118,7 @@ bool query_data::validate_results() {
 */
     // validate results
     printf("validating results...\n");
-    for (unsigned i = 0; i < actual_lookup_keys->size(); ++i) {
+    for (size_t i = 0; i < actual_lookup_keys->size(); ++i) {
         if (h_tids_raw[i] > actual_indexed->size()) {
             std::cerr << "invalid tid: " << h_tids_raw[i] << ", at " << i << " from " << actual_lookup_keys->size() << std::endl;
             return false;

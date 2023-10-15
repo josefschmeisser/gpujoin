@@ -36,7 +36,8 @@
 
 namespace harmonia {
 
-using child_ref_t = uint32_t; // TODO use device_size_t ?
+//using child_ref_t = uint32_t; // TODO use device_size_t ?
+using child_ref_t = device_size_t;
 
 // only contains the upper tree levels; stored in constant memory
 // retain some space for kernel launch arguments (those are also stored in constant memory)
@@ -54,12 +55,12 @@ struct harmonia_tree {
     using key_t = Key;
     using value_t = Value;
 
-    static constexpr unsigned max_depth = 16;
+    static constexpr size_t max_depth = 16;
     static constexpr key_t max_key = std::numeric_limits<key_t>::max();
     static_assert(fanout < std::numeric_limits<unsigned>::max());
-    static constexpr unsigned max_keys = fanout - 1; // per node
+    static constexpr size_t max_keys = fanout - 1; // per node
 
-    static unsigned constexpr get_max_keys() noexcept { return max_keys; }
+    static size_t constexpr get_max_keys() noexcept { return max_keys; }
 
     limited_vector<key_t, HostAllocator<key_t>> keys;
     limited_vector<child_ref_t, HostAllocator<child_ref_t>> children;
@@ -311,6 +312,7 @@ struct harmonia_tree {
             values.swap(new_values);
         }
 
+        printf("fill with max_key\n");
         // populate the entire key array with `max_key`
         // so that underfull nodes do not require any special logic during lookup
         std::fill(keys.begin(), keys.end(), key_t(max_key));
@@ -319,8 +321,11 @@ struct harmonia_tree {
         depth = levels.size();
         size = input.size();
 
+        printf("invoke store_structure\n");
         store_structure(levels);
+        printf("invoke populate_nodes\n");
         populate_nodes(levels, input);
+        printf("structure complete\n");
 
         if (depth > max_depth) throw std::runtime_error("max depth exceeded");
 
@@ -331,8 +336,12 @@ struct harmonia_tree {
         key_sample.reserve(1000);
         // sample was introduced in c++17
         //std::sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
+        printf("before simple_sample\n");
         simple_sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
+        printf("after simple_sample\n");
+        printf("before optimize ntg\n");
         optimize_ntg(key_sample);
+        printf("after optimize ntg\n");
     }
 
     // return: {depth_limit, byte_limit}
@@ -413,6 +422,7 @@ struct harmonia_tree {
 
     template<class DeviceAllocator>
     __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
+        printf("create_device_handle\n");
         // copy upper tree levels to device constant memory
         const auto caching_depth = copy_children_portion_to_cached_memory();
 
@@ -746,6 +756,7 @@ struct harmonia_tree {
     }
 
     __host__ void optimize_ntg(std::vector<key_t>& sample) {
+        printf("in optimize_ntg\n");
         ntg_degrees.clear();
         for (unsigned current_depth = 0; current_depth < depth; ++current_depth) {
             unsigned current_ntg_degree = 5;

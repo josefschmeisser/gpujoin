@@ -89,7 +89,7 @@ std::string stringify(InputIt first, InputIt last) {
 template<class InputIt, class OutputIt, class URBG>
 void simple_sample(InputIt first, InputIt last, OutputIt out, size_t n, URBG&& rg) {
     size_t size = std::distance(first, last);
-    std::uniform_int_distribution<> distrib(0, size - 1);
+    std::uniform_int_distribution<size_t> distrib(0, size - 1);
     std::unordered_set<size_t> seen;
     while (n > 0) {
         size_t i = distrib(rg);

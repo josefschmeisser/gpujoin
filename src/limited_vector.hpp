@@ -67,12 +67,13 @@ struct limited_vector {
 
     size_t capacity() const noexcept { return limit_; }
 
-    T& operator[](int idx) noexcept {
+    T& operator[](size_t idx) noexcept {
+        if (idx >= size_) printf("idx: %lu > size: %lu\n", idx, size_);
         assert(idx < size_);
         return arr_[idx];
     }
 
-    const T& operator[](int idx) const noexcept {
+    const T& operator[](size_t idx) const noexcept {
         assert(idx < size_);
         return arr_[idx];
     }
