@@ -2,7 +2,7 @@
 
 declare -i relation_r_size=$((2**26))
 declare -i relation_s_size=$((2**26))
-declare -i relation_s_end_size=$((2**30))
+declare -i relation_s_end_size=$((2**34))
 declare -i step=$((128*(10**6)))
 declare -r output="search.yml"
 
