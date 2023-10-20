@@ -88,10 +88,15 @@ struct mmap_allocator {
         if (node_mask == 0) {
             throw std::runtime_error("node not available for process");
         }
-
         const auto r = mbind(ptr, aligned_size, MPOL_BIND, &allowed_nodes, maxnode, MPOL_MF_STRICT);
         if (r != 0) {
             throw std::runtime_error("mbind failed: "s + std::strerror(errno));
+        }
+
+        // TODO check: use size or aligned_size
+        const auto r2 = mlock(ptr, aligned_size);
+        if (r2 != 0) {
+            throw std::runtime_error("mlock failed: "s + std::strerror(errno));
         }
 
         return static_cast<pointer>(ptr);
