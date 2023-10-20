@@ -63,6 +63,8 @@ struct harmonia_tree {
     static size_t constexpr get_max_keys() noexcept { return max_keys; }
 
     limited_vector<key_t, HostAllocator<key_t>> keys;
+    const key_t* leaf_keys;
+    size_t key_count_prefix_sum;
     limited_vector<child_ref_t, HostAllocator<child_ref_t>> children;
     limited_vector<value_t, HostAllocator<value_t>> values;
 
@@ -72,9 +74,11 @@ struct harmonia_tree {
 
     struct device_handle_t {
         const key_t* __restrict__ keys;
+        const key_t* __restrict__ leaf_keys;
         const child_ref_t* __restrict__ children;
         const value_t* __restrict__ values;
         device_size_t size;
+        device_size_t key_count_prefix_sum;
         unsigned depth;
         unsigned caching_depth;
         unsigned ntg_degree[max_depth]; // ntg size for each level starting at the root level
@@ -82,6 +86,7 @@ struct harmonia_tree {
 
     struct memory_guard_t {
         device_array_wrapper<key_t> keys_guard;
+        device_array_wrapper<key_t> leaf_keys_guard;
         device_array_wrapper<child_ref_t> children_guard;
         device_array_wrapper<value_t> values_guard;
     };
@@ -250,7 +255,9 @@ struct harmonia_tree {
     template<class Vector>
     __host__ void populate_leaf_nodes(const std::vector<level_data>& tree_levels, const Vector& input) {
         size_t children_offset = tree_levels.back().node_count_prefix_sum;
-        size_t key_count_prefix_sum = children_offset * max_keys;
+        //size_t key_count_prefix_sum = children_offset * max_keys;
+        key_count_prefix_sum = children_offset * max_keys;
+        // TODO remove:
         std::copy(input.begin(), input.end(), keys.begin() + key_count_prefix_sum);
 
         child_ref_t values_prefix_sum = 0;
@@ -295,6 +302,7 @@ struct harmonia_tree {
     __host__ void construct(const Vector& input) {
         assert(input.size() < std::numeric_limits<device_size_t>::max());
 
+leaf_keys = input.data();
         auto levels = gather_tree_info(input);
         //create_node_descriptions(levels);
 
@@ -381,9 +389,12 @@ struct harmonia_tree {
         return caching_depth;
     }
 
+    // TODO remove
     __host__ void create_device_handle(device_handle_t& handle) {
         // copy upper tree levels to device constant memory
-        const auto caching_depth = copy_children_portion_to_cached_memory();
+        // TODO re-enable
+        //const auto caching_depth = copy_children_portion_to_cached_memory();
+        const auto caching_depth = 0;
 
         key_t* d_keys;
         auto ret = cudaMalloc(&d_keys, sizeof(key_t)*keys.size());
@@ -423,8 +434,9 @@ struct harmonia_tree {
     template<class DeviceAllocator>
     __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
         printf("create_device_handle\n");
-        // copy upper tree levels to device constant memory
-        const auto caching_depth = copy_children_portion_to_cached_memory();
+        // TODO re-enable
+        //const auto caching_depth = copy_children_portion_to_cached_memory();
+        const auto caching_depth = 0;
 
         // initialize fields
         handle.depth = depth;
@@ -435,6 +447,13 @@ struct harmonia_tree {
         typename DeviceAllocator::rebind<key_t>::other keys_allocator = device_allocator;
         guard.keys_guard = create_device_array_from(keys, keys_allocator);
         handle.keys = guard.keys_guard.data();
+
+        // migrate leaf key array
+//guard.leaf_keys_guard = create_device_array_from(const_cast<key_t*>(leaf_keys), keys_allocator);
+//handle.leaf_keys = guard.leaf_keys_guard.data();
+handle.leaf_keys = leaf_keys;
+
+handle.key_count_prefix_sum = key_count_prefix_sum;
 
         // migrate children array
         typename DeviceAllocator::rebind<child_ref_t>::other children_allocator = device_allocator;
@@ -608,8 +627,11 @@ struct harmonia_tree {
 #endif
         key_t actual;
         device_size_t lb = 0, pos = 0;
-        for (unsigned current_depth = 0; current_depth < tree.depth; ++current_depth) {
-            const key_t* node_start = tree.keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
+        for (unsigned current_depth = 1; current_depth <= tree.depth; ++current_depth) {
+            //const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - max_keys*pos) : tree.keys;
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            //const key_t* keys = tree.keys;
+            const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search<Degree>(active, key, node_start);
             actual = node_start[lb];
