@@ -257,8 +257,11 @@ struct harmonia_tree {
         size_t children_offset = tree_levels.back().node_count_prefix_sum;
         //size_t key_count_prefix_sum = children_offset * max_keys;
         key_count_prefix_sum = children_offset * max_keys;
+#if 1
+#else
         // TODO remove:
         std::copy(input.begin(), input.end(), keys.begin() + key_count_prefix_sum);
+#endif
 
         child_ref_t values_prefix_sum = 0;
         for (size_t node_idx = 0; node_idx < tree_levels.back().node_count; ++node_idx) {
@@ -272,7 +275,9 @@ struct harmonia_tree {
 
     template<class Vector>
     __host__ void populate_nodes(const std::vector<level_data>& tree_levels, const Vector& input) {
+        printf("before populate_leaf_nodes\n");
         populate_leaf_nodes(tree_levels, input);
+        printf("after populate_leaf_nodes\n");
         if (tree_levels.size() > 1) {
             populate_inner_nodes(tree_levels, tree_levels.size() - 2);
         }
@@ -311,11 +316,17 @@ leaf_keys = input.data();
         const auto node_count = leaf_level.node_count_prefix_sum + leaf_level.node_count;
         const auto key_array_size = max_keys*node_count;
 
+#if 1
+
+        decltype(keys) new_keys(key_array_size, key_array_size - leaf_level.node_count);
+#else
         decltype(keys) new_keys(key_array_size, key_array_size);
+#endif
         keys.swap(new_keys);
         decltype(children) new_children(node_count, node_count);
         children.swap(new_children);
         if /*constexpr*/ (!Sorted_Only) {
+            printf("=== sorted only!\n");
             decltype(values) new_values(input.size(), input.size());
             values.swap(new_values);
         }
@@ -348,7 +359,7 @@ leaf_keys = input.data();
         simple_sample(input.begin(), input.end(), std::back_inserter(key_sample), 1000, std::mt19937{std::random_device{}()});
         printf("after simple_sample\n");
         printf("before optimize ntg\n");
-        optimize_ntg(key_sample);
+        //optimize_ntg(key_sample);
         printf("after optimize ntg\n");
     }
 
@@ -628,6 +639,9 @@ handle.key_count_prefix_sum = key_count_prefix_sum;
         key_t actual;
         device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 1; current_depth <= tree.depth; ++current_depth) {
+
+
+            assert(!active || current_depth < tree.depth || tree.key_count_prefix_sum <= max_keys*pos);
             //const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - max_keys*pos) : tree.keys;
             const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
             //const key_t* keys = tree.keys;
