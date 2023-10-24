@@ -17,7 +17,22 @@ struct vector_view {
         : arr_(arr), size_(size)
     {}
 
+    vector_view(vector_view&& other) noexcept {
+        arr_ = other.arr_;
+        size_ = other.size_;
+        other.arr_ = nullptr;
+        other.size_ = 0;
+    }
+
     ~vector_view() = default;
+
+    vector_view& operator=(vector_view&& other) {
+        arr_ = other.arr_;
+        size_ = other.size_;
+        other.arr_ = nullptr;
+        other.size_ = 0;
+        return *this;
+    }
 
     T& front() noexcept {
         assert(size_ > 0);
@@ -67,7 +82,7 @@ struct vector_view {
 
 private:
     T* arr_;
-    const size_t size_;
+    size_t size_;
 };
 
 // for pre-c++17 compilers
@@ -79,4 +94,9 @@ auto make_vector_view(T* arr, size_t size) {
 template<class VectorType>
 vector_view<typename VectorType::value_type> make_vector_view(VectorType& vector_value) {
     return vector_view<typename VectorType::value_type>(&vector_value.front(), vector_value.size());
+}
+
+template<class VectorType>
+vector_view<const typename VectorType::value_type> make_vector_view(const VectorType& vector_value) {
+    return vector_view<const typename VectorType::value_type>(&vector_value.front(), vector_value.size());
 }
