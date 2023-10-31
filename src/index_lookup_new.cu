@@ -103,7 +103,8 @@ bool query_data::validate_results() {
 #ifdef ONLY_AGGREGATES
     // TODO
 #else
-    auto h_tids = d_tids.to_host_accessible();
+    static host_allocator_t<value_t> tids_validation_allocator;
+    auto h_tids = d_tids.to_host_accessible(tids_validation_allocator);
     auto h_tids_raw = h_tids.data();
 
     //std::cout << "h_tids: " << stringify(h_tids_raw, h_tids_raw + h_tids.size()) << std::endl;
