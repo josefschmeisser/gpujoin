@@ -362,17 +362,18 @@ struct btree {
     }
 
     template<class DeviceAllocator>
-    NodeBase* migrate(DeviceAllocator& device_allocator, device_array_wrapper<page>& guard) {
-        // allocate memory
-        typename DeviceAllocator::rebind<page>::other page_allocator = device_allocator;
-        page* migrated_pages = page_allocator.allocate(pages.size());
-        auto new_guard = device_array_wrapper<page>(migrated_pages, pages.size(), page_allocator);
+    NodeBase* migrate(device_array_wrapper<page>& guard) {
+        using page_allocator_type = typename DeviceAllocator::rebind<page>::other;
+
+        // allocate new memory if necessary
+        static page_allocator_type page_allocator;
+        auto new_guard = create_device_array_from(pages, page_allocator);
         guard.swap(new_guard);
 
         // migrate tree
         size_t pos = 0;
         target_memcpy<DeviceAllocator> memcpy_fun;
-        return migrate_subtree(root, migrated_pages, pos, memcpy_fun);
+        return migrate_subtree(root, guard.data(), pos, memcpy_fun);
     }
 
     size_t tree_size_in_byte(const NodeBase* tree) const {

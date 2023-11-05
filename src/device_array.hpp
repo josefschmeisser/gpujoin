@@ -47,9 +47,9 @@ struct allocation_model : public allocation_concept<typename Allocator::value_ty
     Allocator allocator_;
     bool managed_;
 
-    allocation_model(value_type* ptr, size_t size, Allocator allocator, bool managed = true)
+    allocation_model(value_type* ptr, size_t size, bool managed = true)
         : allocation_concept<value_type>(ptr, size)
-        , allocator_(allocator)
+        , allocator_()
         , managed_(managed)
     {}
 
@@ -68,7 +68,7 @@ struct allocation_model : public allocation_concept<typename Allocator::value_ty
     std::shared_ptr<allocation_concept<value_type>> to_host_accessible() const override;
 
     template<class DestAllocator>
-    std::shared_ptr<allocation_concept<value_type>> copy_if_different(DestAllocator& allocator) const;
+    std::shared_ptr<allocation_concept<value_type>> copy_if_different() const;
 };
 
 template<class Allocator>
@@ -87,24 +87,24 @@ std::shared_ptr<allocation_concept<typename Allocator::value_type>> allocation_m
     static std::allocator<value_type> target_allocator;
 
     if /*constexpr*/ (is_allocation_host_accessible<Allocator>::value) {
-        return std::make_shared<allocation_model<decltype(allocator_)>>(this->ptr_, this->size_, allocator_, false);
+        return std::make_shared<allocation_model<decltype(allocator_)>>(this->ptr_, this->size_, false);
     } else {
         value_type* ptr = target_allocator.allocate(this->size_);
         const auto ret = cudaMemcpy(ptr, this->ptr_, this->size_*sizeof(value_type), cudaMemcpyDeviceToHost);
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
-        return std::make_shared<allocation_model<decltype(target_allocator)>>(ptr, this->size_, target_allocator);
+        return std::make_shared<allocation_model<decltype(target_allocator)>>(ptr, this->size_, true);
     }
 }
 
 template<class Allocator>
 template<class DestAllocator>
-std::shared_ptr<allocation_concept<typename Allocator::value_type>> allocation_model<Allocator>::copy_if_different(DestAllocator& allocator) const {
+std::shared_ptr<allocation_concept<typename Allocator::value_type>> allocation_model<Allocator>::copy_if_different() const {
 #if 0
     using src_allocator_type = typename Allocator::template rebind<value_type>::other;
     using dst_allocator_type = typename DestAllocator::template rebind<value_type>::other;
 
     if /*constexpr*/ (std::is_same<src_allocator_type, dst_allocator_type>::value) {
-        return std::make_shared<allocation_model<dst_allocator_type>>(this->ptr_, this->size_, allocator_, false);
+        return std::make_shared<allocation_model<dst_allocator_type>>(this->ptr_, this->size_, false);
     } else {
         const bool src_host_accessible = is_allocation_host_accessible<src_allocator_type>::value;
         const bool dst_host_accessible = is_allocation_host_accessible<dst_allocator_type>::value;
@@ -121,11 +121,13 @@ std::shared_ptr<allocation_concept<typename Allocator::value_type>> allocation_m
 
         const auto ret = cudaMemcpy(ptr, this->ptr_, this->size_*sizeof(value_type), kind);
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
-        return std::make_shared<allocation_model<dst_allocator_type>>(ptr, this->size_, bound_allocator, true);
+        return std::make_shared<allocation_model<dst_allocator_type>>(ptr, this->size_, true);
     }
 #endif
     return {};
 }
+
+template<typename T> struct encoded_type { };
 
 template<class T>
 struct device_array_wrapper {
@@ -139,11 +141,11 @@ struct device_array_wrapper {
         : device_array_(other.device_array_)
     {}
 
+    // https://stackoverflow.com/a/62675564
     template<class Allocator>
-    device_array_wrapper(T* ptr, size_t size, Allocator allocator) {
+    device_array_wrapper(T* ptr, size_t size, encoded_type<Allocator>) {
         using bound_allocator_type = typename Allocator::template rebind<T>::other;
-        static bound_allocator_type bound_allocator;
-        device_array_ = std::make_shared<allocation_model<bound_allocator_type>>(ptr, size, bound_allocator, true);
+        device_array_ = std::make_shared<allocation_model<bound_allocator_type>>(ptr, size, true);
     }
 
     ~device_array_wrapper() = default;
@@ -164,14 +166,13 @@ public:
         using bound_allocator_type = typename Allocator::template rebind<T>::other;
         static bound_allocator_type bound_allocator;
         T* ptr = bound_allocator.allocate(size);
-        device_array_ = std::make_shared<allocation_model<bound_allocator_type>>(ptr, size, bound_allocator, true);
+        device_array_ = std::make_shared<allocation_model<bound_allocator_type>>(ptr, size, true);
     }
 
     template<class Allocator>
-    static device_array_wrapper<T> create_reference_only(T* ptr, size_t size, Allocator allocator) {
+    static device_array_wrapper<T> create_reference_only(T* ptr, size_t size) {
         using bound_allocator_type = typename Allocator::template rebind<T>::other;
-        static bound_allocator_type bound_allocator;
-        return device_array_wrapper(std::make_shared<allocation_model<bound_allocator_type>>(ptr, size, bound_allocator, false));
+        return device_array_wrapper(std::make_shared<allocation_model<bound_allocator_type>>(ptr, size, false));
     }
 
     T* data() {
@@ -212,16 +213,16 @@ public:
     }
 
     template<class HostAllocator>
-    device_array_wrapper<T> to_host_accessible(HostAllocator allocator) const {
+    device_array_wrapper<T> to_host_accessible() const {
         if (!device_array_) return device_array_wrapper();
 
         if (is_host_accessible()) return *this;
 
         using bound_allocator_type = typename HostAllocator::template rebind<T>::other;
-        bound_allocator_type bound_allocator = allocator;
+        static bound_allocator_type bound_allocator;
 
         device_array_wrapper<T> new_allocation;
-        new_allocation.allocate(size());
+        new_allocation.allocate<bound_allocator_type>(size());
         const auto ret = cudaMemcpy(new_allocation.data(), data(), size()*sizeof(T), cudaMemcpyDeviceToHost);
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
 
@@ -229,7 +230,7 @@ public:
     }
 
     template<class Allocator>
-    device_array_wrapper<T> copy_if_different(Allocator& allocator) const {
+    device_array_wrapper<T> copy_if_different() const {
         throw "not implemented";
     }
 };
@@ -239,19 +240,19 @@ auto create_device_array(size_t size) {
     using allocator_type = cuda_allocator<T>;
     static allocator_type allocator;
     T* ptr = allocator.allocate(size);
-    return device_array_wrapper<T>(ptr, size, allocator);
+    return device_array_wrapper<T>(ptr, size, encoded_type<allocator_type> {});
 }
 
 template<class T, class Allocator>
-auto create_device_array(size_t size, Allocator& allocator) {
+auto create_device_array(size_t size, Allocator& allocator) { // TODO remove allocator
     using bound_allocator_type = typename Allocator::template rebind<T>::other;
-    bound_allocator_type bound_allocator = allocator;
+    static bound_allocator_type bound_allocator;
     T* ptr = bound_allocator.allocate(size);
-    return device_array_wrapper<T>(ptr, size, bound_allocator);
+    return device_array_wrapper<T>(ptr, size, encoded_type<bound_allocator_type> {});
 }
 
 template<typename T, class InputAllocator, typename OutputAllocator, template <typename, typename> class VectorType>
-auto create_device_array_from(VectorType<T, InputAllocator>& vec, OutputAllocator& device_allocator) {
+auto create_device_array_from(VectorType<T, InputAllocator>& vec, OutputAllocator& device_allocator) { // TODO device_allocator allocator
     using src_allocator_type = typename InputAllocator::template rebind<T>::other;
     using dst_allocator_type = typename OutputAllocator::template rebind<T>::other;
     static dst_allocator_type bound_allocator = device_allocator;
@@ -259,7 +260,7 @@ auto create_device_array_from(VectorType<T, InputAllocator>& vec, OutputAllocato
     // check if rebinding is sufficient
     if (std::is_same<src_allocator_type, dst_allocator_type>::value) {
         printf("same allocator after all\n");
-        return device_array_wrapper<T>::create_reference_only(vec.data(), vec.size(), bound_allocator);
+        return device_array_wrapper<T>::template create_reference_only<dst_allocator_type>(vec.data(), vec.size());
     }
 
     // allocate memory
@@ -270,18 +271,18 @@ auto create_device_array_from(VectorType<T, InputAllocator>& vec, OutputAllocato
         // we have to use cudaMemcpy here since device memory can't be accessed by the host
         const auto ret = cudaMemcpy(ptr, vec.data(), vec.size()*sizeof(T), cudaMemcpyHostToDevice);
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
-        return device_array_wrapper<T>(ptr, vec.size(), bound_allocator);
+        return device_array_wrapper<T>(ptr, vec.size(), encoded_type<dst_allocator_type> {});
     } else {
         std::memcpy(ptr, vec.data(), vec.size()*sizeof(T));
-        return device_array_wrapper<T>(ptr, vec.size(), bound_allocator);
+        return device_array_wrapper<T>(ptr, vec.size(), encoded_type<dst_allocator_type> {});
     }
 }
 
 template<typename T, class InputAllocator, typename OutputAllocator, template <typename, typename> class VectorType>
-auto create_device_array_from(VectorType<T, OutputAllocator>& vec, OutputAllocator& device_allocator) {
+auto create_device_array_from(VectorType<T, OutputAllocator>& vec, OutputAllocator& device_allocator) { // TODO device_allocator allocator
     using bound_allocator_type = typename OutputAllocator::template rebind<T>::other;
-    static bound_allocator_type bound_allocator = device_allocator;
-    return device_array_wrapper<T>::create_reference_only(vec.data(), vec.size(), bound_allocator);
+    bound_allocator_type bound_allocator = device_allocator;
+    return device_array_wrapper<T>::template create_reference_only<bound_allocator_type>(vec.data(), vec.size());
 }
 
 // This alias template removes the depency on the additional template parameter of cuda_allocator

@@ -121,15 +121,14 @@ struct btree_index : public abstract_index<Key> {
     } device_index;
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
-        h_tree_.construct(h_column, 0.7);
+        h_tree_.construct(h_column, 1.0);
 
         if /*constexpr*/ (std::is_same<DeviceAllocator<int>, HostAllocator<int>>::value) {
             printf("no migration necessary\n");
             device_index.d_tree_ = h_tree_.root;
         } else {
             printf("migrating btree...\n");
-            DeviceAllocator<key_t> device_allocator;
-            device_index.d_tree_ = h_tree_.migrate(device_allocator, h_guard);
+            device_index.d_tree_ = h_tree_.template migrate<DeviceAllocator<int>>(h_guard);
         }
     }
 

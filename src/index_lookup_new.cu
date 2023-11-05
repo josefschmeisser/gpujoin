@@ -103,8 +103,8 @@ bool query_data::validate_results() {
 #ifdef ONLY_AGGREGATES
     // TODO
 #else
-    static host_allocator_t<value_t> tids_validation_allocator;
-    auto h_tids = d_tids.to_host_accessible(tids_validation_allocator);
+    //static host_allocator_t<value_t> tids_validation_allocator;
+    auto h_tids = d_tids.to_host_accessible<host_allocator_t<value_t>>();
     auto h_tids_raw = h_tids.data();
 
     //std::cout << "h_tids: " << stringify(h_tids_raw, h_tids_raw + h_tids.size()) << std::endl;
@@ -398,7 +398,7 @@ int main(int argc, char** argv) {
     } else {
         measuring_config.stdout_only = true;
     }
-    measuring_config.repetitions = 10;
+    measuring_config.repetitions = 3;
 /*
     if (config.execute_predefined_scenario) {
         execute_benchmark_scenario();
