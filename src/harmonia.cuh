@@ -68,11 +68,11 @@ struct harmonia_tree {
 
     limited_vector<key_t, HostAllocator<key_t>> keys;
     const key_t* leaf_keys;
-    size_t key_count_prefix_sum;
     limited_vector<child_ref_t, HostAllocator<child_ref_t>> children;
     limited_vector<value_t, HostAllocator<value_t>> values;
 
-    device_size_t size;
+    size_t size;
+    size_t inner_nodes_key_array_size;
     unsigned depth;
     std::vector<unsigned> ntg_degrees;
 
@@ -82,7 +82,7 @@ struct harmonia_tree {
         const child_ref_t* __restrict__ children;
         const value_t* __restrict__ values;
         device_size_t size;
-        device_size_t key_count_prefix_sum;
+        device_size_t inner_nodes_key_array_size;
         unsigned depth;
         unsigned caching_depth;
         unsigned ntg_degree[max_depth]; // ntg size for each level starting at the root level
@@ -215,9 +215,9 @@ struct harmonia_tree {
     __host__ const key_t& get_key(const construction_context& ctx, size_t idx) const {
         if (Reuse_Input_Memory) {//constexpr (Reuse_Input_Memory) {
             assert(
-                (idx >= key_count_prefix_sum && idx - key_count_prefix_sum < ctx.input.size())
-                || (idx < key_count_prefix_sum && idx < keys.size()));
-            const key_t* keys_ptr = idx >= key_count_prefix_sum ? ctx.input.data() - key_count_prefix_sum : keys.data();
+                (idx >= inner_nodes_key_array_size && idx - inner_nodes_key_array_size < ctx.input.size())
+                || (idx < inner_nodes_key_array_size && idx < keys.size()));
+            const key_t* keys_ptr = idx >= inner_nodes_key_array_size ? ctx.input.data() - inner_nodes_key_array_size : keys.data();
             return keys_ptr[idx];
 
         } else {
@@ -265,7 +265,7 @@ struct harmonia_tree {
             //std::cout << "sep: " << sep << std::endl;
             // TODO check / assert
             size_t idx = level_keys_start + next_key_idx;
-            assert(idx < key_count_prefix_sum);
+            assert(idx < inner_nodes_key_array_size);
             keys[idx] = sep;
             next_key_idx += 1;
             skipped = false;
@@ -279,8 +279,7 @@ struct harmonia_tree {
 
     __host__ void populate_leaf_nodes(const construction_context& ctx, const std::vector<level_data>& tree_levels) {
         size_t children_offset = tree_levels.back().node_count_prefix_sum;
-        //size_t key_count_prefix_sum = children_offset * max_keys;
-        key_count_prefix_sum = children_offset * max_keys;
+        size_t key_count_prefix_sum = children_offset * max_keys;
 
         if (Reuse_Input_Memory) {
             // no-op
@@ -339,12 +338,16 @@ struct harmonia_tree {
 
         // allocate memory for all the arrays
         const auto& leaf_level = levels.back();
+        const auto inner_nodes_key_array_size = max_keys*leaf_level.node_count_prefix_sum;
         const auto node_count = leaf_level.node_count_prefix_sum + leaf_level.node_count;
         const auto key_array_size = max_keys*node_count;
 
+        printf("inner_nodes_key_array_size: %lu\n", inner_nodes_key_array_size);
+        printf("key_array_size: %lu\n", key_array_size);
+        printf("leaf_level.node_count_prefix_sum: %lu; leaf_level.node_count: %lu\n", leaf_level.node_count_prefix_sum, leaf_level.node_count);
         if (Reuse_Input_Memory) {
             printf("reusing input memory\n");
-            decltype(keys) new_keys(key_array_size, key_array_size - leaf_level.node_count);
+            decltype(keys) new_keys(inner_nodes_key_array_size, inner_nodes_key_array_size);
             keys.swap(new_keys);
             // the underlying allocation has to be accessible from the device!
             leaf_keys = input.data();
@@ -352,7 +355,7 @@ struct harmonia_tree {
             decltype(keys) new_keys(key_array_size, key_array_size);
             keys.swap(new_keys);
             // the handle's leaf_keys field will be set during migration, the following is only used for host-side lookups
-            leaf_keys = &keys[key_count_prefix_sum];
+            leaf_keys = &keys[inner_nodes_key_array_size];
         }
 
         decltype(children) new_children(node_count, node_count);
@@ -368,9 +371,10 @@ struct harmonia_tree {
         // so that underfull nodes do not require any special logic during lookup
         std::fill(keys.begin(), keys.end(), key_t(max_key));
 
-        // initialize remaining members
-        depth = levels.size();
-        size = input.size();
+        // initialize remaining class members
+        this->depth = levels.size();
+        this->size = input.size();
+        this->inner_nodes_key_array_size = inner_nodes_key_array_size;
 
         printf("invoke store_structure\n");
         store_structure(levels);
@@ -487,9 +491,9 @@ struct harmonia_tree {
         handle.keys = guard.keys_guard.data();
 
         // migrate leaf key array
-        handle.leaf_keys = Reuse_Input_Memory ? leaf_keys : &handle.keys[key_count_prefix_sum];
-        handle.key_count_prefix_sum = key_count_prefix_sum;
-        printf("key_count_prefix_sum: %lu\n", key_count_prefix_sum);
+        handle.leaf_keys = Reuse_Input_Memory ? leaf_keys : &handle.keys[inner_nodes_key_array_size];
+        handle.inner_nodes_key_array_size = inner_nodes_key_array_size;
+        printf("inner_nodes_key_array_size: %lu\n", inner_nodes_key_array_size);
 
         // migrate children array
         typename DeviceAllocator::rebind<child_ref_t>::other children_allocator = device_allocator;
@@ -630,7 +634,7 @@ struct harmonia_tree {
         device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 1; current_depth <= depth; ++current_depth) {
             // TODO check
-            const key_t* keys = current_depth == depth ? (leaf_keys - key_count_prefix_sum) : keys;
+            const key_t* keys = current_depth == depth ? (leaf_keys - inner_nodes_key_array_size) : keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
@@ -668,8 +672,8 @@ struct harmonia_tree {
         key_t actual;
         device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 1; current_depth <= tree.depth; ++current_depth) {
-            assert(!active || current_depth < tree.depth || tree.key_count_prefix_sum <= max_keys*pos);
-            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            assert(!active || current_depth < tree.depth || tree.inner_nodes_key_array_size <= max_keys*pos);
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.inner_nodes_key_array_size) : tree.keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
@@ -700,7 +704,7 @@ struct harmonia_tree {
         key_t actual;
         device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 1; current_depth <= tree.depth; ++current_depth) {
-            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.inner_nodes_key_array_size) : tree.keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
@@ -734,8 +738,8 @@ struct harmonia_tree {
         key_t actual;
         device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 1; current_depth <= tree.depth; ++current_depth) {
-            assert(!active || current_depth < tree.depth || tree.key_count_prefix_sum <= max_keys*pos);
-            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            assert(!active || current_depth < tree.depth || tree.inner_nodes_key_array_size <= max_keys*pos);
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.inner_nodes_key_array_size) : tree.keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
@@ -773,7 +777,7 @@ struct harmonia_tree {
         key_t actual;
         device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 1; current_depth <= tree.depth; ++current_depth) {
-            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.inner_nodes_key_array_size) : tree.keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
@@ -808,7 +812,7 @@ struct harmonia_tree {
         device_size_t lb = 0, pos = 0, current_depth = 1;
         // use the portion of the children array which is stored in constant memory; hence, accesses to this array will be cached
         for (; current_depth <= tree.caching_depth; ++current_depth) {
-            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.inner_nodes_key_array_size) : tree.keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
@@ -824,7 +828,7 @@ struct harmonia_tree {
         }
         // once the upper portion of the children array is exhausted, we switch to the full array which is kept in global memory
         for (; current_depth <= tree.depth; ++current_depth) {
-            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.inner_nodes_key_array_size) : tree.keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
@@ -858,7 +862,7 @@ struct harmonia_tree {
         key_t actual;
         device_size_t lb = 0, pos = 0;
         for (unsigned current_depth = 1; current_depth <= tree.depth; ++current_depth) {
-            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.key_count_prefix_sum) : tree.keys;
+            const key_t* keys = current_depth == tree.depth ? (tree.leaf_keys - tree.inner_nodes_key_array_size) : tree.keys;
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
