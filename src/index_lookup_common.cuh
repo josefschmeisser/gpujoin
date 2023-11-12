@@ -228,7 +228,8 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, unsigned
     const int loop_limit = (n + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
     for (int i = index; i < loop_limit; i += stride) {
         const bool active = i < n;
-        const auto tid = index_structure.cooperative_lookup(active, keys[i]);
+        const auto key_idx = min(i, n);
+        const auto tid = index_structure.cooperative_lookup(active, keys[key_idx]);
         if (active) {
             tids[i] = tid;
         }
