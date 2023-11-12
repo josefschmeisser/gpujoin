@@ -40,6 +40,14 @@ static VectorType& choose_probe_side(VectorType& indexed, VectorType& lookup_key
 query_data::query_data() {
     auto& config = get_experiment_config();
 
+    // enforce harmonia constraint
+    static constexpr auto max_keys = harmonia_type::harmonia_t::get_max_keys();
+    if (config.num_elements % max_keys != 0) {
+        config.num_elements = config.num_elements & ~(max_keys - 1);
+        config.num_elements += max_keys;
+        printf("adjusting dataset size to: %lu\n", config.num_elements);
+    }
+
     // generate datasets
     printf("generating datasets...\n");
     indexed.resize(config.num_elements);

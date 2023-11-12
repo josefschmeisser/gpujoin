@@ -4,11 +4,16 @@
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
+#include <type_traits>
+
+//#include "device_array.hpp"
 
 template<class T, class Allocator>
 struct limited_vector {
     using my_type = limited_vector<T, Allocator>;
     using value_type = T;
+
+    static_assert(std::is_same<value_type, typename Allocator::value_type>::value);
 
     limited_vector() noexcept
         : arr_(nullptr), limit_(0), size_(0) {}
@@ -20,6 +25,13 @@ struct limited_vector {
         arr_ = allocator.allocate(limit);
     }
 
+/* TODO
+    limited_vector(device_array<T>& allocation)
+        : limit_(allocation.size()), size_(0)
+    {
+        arr_ = allocation.data();
+    }
+*/
     ~limited_vector() {
         static Allocator allocator;
         if (arr_) {

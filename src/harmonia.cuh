@@ -67,7 +67,7 @@ struct harmonia_tree {
     static size_t constexpr get_max_keys() noexcept { return max_keys; }
 
     limited_vector<key_t, HostAllocator<key_t>> keys;
-    const key_t* leaf_keys;
+    const key_t* leaf_keys = nullptr;
     limited_vector<child_ref_t, HostAllocator<child_ref_t>> children;
     limited_vector<value_t, HostAllocator<value_t>> values;
 
@@ -225,6 +225,19 @@ struct harmonia_tree {
         }
     }
 
+    __host__ const key_t& get_key(size_t idx) const {
+        printf("idx: %lu; size: %lu\n", idx, size);
+        assert(idx < size);
+        assert(leaf_keys != nullptr);
+        if (Reuse_Input_Memory) {//constexpr (Reuse_Input_Memory) {
+            const key_t* keys_ptr = idx >= inner_nodes_key_array_size ? (leaf_keys - inner_nodes_key_array_size) : keys.data();
+            return keys_ptr[idx];
+
+        } else {
+            return keys[idx];
+        }
+    }
+
     __host__ key_t get_largest_key(const construction_context& ctx, const std::vector<level_data>& tree_levels, unsigned level_idx, size_t node_idx) {
         assert(tree_levels.size() > level_idx);
 
@@ -330,6 +343,10 @@ struct harmonia_tree {
     __host__ void construct(const Vector& input) {
         assert(input.size() < std::numeric_limits<device_size_t>::max());
 
+        if (Reuse_Input_Memory && (input.size() % max_keys != 0)) {
+            throw std::runtime_error("harmonia: when Reuse_Input_Memory is set the dataset set must be a multiple of the node size");
+        }
+
         construction_context ctx;
         ctx.input = std::move(make_vector_view(input));
 
@@ -398,8 +415,10 @@ struct harmonia_tree {
 
         unsigned current_depth = 1;
         size_t lb = 0, pos = 0;
-        for (; current_depth <= depth; ++current_depth) {
-            const key_t* node_start = &keys[max_keys*pos];
+        // The leaf level has to be excluded here, since the children array
+        // doesn't point to any valid pages beyond the last inner level.
+        for (; current_depth < depth; ++current_depth) {
+            const key_t* node_start = &get_key(max_keys*pos);
 
             lb = std::lower_bound(node_start, node_start + max_keys, largest_key) - node_start;
             size_t new_pos = children[pos] + lb;
@@ -410,7 +429,7 @@ struct harmonia_tree {
             pos = new_pos;
         }
 
-        return {current_depth, pos*sizeof(child_ref_t)};
+        return {current_depth - 1, pos*sizeof(child_ref_t)};
     }
 
     __host__ unsigned copy_children_portion_to_cached_memory() {
@@ -476,9 +495,7 @@ struct harmonia_tree {
     template<class DeviceAllocator>
     __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
         printf("create_device_handle\n");
-        // TODO re-enable
-        //const auto caching_depth = copy_children_portion_to_cached_memory();
-        const auto caching_depth = 0;
+        const auto caching_depth = copy_children_portion_to_cached_memory();
 
         // initialize fields
         handle.depth = depth;

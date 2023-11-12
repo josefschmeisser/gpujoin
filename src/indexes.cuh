@@ -276,7 +276,7 @@ struct harmonia_index : public abstract_index<Key> {
     __host__ virtual void construct(const vector_view<key_t>& h_column, const key_t* /*d_column*/) override {
         tree.construct(h_column);
 
-        // migrate harmonia spline
+        // migrate harmonia
         const auto start = std::chrono::high_resolution_clock::now();
 
         DeviceAllocator<key_t> device_allocator;
