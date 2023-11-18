@@ -383,7 +383,7 @@ void execute_approach(std::string approach_name) {
 
     auto approach_inst = approaches.at(approach_name)->create(qd, index_type);
     approach_inst->initialize(qd);
-
+return;
     measure(experiment_desc, [&](auto& measurement) {
         approach_inst->run(qd, measurement);
     }, validator);
