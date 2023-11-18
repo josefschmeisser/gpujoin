@@ -761,7 +761,10 @@ struct harmonia_tree {
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search<Degree>(active, key, node_start);
-            actual = node_start[lb];
+            if (active)
+                actual = node_start[lb];
+            else
+                lb = 0;
 
             device_size_t new_pos = tree.children[pos] + lb;
             //active = active && new_pos < tree.size; // TODO
@@ -778,6 +781,15 @@ struct harmonia_tree {
                 return tree.values[pos];
             }
         }
+/*
+        uint32_t actmask = __ballot_sync(FULL_MASK, active);
+        if (active && pos >= tree.size) {
+            printf("no match: %lu; pos: %lu\n", key, pos);
+        }
+        if (active && key != actual) {
+            printf("no match2: %lu; pos: %lu; lb: %lu; actual: %lu; active: %u\n", key, pos, lb, actual, actmask);
+        }*/
+
 
         return not_found;
     }
@@ -884,7 +896,8 @@ struct harmonia_tree {
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
 
             lb = cooperative_linear_search(active, key, node_start, tree.ntg_degree[current_depth]);
-            actual = node_start[lb];
+            if (active)
+                actual = node_start[lb];
 
             // Use the portion of the children array which is stored in constant memory;
             // hence, accesses to this array will be cached

@@ -267,9 +267,9 @@ struct harmonia_index : public abstract_index<Key> {
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            //return harmonia_t::lookup<4>(active, d_tree, key);
+            return harmonia_t::lookup<4>(active, d_tree, key);
             //return harmonia_t::ntg_lookup(active, d_tree, key);
-            return harmonia_t::ntg_lookup_with_caching(active, d_tree, key);
+            //return harmonia_t::ntg_lookup_with_caching(active, d_tree, key);
         }
     } device_index;
 
