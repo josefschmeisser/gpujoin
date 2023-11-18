@@ -408,14 +408,16 @@ struct harmonia_tree {
         optimize_ntg(ctx);
         printf("after optimize ntg\n");
 */
+        printf("\n");
         //lookup(input[input.size()/2]);
         size_t sample_size = 10;
         std::vector<key_t> sample;
         sample.reserve(sample_size);
         simple_sample(ctx.input.begin(), ctx.input.end(), std::back_inserter(sample), sample_size, std::mt19937{});
         for (key_t k : sample) {
-            printf("\n=== start new lookup for: %lu===\n", k);
+            printf("=== start new lookup for: %lu ===\n", k);
             lookup(k);
+            printf("\n");
         }
     }
 
@@ -667,7 +669,12 @@ struct harmonia_tree {
 std::cout << "depth: " << current_depth << " node: " << stringify(node_start, node_start + max_keys) << std::endl;
             lb = std::lower_bound(node_start, node_start + max_keys, key) - node_start;
             actual = node_start[lb];
-std::cout << "lb: " << lb << " key: " <<  key << " actual: " << actual << " previous: " << node_start[std::min(lb, lb-1)] << std::endl;
+            const key_t previous = node_start[std::min(lb, lb-1)];
+            const key_t next = node_start[std::min(lb+1, get_max_keys())];
+            auto diff1 = static_cast<int64_t>(actual) - static_cast<int64_t>(previous);
+            auto diff2 = static_cast<int64_t>(next) - static_cast<int64_t>(actual);
+std::cout << "-> lb: " << lb << " key: " <<  key << " before: " << diff1 << " after: " << diff2
+    << " actual: " << actual << " previous: " << previous << " next: " << next << std::endl;
             assert(key <= actual);
             device_size_t new_pos = children[pos] + lb;
 
