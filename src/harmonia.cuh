@@ -149,14 +149,17 @@ struct harmonia_tree {
             size_t page_count = gather_level_info(current_level_info);
             assert(page_count > 0);
             // handle an edge case where the rightmost page on a level is empty, yet refers to a single child
-            page_count += (fanout * page_count < previous_page_count) ? 1 : 0;
+            const bool apply_offset = (fanout * page_count < previous_page_count);
+            page_count += apply_offset ? 1 : 0;
+std::cout << "edge case offset: " << apply_offset << std::endl;
 
             //current_level_info.nodes.reserve(page_count);
             current_level_info.node_count = page_count;
             previous_page_count = page_count;
 
             //std::cout << "level current_key_count: " << current_key_count << " page_count: " << page_count << std::endl;
-            current_key_count = std::floor(static_cast<float>(max_keys * page_count) / static_cast<float>(fanout));
+//            current_key_count = std::floor(static_cast<float>(max_keys * page_count) / static_cast<float>(fanout));
+current_key_count = (static_cast<size_t>(max_keys) * page_count) / fanout;
             //std::cout << "next key count: " << current_key_count << std::endl;
             if (page_count == 1) {
                 break;
@@ -324,18 +327,27 @@ struct harmonia_tree {
         child_ref_t prefix_sum = 1;
 
         // levels are stored in reverse order since the tree was constructed in bottom-up fashion
+        unsigned level_idx = 1;
         for (const auto level : tree_levels) {
             if (level.is_leaf_level) break;
-
+std::cout << "level " << level_idx++ << " node_count_prefix_sum: " << level.node_count_prefix_sum
+    << " key_count_prefix_sum: " << level.key_count_prefix_sum << std::endl;
             // write out the prefix sum array entries
             for (size_t node_idx = 0; node_idx < level.node_count; ++node_idx) {
                 children[children_offset++] = prefix_sum;
 
                 const auto node_key_count = (node_idx < level.node_count - 1) ? max_keys : (level.key_count - node_idx*max_keys);
-                //std::cout << "node_key_count: " << node_key_count << " l k count: " << level.key_count << " node_idx: " << node_idx << " c: " << level.key_count - node_idx*max_keys << std::endl;
-
+if (node_idx == 0) {
+    std::cout << "node_key_count: " << node_key_count << " l k count: " << level.key_count <<
+        " node_idx: " << node_idx << " c: " << level.key_count - node_idx*max_keys << std::endl;
+    std::cout << "children[" << children_offset - 1 << "]: " << children[children_offset - 1] << std::endl;
+}
+if (node_key_count < 1) {
+    std::cout << "node_key_count == 0" << std::endl;
+}
                 prefix_sum += node_key_count + 1;
             }
+
         }
     }
 
@@ -409,8 +421,11 @@ struct harmonia_tree {
         printf("after optimize ntg\n");
 */
         printf("\n");
+        printf("=== start new lookup for: 0 ===\n");
         //lookup(input[input.size()/2]);
-        size_t sample_size = 10;
+        lookup(input.front());
+        printf("\n");
+        size_t sample_size = 3;
         std::vector<key_t> sample;
         sample.reserve(sample_size);
         simple_sample(ctx.input.begin(), ctx.input.end(), std::back_inserter(sample), sample_size, std::mt19937{});
@@ -671,13 +686,14 @@ std::cout << "depth: " << current_depth << " node: " << stringify(node_start, no
             actual = node_start[lb];
             const key_t previous = node_start[std::min(lb, lb-1)];
             const key_t next = node_start[std::min(lb+1, get_max_keys())];
-            auto diff1 = static_cast<int64_t>(actual) - static_cast<int64_t>(previous);
-            auto diff2 = static_cast<int64_t>(next) - static_cast<int64_t>(actual);
+            auto diff1 = static_cast<int64_t>(key) - static_cast<int64_t>(previous);
+            auto diff2 = static_cast<int64_t>(next) - static_cast<int64_t>(key);
 std::cout << "-> lb: " << lb << " key: " <<  key << " before: " << diff1 << " after: " << diff2
     << " actual: " << actual << " previous: " << previous << " next: " << next << std::endl;
             assert(key <= actual);
+std::cout << "-> pos: " << pos << " children[" << pos << "]: " << children[pos];
             device_size_t new_pos = children[pos] + lb;
-
+std::cout << " new_pos: " << new_pos << std::endl;
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
