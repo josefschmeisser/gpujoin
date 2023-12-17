@@ -58,12 +58,12 @@ struct vector_view {
 
     size_type capacity() const noexcept { return size_; }
 
-    T& operator[](int idx) noexcept {
+    T& operator[](size_t idx) noexcept {
         assert(idx < size_);
         return arr_[idx];
     }
 
-    const T& operator[](int idx) const noexcept {
+    const T& operator[](size_t idx) const noexcept {
         assert(idx < size_);
         return arr_[idx];
     }
