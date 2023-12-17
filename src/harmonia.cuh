@@ -148,18 +148,18 @@ struct harmonia_tree {
 
             size_t page_count = gather_level_info(current_level_info);
             assert(page_count > 0);
+
             // handle an edge case where the rightmost page on a level is empty, yet refers to a single child
             const bool apply_offset = (fanout * page_count < previous_page_count);
             page_count += apply_offset ? 1 : 0;
-std::cout << "edge case offset: " << apply_offset << std::endl;
+            //std::cout << "edge case offset: " << apply_offset << std::endl;
 
             //current_level_info.nodes.reserve(page_count);
             current_level_info.node_count = page_count;
             previous_page_count = page_count;
 
             //std::cout << "level current_key_count: " << current_key_count << " page_count: " << page_count << std::endl;
-//            current_key_count = std::floor(static_cast<float>(max_keys * page_count) / static_cast<float>(fanout));
-current_key_count = (static_cast<size_t>(max_keys) * page_count) / fanout;
+            current_key_count = (static_cast<size_t>(max_keys) * page_count) / fanout;
             //std::cout << "next key count: " << current_key_count << std::endl;
             if (page_count == 1) {
                 break;
@@ -173,9 +173,10 @@ current_key_count = (static_cast<size_t>(max_keys) * page_count) / fanout;
         size_t total_node_count = 0;
         size_t total_key_count = 0;
         for (auto& level : levels) {
+
             level.node_count_prefix_sum = total_node_count;
             total_node_count += level.node_count;
-
+            //std::cout << "level node_count: " << level.node_count << " level.node_count_prefix_sum: " << level.node_count_prefix_sum << std::endl;
             level.key_count_prefix_sum = total_key_count;
             total_key_count += level.key_count;
         }
@@ -326,25 +327,29 @@ current_key_count = (static_cast<size_t>(max_keys) * page_count) / fanout;
         size_t children_offset = 0;
         child_ref_t prefix_sum = 1;
 
-        // levels are stored in reverse order since the tree was constructed in bottom-up fashion
-        unsigned level_idx = 1;
-        for (const auto level : tree_levels) {
+        // levels are stored in forward order
+        for (size_t level_idx = 0; level_idx < tree_levels.size(); ++level_idx) {
+            const auto& level = tree_levels[level_idx];
+            const auto& next_level = tree_levels[std::min(level_idx + 1, tree_levels.size() - 1)];
             if (level.is_leaf_level) break;
-std::cout << "level " << level_idx++ << " node_count_prefix_sum: " << level.node_count_prefix_sum
-    << " key_count_prefix_sum: " << level.key_count_prefix_sum << std::endl;
+            std::cout << "&level == &next_level " << (&level == &next_level) << " nxt idx: " << std::min(level_idx + 1, tree_levels.size() - 1) << std::endl;
+            std::cout << "level " << level_idx << " node_count_prefix_sum: " << level.node_count_prefix_sum
+                << " key_count_prefix_sum: " << level.key_count_prefix_sum << std::endl;
+            std::cout << "================ prefix_sum: " << prefix_sum << " next_level.node_count_prefix_sum: " << next_level.node_count_prefix_sum << std::endl;
+            assert(&level == &next_level || prefix_sum == next_level.node_count_prefix_sum);
             // write out the prefix sum array entries
             for (size_t node_idx = 0; node_idx < level.node_count; ++node_idx) {
                 children[children_offset++] = prefix_sum;
 
                 const auto node_key_count = (node_idx < level.node_count - 1) ? max_keys : (level.key_count - node_idx*max_keys);
-if (node_idx == 0) {
-    std::cout << "node_key_count: " << node_key_count << " l k count: " << level.key_count <<
-        " node_idx: " << node_idx << " c: " << level.key_count - node_idx*max_keys << std::endl;
-    std::cout << "children[" << children_offset - 1 << "]: " << children[children_offset - 1] << std::endl;
-}
-if (node_key_count < 1) {
-    std::cout << "node_key_count == 0" << std::endl;
-}
+                if (node_idx == 0) {
+                    std::cout << "node_key_count: " << node_key_count << " l k count: " << level.key_count <<
+                        " node_idx: " << node_idx << " c: " << level.key_count - node_idx*max_keys << std::endl;
+                    std::cout << "children[" << children_offset - 1 << "]: " << children[children_offset - 1] << std::endl;
+                }
+                if (node_key_count < 1) {
+                    std::cout << "node_key_count == 0" << std::endl;
+                }
                 prefix_sum += node_key_count + 1;
             }
 
@@ -670,7 +675,7 @@ if (node_key_count < 1) {
 
         return lower_bound;
     }
-
+// TODO check
     // host-side lookup function, for validation purposes only
     __host__ value_t lookup(key_t key) {
         bool active = true;
