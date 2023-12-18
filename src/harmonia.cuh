@@ -315,9 +315,7 @@ struct harmonia_tree {
     }
 
     __host__ void populate_nodes(const construction_context& ctx, const std::vector<level_data>& tree_levels) {
-        printf("before populate_leaf_nodes\n");
         populate_leaf_nodes(ctx, tree_levels);
-        printf("after populate_leaf_nodes\n");
         if (tree_levels.size() > 1) {
             populate_inner_nodes(ctx, tree_levels, tree_levels.size() - 2);
         }
@@ -332,24 +330,13 @@ struct harmonia_tree {
             const auto& level = tree_levels[level_idx];
             const auto& next_level = tree_levels[std::min(level_idx + 1, tree_levels.size() - 1)];
             if (level.is_leaf_level) break;
-            std::cout << "&level == &next_level " << (&level == &next_level) << " nxt idx: " << std::min(level_idx + 1, tree_levels.size() - 1) << std::endl;
-            std::cout << "level " << level_idx << " node_count_prefix_sum: " << level.node_count_prefix_sum
-                << " key_count_prefix_sum: " << level.key_count_prefix_sum << std::endl;
-            std::cout << "================ prefix_sum: " << prefix_sum << " next_level.node_count_prefix_sum: " << next_level.node_count_prefix_sum << std::endl;
+
             assert(&level == &next_level || prefix_sum == next_level.node_count_prefix_sum);
             // write out the prefix sum array entries
             for (size_t node_idx = 0; node_idx < level.node_count; ++node_idx) {
                 children[children_offset++] = prefix_sum;
 
                 const auto node_key_count = (node_idx < level.node_count - 1) ? max_keys : (level.key_count - node_idx*max_keys);
-                if (node_idx == 0) {
-                    std::cout << "node_key_count: " << node_key_count << " l k count: " << level.key_count <<
-                        " node_idx: " << node_idx << " c: " << level.key_count - node_idx*max_keys << std::endl;
-                    std::cout << "children[" << children_offset - 1 << "]: " << children[children_offset - 1] << std::endl;
-                }
-                if (node_key_count < 1) {
-                    std::cout << "node_key_count == 0" << std::endl;
-                }
                 prefix_sum += node_key_count + 1;
             }
 
@@ -376,11 +363,7 @@ struct harmonia_tree {
         const auto node_count = leaf_level.node_count_prefix_sum + leaf_level.node_count;
         const auto key_array_size = max_keys*node_count;
 
-        printf("inner_nodes_key_array_size: %lu\n", inner_nodes_key_array_size);
-        printf("key_array_size: %lu\n", key_array_size);
-        printf("leaf_level.node_count_prefix_sum: %lu; leaf_level.node_count: %lu\n", leaf_level.node_count_prefix_sum, leaf_level.node_count);
         if (Reuse_Input_Memory) {
-            printf("reusing input memory\n");
             decltype(keys) new_keys(inner_nodes_key_array_size, inner_nodes_key_array_size);
             keys.swap(new_keys);
             // the underlying allocation has to be accessible from the device!
@@ -400,7 +383,6 @@ struct harmonia_tree {
             values.swap(new_values);
         }
 
-        printf("fill with max_key\n");
         // populate the entire key array with `max_key`
         // so that underfull nodes do not require any special logic during lookup
         std::fill(keys.begin(), keys.end(), key_t(max_key));
@@ -410,35 +392,15 @@ struct harmonia_tree {
         this->size = input.size();
         this->inner_nodes_key_array_size = inner_nodes_key_array_size;
 
-        printf("invoke store_structure\n");
         store_structure(levels);
-        printf("invoke populate_nodes\n");
         populate_nodes(ctx, levels);
-        printf("structure complete\n");
 
         if (depth > max_depth) throw std::runtime_error("max depth exceeded");
 
         if (input.size() < 1000*10) return;
-/*
+
         // optimize ntg sizes
-        printf("before optimize ntg\n");
         optimize_ntg(ctx);
-        printf("after optimize ntg\n");
-*/
-        printf("\n");
-        printf("=== start new lookup for: 0 ===\n");
-        //lookup(input[input.size()/2]);
-        lookup(input.front());
-        printf("\n");
-        size_t sample_size = 3;
-        std::vector<key_t> sample;
-        sample.reserve(sample_size);
-        simple_sample(ctx.input.begin(), ctx.input.end(), std::back_inserter(sample), sample_size, std::mt19937{});
-        for (key_t k : sample) {
-            printf("=== start new lookup for: %lu ===\n", k);
-            lookup(k);
-            printf("\n");
-        }
     }
 
     // return: {depth_limit, byte_limit}
@@ -526,7 +488,6 @@ struct harmonia_tree {
 
     template<class DeviceAllocator>
     __host__ void create_device_handle(device_handle_t& handle, DeviceAllocator& device_allocator, memory_guard_t& guard) {
-        printf("create_device_handle\n");
         const auto caching_depth = copy_children_portion_to_cached_memory();
 
         // initialize fields
@@ -542,7 +503,6 @@ struct harmonia_tree {
         // migrate leaf key array
         handle.leaf_keys = Reuse_Input_Memory ? leaf_keys : &handle.keys[inner_nodes_key_array_size];
         handle.inner_nodes_key_array_size = inner_nodes_key_array_size;
-        printf("inner_nodes_key_array_size: %lu\n", inner_nodes_key_array_size);
 
         // migrate children array
         typename DeviceAllocator::rebind<child_ref_t>::other children_allocator = device_allocator;
@@ -675,7 +635,7 @@ struct harmonia_tree {
 
         return lower_bound;
     }
-// TODO check
+
     // host-side lookup function, for validation purposes only
     __host__ value_t lookup(key_t key) {
         bool active = true;
@@ -686,19 +646,11 @@ struct harmonia_tree {
             const key_t* keys = current_depth == depth ? (leaf_keys - inner_nodes_key_array_size) : this->keys.data();
             //const key_t* keys = tree.keys;
             const key_t* node_start = keys + max_keys*pos; // TODO use shift when max_keys is a power of 2
-std::cout << "depth: " << current_depth << " node: " << stringify(node_start, node_start + max_keys) << std::endl;
+
             lb = std::lower_bound(node_start, node_start + max_keys, key) - node_start;
             actual = node_start[lb];
-            const key_t previous = node_start[std::min(lb, lb-1)];
-            const key_t next = node_start[std::min(lb+1, get_max_keys())];
-            auto diff1 = static_cast<int64_t>(key) - static_cast<int64_t>(previous);
-            auto diff2 = static_cast<int64_t>(next) - static_cast<int64_t>(key);
-std::cout << "-> lb: " << lb << " key: " <<  key << " before: " << diff1 << " after: " << diff2
-    << " actual: " << actual << " previous: " << previous << " next: " << next << std::endl;
-            assert(key <= actual);
-std::cout << "-> pos: " << pos << " children[" << pos << "]: " << children[pos];
             device_size_t new_pos = children[pos] + lb;
-std::cout << " new_pos: " << new_pos << std::endl;
+
             // Inactive threads never progress during the traversal phase.
             // They, however, will be utilized by active threads during the cooperative search.
             pos = active ? new_pos : 0;
