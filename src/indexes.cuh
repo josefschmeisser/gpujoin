@@ -43,7 +43,8 @@ struct btree_info {
     using btree_type = BtreeType;
     using key_type = typename BtreeType::key_t;
     using value_type = typename BtreeType::value_t;
-    using node_base_type = typename BtreeType::NodeBase;
+    //using node_base_type = typename BtreeType::NodeBase;
+    using handle_type = typename BtreeType::device_handle_t;
 };
 
 struct btree_lookup_algorithm {
@@ -53,8 +54,8 @@ struct btree_lookup_algorithm {
     }
 
     template<class BtreeInfoType>
-    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, const typename BtreeInfoType::node_base_type* tree, typename BtreeInfoType::key_type key) const {
-        return BtreeInfoType::btree_type::lookup(tree, key);
+    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, const typename BtreeInfoType::handle_type& handle, typename BtreeInfoType::key_type key) const {
+        return BtreeInfoType::btree_type::lookup(handle, key);
     }
 };
 
@@ -64,8 +65,9 @@ struct btree_cooperative_lookup_algorithm {
     }
 
     template<class BtreeInfoType>
-    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, bool active, const typename BtreeInfoType::node_base_type* tree, typename BtreeInfoType::key_type key) const {
-        return BtreeInfoType::btree_type::cooperative_lookup(active, tree, key);
+    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, bool active, const typename BtreeInfoType::handle_type& handle, typename BtreeInfoType::key_type key) const {
+        // TODO
+        return 0;//BtreeInfoType::btree_type::cooperative_lookup(active, tree, key);
     }
 };
 
@@ -77,10 +79,9 @@ struct btree_pseudo_cooperative_lookup_algorithm {
     }
 
     template<class BtreeInfoType>
-    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, bool active, const typename BtreeInfoType::node_base_type* tree, typename BtreeInfoType::key_type key) const {
-        //return BtreeInfoType::btree_type::lookup(tree, key);
-        static const LookupAlgorithm lookup_algorithm{};
-        return lookup_algorithm(btree_info, tree, key);
+    __device__ __forceinline__ auto operator() (const BtreeInfoType btree_info, bool active, const typename BtreeInfoType::handle_type& handle, typename BtreeInfoType::key_type key) const {
+        static const LookupAlgorithm lookup_algorithm {};
+        return lookup_algorithm(btree_info, handle, key);
     }
 };
 
@@ -101,28 +102,32 @@ struct btree_index : public abstract_index<Key> {
     using btree_info_type = btree_info<btree_t>;
 
     btree_t h_tree_;
-    device_array_wrapper<typename btree_t::page> h_guard;
+    //device_array_wrapper<typename btree_t::page> h_guard;
+    typename btree_t::device_guard_t h_guard;
 
     struct device_index_t {
-        const typename btree_t::NodeBase* d_tree_;
+        //const typename btree_t::NodeBase* d_tree_;
+        typename btree_t::device_handle_t d_handle_;
 
         static constexpr btree_info_type btree_info_inst{};
 
         [[deprecated]]
         __device__ __forceinline__ value_t lookup(const key_t key) const {
-            static const typename IndexConfiguration::lookup_algorithm_type lookup_algorithm{};
-            return lookup_algorithm(btree_info_inst, d_tree_, key);
+            static const typename IndexConfiguration::lookup_algorithm_type lookup_algorithm {};
+            return lookup_algorithm(btree_info_inst, d_handle_, key);
         }
 
         __device__ __forceinline__ value_t cooperative_lookup(const bool active, const key_t key) const {
-            static const typename IndexConfiguration::cooperative_lookup_algorithm_type lookup_algorithm{};
-            return lookup_algorithm(btree_info_inst, active, d_tree_, key);
+            static const typename IndexConfiguration::cooperative_lookup_algorithm_type lookup_algorithm {};
+            return lookup_algorithm(btree_info_inst, active, d_handle_, key);
         }
     } device_index;
 
     __host__ void construct(const vector_view<key_t>& h_column, const key_t* d_column) override {
         h_tree_.construct(h_column, 1.0);
 
+
+#if 0
         if /*constexpr*/ (std::is_same<DeviceAllocator<int>, HostAllocator<int>>::value) {
             printf("no migration necessary\n");
             device_index.d_tree_ = h_tree_.root;
@@ -130,6 +135,11 @@ struct btree_index : public abstract_index<Key> {
             printf("migrating btree...\n");
             device_index.d_tree_ = h_tree_.template migrate<DeviceAllocator<int>>(h_guard);
         }
+#else
+        printf("migrating btree...\n");
+        h_tree_.template migrate<DeviceAllocator<int>>(h_guard);
+        std::memcpy(&device_index.d_handle_, &h_guard.handle, sizeof(device_index.d_handle_));
+#endif
     }
 
     __host__ size_t memory_consumption() const override {
