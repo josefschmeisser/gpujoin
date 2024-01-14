@@ -136,7 +136,6 @@ struct btree_index : public abstract_index<Key> {
             device_index.d_tree_ = h_tree_.template migrate<DeviceAllocator<int>>(h_guard);
         }
 #else
-        printf("migrating btree...\n");
         h_tree_.template migrate<DeviceAllocator<int>>(h_guard);
         std::memcpy(&device_index.d_handle_, &h_guard.handle, sizeof(device_index.d_handle_));
 #endif
