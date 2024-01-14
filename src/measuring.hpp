@@ -9,7 +9,7 @@
 
 namespace measuring {
 
-static const unsigned warm_up_rounds = 0;
+static unsigned warm_up_rounds = 0;
 
 struct measuring_settings {
     std::string dest_file;

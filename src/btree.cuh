@@ -54,12 +54,7 @@ struct btree {
         value_t payloads[maxEntries];
     };
     static_assert(sizeof(LeafNode) < page_size);
-/*
-    struct PseudoLeafNode : public NodeBase {
-        key_t* keys;
-    };
-    static_assert(sizeof(PseudoLeafNode) < page_size);
-*/
+
     struct InnerNode : public NodeBase {
         static constexpr unsigned maxEntries = ((page_size - sizeof(NodeBase) - sizeof(NodePointer)) / (sizeof(key_t) + sizeof(NodePointer))) - 1;
 
@@ -210,34 +205,6 @@ struct btree {
 
         return construct_inner_nodes(current_level, load_factor, inverseDepth + 1);
     }
-    NodeBase* construct_inner_nodes_old(std::vector<NodeBase*> lower_level, float load_factor) {
-        if (lower_level.size() == 1) {
-            return lower_level.front();
-        }
-
-        std::vector<NodeBase*> current_level;
-        InnerNode* node = create_inner();
-        for (unsigned i = 0; i < lower_level.size() - 1; i++) {
-            NodeBase* curr = lower_level[i];
-            key_t sep = max_key(curr);
-            bool full = node->header.count >= InnerNode::maxEntries;
-            full = full || static_cast<float>(node->header.count) / static_cast<float>(InnerNode::maxEntries) > load_factor;
-            if (full) {
-                node->children[node->header.count] = curr;
-                current_level.push_back(node);
-                node = create_inner();
-            } else {
-                bool appended = append_into(node, sep, curr);
-                (void)appended;
-                assert(appended);
-            }
-        }
-        node->children[node->header.count] = lower_level[lower_level.size() - 1];
-        current_level.push_back(node);
-        std::cout << "count per inner node: " << lower_level.size() / current_level.size() << std::endl;
-
-        return construct_inner_nodes(current_level, load_factor);
-    }
 
     size_t estimate_page_count_upper_bound(size_t key_count, float load_factor) {
         unsigned leaf_space = std::floor(static_cast<float>(LeafNode::maxEntries) * load_factor);
@@ -274,7 +241,6 @@ struct btree {
 
         std::vector<NodePointer> leaves;
         if /*constexpr*/ (Clustered_Index) {
-            // TODO
             for (size_t i = 0; i < n; i += LeafNode::maxEntries) {
                 NodePointer node = reinterpret_cast<NodePointer>(const_cast<key_t*>(&keys[i]));
                 leaves.push_back(node);
@@ -307,51 +273,6 @@ struct btree {
             free_tree(root);
         }
         root = construct_inner_nodes(leaves, load_factor, 1);
-        //root = construct_inner_nodes(leaves, load_factor);
-
-        std::cout << "tree size: " << tree_size_in_byte(root) / (1024*1024) << " MB" << std::endl;
-
-        std::cout << "actual page count: " << pages.size() << std::endl;
-    }
-
-    template<class Vector>
-    void construct_old(const Vector& keys, float load_factor) {
-        assert(load_factor > 0 && load_factor <= 1.0);
-        uint64_t n = keys.size();
-
-        // determine an upper bound for the number of pages required
-        size_t pages_required = estimate_page_count_upper_bound(n, load_factor);
-        std::cout << "estimated page count: " << pages_required << std::endl;
-        decltype(pages) new_pages(pages_required);
-        pages.swap(new_pages);
-
-        std::vector<NodeBase*> leaves;
-        LeafNode* node = create_leaf();
-        for (uint64_t i = 0; i < n; i++) {
-            auto k = keys[i];
-            value_t value = i;
-            bool full = node->header.count >= LeafNode::maxEntries;
-            full = full || static_cast<float>(node->header.count) / static_cast<float>(LeafNode::maxEntries) > load_factor;
-            if (full) {
-                leaves.push_back(node);
-                node = create_leaf();
-                bool inserted = append_into(node, k, value);
-                (void)inserted;
-                assert(inserted);
-            } else {
-                bool appended = append_into(node, k, value);
-                (void)appended;
-                assert(appended);
-            }
-        }
-        leaves.push_back(node);
-
-        std::cout << "count per leaf node: " << n / leaves.size() << std::endl;
-
-        if (root) {
-            free_tree(root);
-        }
-        root = construct_inner_nodes(leaves, load_factor);
 
         std::cout << "tree size: " << tree_size_in_byte(root) / (1024*1024) << " MB" << std::endl;
 
@@ -501,25 +422,7 @@ struct btree {
         }
         return dest;
     }
-    template<class MemcpyFun>
-    NodeBase* migrate_subtree_old(NodeBase* src, page* dest_pages, size_t& current_pos, MemcpyFun&& memcpy_fun) {
-        NodeBase* dest = reinterpret_cast<NodeBase*>(&dest_pages[current_pos++]);
-        if (!src->header.isLeaf) {
-            const InnerNode* inner = static_cast<const InnerNode*>(src);
-            std::unique_ptr<uint8_t[]> tmpMem { new uint8_t[page_size] };
-            InnerNode* tmp = reinterpret_cast<InnerNode*>(tmpMem.get());
-            std::memcpy(tmp, src, page_size);
-            for (unsigned i = 0; i <= src->header.count; ++i) {
-                NodeBase* child = inner->children[i];
-                NodeBase* newChild = migrate_subtree(child, dest_pages, current_pos, memcpy_fun);
-                tmp->children[i] = newChild;
-            }
-            memcpy_fun(dest, tmp, page_size);
-        } else {
-            memcpy_fun(dest, src, page_size);
-        }
-        return dest;
-    }
+
     template<class DeviceAllocator>
     NodeBase* migrate(device_array_wrapper<page>& guard) {
         using page_allocator_type = typename DeviceAllocator::rebind<page>::other;
@@ -534,7 +437,6 @@ struct btree {
         target_memcpy<DeviceAllocator> memcpy_fun;
         return migrate_subtree(root, guard.data(), pos, memcpy_fun);
     }
-
 
     template<class DeviceAllocator>
     __host__ void migrate(device_guard_t& guard) {
@@ -571,19 +473,6 @@ struct btree {
         }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     size_t tree_size_in_byte(const NodeBase* tree) const {
         if (tree->header.isLeaf) { return page_size; }
 
@@ -613,28 +502,28 @@ struct btree {
         return size;
     }
 
+    template<bool Eval_Clustered_Index = Clustered_Index>
+    static __device__ std::enable_if_t<Eval_Clustered_Index, value_t> lookup(const device_handle_t& tree, key_t key) {
+        assert(Clustered_Index);
 
-    static __device__ value_t lookup_old(const NodeBase* tree, key_t key) {
         //printf("lookup key: %lu\n", key);
-        const NodeBase* node = tree;
-        while (!node->header.isLeaf) {
+        NodePointer node = tree.root;
+        while (true) {
             const InnerNode* inner = static_cast<const InnerNode*>(node);
-            unsigned pos = branchy_binary_search(key, inner->keys, inner->header.count);
-            //unsigned pos = linear_search(key, inner->keys, inner->header.count);
-            //printf("inner pos: %d\n", pos);
+            const auto pos = branchy_binary_search(key, inner->keys, inner->header.count);
             node = inner->children[pos];
-            /*
-            if (node == nullptr) {
-                return Not_Found;
-            }*/
+
+            if (inner->header.isFinalInner) break;
         }
 
-        const LeafNode* leaf = static_cast<const LeafNode*>(node);
-        unsigned pos = branchy_binary_search(key, leaf->keys, leaf->header.count);
-        //unsigned pos = linear_search(key, leaf->keys, leaf->header.count);
-        //printf("leaf pos: %d\n", pos);
-        if ((pos < leaf->header.count) && (leaf->keys[pos] == key)) {
-            return leaf->payloads[pos];
+        const key_t* node_keys = reinterpret_cast<const key_t*>(node);
+        assert(!Clustered_Index || (node_keys >= tree.column_begin && node_keys < tree.column_end));
+        const size_t key_count = min(LeafNode::maxEntries, static_cast<unsigned>(tree.column_end - node_keys));
+        const auto pos = branchy_binary_search(key, node_keys, key_count);
+        assert(&node_keys[pos] >= tree.column_begin && &node_keys[pos] < tree.column_end);
+        if ((pos < key_count) && (node_keys[pos] == key)) {
+            
+            return static_cast<value_t>(&node_keys[pos] - tree.column_begin);
         }
 
         return Not_Found;
@@ -662,33 +551,6 @@ struct btree {
         //printf("leaf pos: %d\n", pos);
         if ((pos < leaf->header.count) && (leaf->keys[pos] == key)) {
             return leaf->payloads[pos];
-        }
-
-        return Not_Found;
-    }
-
-    template<bool Eval_Clustered_Index = Clustered_Index>
-    static __device__ std::enable_if_t<Eval_Clustered_Index, value_t> lookup(const device_handle_t& tree, key_t key) {
-        assert(Clustered_Index);
-
-        //printf("lookup key: %lu\n", key);
-        NodePointer node = tree.root;
-        while (true) {
-            const InnerNode* inner = static_cast<const InnerNode*>(node);
-            const auto pos = branchy_binary_search(key, inner->keys, inner->header.count);
-            node = inner->children[pos];
-
-            if (inner->header.isFinalInner) break;
-        }
-
-        const key_t* node_keys = reinterpret_cast<const key_t*>(node);
-        assert(!Clustered_Index || (node_keys >= tree.column_begin && node_keys < tree.column_end));
-        const size_t key_count = min(LeafNode::maxEntries, static_cast<unsigned>(tree.column_end - node_keys));
-        const auto pos = branchy_binary_search(key, node_keys, key_count);
-        assert(&node_keys[pos] >= tree.column_begin && &node_keys[pos] < tree.column_end);
-        if ((pos < key_count) && (node_keys[pos] == key)) {
-            
-            return static_cast<value_t>(&node_keys[pos] - tree.column_begin);
         }
 
         return Not_Found;
