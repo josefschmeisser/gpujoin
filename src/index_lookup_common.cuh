@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cassert>
+//#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <numeric>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -47,17 +48,20 @@ void populate_densely(VectorType& v) {
 }
 
 template<class T, class VectorType>
-void populate_uniformly(VectorType& v, uint64_t limit) {
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
-        std::mt19937 rng {r.begin()}; // TODO check unique?
-        std::uniform_int_distribution<T> lookup_distribution(0ul, limit - 1ul);
-        std::generate(v.begin() + r.begin(), v.begin() + r.end(), [&]() { return lookup_distribution(rng); });
-        /*
-        for (uint64_t i = r.begin(); i < r.end(); ++i) {
-            const auto key_idx = lookup_distribution(rng);
-            assert(key_idx < v.size());
-            v[i] = key_idx;
-        }*/
+void populate_uniformly(VectorType& v, size_t limit) {
+    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
+/*
+        using namespace std::chrono;
+
+        system_clock::time_point tp = system_clock::now();
+        system_clock::duration dtn = tp.time_since_epoch();
+        const size_t seed = dtn.count();
+*/
+        static thread_local std::random_device rd;
+        //std::mt19937_64 gen(r.begin());
+        std::mt19937_64 gen(rd());
+        std::uniform_int_distribution<size_t> lookup_distribution(0ul, limit - 1ul);
+        std::generate(v.begin() + r.begin(), v.begin() + r.end(), [&]() { return lookup_distribution(gen); });
     });
 }
 
@@ -72,18 +76,19 @@ void populate_uniquely_uniformly(VectorType& v, size_t upper_limit) {
     // TODO: consider https://stackoverflow.com/a/6953958
 
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
-    //oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, upper_limit), [&](const oneapi::tbb::blocked_range<size_t>& r) {
         //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
         assert(r.size() > 0);
 
         // create random keys
-        std::mt19937 rng {r.begin()};
-        std::uniform_int_distribution<T> key_distrib(0, upper_limit);
+        static thread_local std::random_device rd;
+        //std::mt19937_64 gen(r.begin());
+        std::mt19937_64 gen(rd());
+        std::uniform_int_distribution<T> key_distrib(range_begin, range_end);
         std::unordered_set<T> unique;
         unique.reserve(r.size());
 
         while (unique.size() < r.size()) {
-            const auto key = key_distrib(rng);
+            const auto key = key_distrib(gen);
             if (key >= r.begin() && key < r.end()) {
                 unique.insert(key);
             }
@@ -91,14 +96,16 @@ void populate_uniquely_uniformly(VectorType& v, size_t upper_limit) {
 
         std::copy(unique.begin(), unique.end(), v.begin() + r.begin());
     });
-#endif
-    std::mt19937 rng {};
+#else
+    static thread_local std::random_device rd;
+    //std::mt19937_64 gen(r.begin());
+    std::mt19937_64 gen(rd());
     std::uniform_int_distribution<T> key_distrib(0, upper_limit - 1);
     std::unordered_set<T> unique;
     unique.reserve(v.size());
 
     while (unique.size() < v.size()) {
-        const auto key = key_distrib(rng);
+        const auto key = key_distrib(gen);
         //assert(key < upper_limit);
         if (key >= upper_limit) continue;
         if (unique.count(key) < 1) {
@@ -108,38 +115,45 @@ void populate_uniquely_uniformly(VectorType& v, size_t upper_limit) {
     }
 
     std::copy(unique.begin(), unique.end(), v.begin());
+#endif
 }
 
 template<class T, class VectorType>
 void populate_uniquely_uniformly_sorted(VectorType& v, size_t upper_limit) {
     // TODO: consider https://stackoverflow.com/a/6953958
-
+#if 0
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
         //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
 
         // create random keys
-        std::mt19937 rng {r.begin()};
-        std::uniform_int_distribution<T> key_distrib(0, upper_limit);
+        static thread_local std::random_device rd;
+        //std::mt19937_64 gen(r.begin());
+        std::mt19937_64 gen(rd());
+        std::uniform_int_distribution<T> key_distrib(range_begin, range_end);
         std::unordered_set<T> unique;
         unique.reserve(v.size()); // TODO r.size() ?
 
         while (unique.size() < v.size()) { // TODO r.size() ?
-            const auto key = key_distrib(rng);
+            const auto key = key_distrib(gen);
             unique.insert(key);
         }
 
         std::copy(unique.begin(), unique.end(), v.begin() + r.begin());
         std::sort(v.begin() + r.begin(), v.begin() + r.end());
     });
+#endif
 }
 
 template<class T, class VectorType>
 void populate_with_zipfian_pattern(VectorType& v, uint64_t limit, double zipf_factor) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
-        std::mt19937 rng {r.begin()};
+        static thread_local std::random_device rd;
+        // Note: using a 32 bit engine is fine as zipf_distribution uses a transformation approach.
+        //std::mt19937 gen(r.begin());
+        std::mt19937 gen(rd());
         zipf_distribution<T> lookup_distribution(limit - 1ul, zipf_factor);
         for (uint64_t i = 0; i < r.size(); ++i) {
-            const auto key_pos = lookup_distribution(rng);
+            const auto key_pos = lookup_distribution(gen);
             v[r.begin() + i] = key_pos;
         }
     });
@@ -320,7 +334,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
             assert(max_bits > 4);
             BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, 4, max_bits);
 
-             __syncthreads();
+            __syncthreads();
         }/* else {
             //if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
         }*/
@@ -492,7 +506,7 @@ __global__ void bws_lookup(const IndexStructureType index_structure, const bws_l
             assert(args.max_bits > 4);
             BlockRadixSortT(smem_data->temp_storage.sort).Sort(thread_keys, thread_values, 4, args.max_bits);
 
-             __syncthreads();
+            __syncthreads();
         }/* else {
             //if (lane_id == 0) printf("warp: %d iteration: %d - skipping sort step ===\n", warp_id, i);
         }*/
@@ -539,12 +553,6 @@ __global__ void bws_lookup(const IndexStructureType index_structure, const bws_l
         tid += valid_items;
     }
 }
-
-
-
-
-
-
 
 template<class IndexType>
 std::vector<std::pair<std::string, std::string>> create_common_experiment_description_pairs() {
