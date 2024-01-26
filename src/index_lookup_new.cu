@@ -406,7 +406,7 @@ int main(int argc, char** argv) {
     } else {
         measuring_config.stdout_only = true;
     }
-    measuring_config.repetitions = 3;
+    measuring_config.repetitions = 10;
 /*
     if (config.execute_predefined_scenario) {
         execute_benchmark_scenario();

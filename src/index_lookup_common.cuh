@@ -443,6 +443,7 @@ __global__ void bws_lookup(const IndexStructureType index_structure, const bws_l
         //printf("use shared memory\n");
         // check shared memory requirements
         constexpr size_t shared_mem_required = sizeof(smem_struct) + sizeof(buffer) + sizeof(in_buffer_pos);
+        (void)shared_mem_required;
         //if (lane_id == 0) printf("shared_mem_required: %lu\n", shared_mem_required);
         assert(shared_mem_required < args.shared_mem_available);
 
