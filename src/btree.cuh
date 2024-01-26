@@ -156,9 +156,8 @@ struct btree {
         const bool is_leaf = node >= column_begin && node < column_end;
         if (is_leaf) {
             const key_t* node_keys = reinterpret_cast<const key_t*>(node);
-            //const size_t key_count = std::min<unsigned>(LeafNode::maxEntries, static_cast<unsigned>(column_end - node_keys));
             constexpr auto max_entries = LeafNode::maxEntries;
-            const size_t key_count = std::min<unsigned>(max_entries, static_cast<unsigned>(column_end - node_keys));
+            const size_t key_count = std::min<size_t>(max_entries, static_cast<size_t>(column_end - node_keys));
             return node_keys[key_count - 1];
         }
         InnerNode* inner_node = static_cast<InnerNode*>(node);
@@ -518,13 +517,15 @@ struct btree {
 
         const key_t* node_keys = reinterpret_cast<const key_t*>(node);
         assert(!Clustered_Index || (node_keys >= tree.column_begin && node_keys < tree.column_end));
-        const size_t key_count = min(LeafNode::maxEntries, static_cast<unsigned>(tree.column_end - node_keys));
+        const size_t key_count = min(static_cast<size_t>(LeafNode::maxEntries), static_cast<size_t>(tree.column_end - node_keys));
         const auto pos = branchy_binary_search(key, node_keys, key_count);
         assert(&node_keys[pos] >= tree.column_begin && &node_keys[pos] < tree.column_end);
         if ((pos < key_count) && (node_keys[pos] == key)) {
             
             return static_cast<value_t>(&node_keys[pos] - tree.column_begin);
-        }
+        }/* else {
+            printf("couldn't find: %lu\n", key);
+        }*/
 
         return Not_Found;
     }
