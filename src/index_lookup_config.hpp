@@ -30,6 +30,7 @@ struct experiment_config {
     bool sorted_lookups = false;
     unsigned partitioning_approach_ignore_bits = 4;
     bool partitioning_approach_dynamic_bit_range = true;
+    uint64_t partitioning_approach_window_size = 10000;
 };
 
 // constants:

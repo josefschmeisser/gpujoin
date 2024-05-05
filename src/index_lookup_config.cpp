@@ -48,6 +48,7 @@ void parse_options(int argc, char** argv) {
         ("p,lookup_pattern", "Lookup dataset type to generate", cxxopts::value<std::string>()->default_value(tmpl_to_string(config.lookup_pattern)))
         ("s,sorted_lookups", "Pre-sort the lookup dataset", cxxopts::value<bool>()->default_value(tmpl_to_string(config.sorted_lookups)))
         ("o,output", "File to write results into", cxxopts::value<std::string>()->default_value(config.output_file))
+        ("w,window", "Partitioning approach window size", cxxopts::value<uint64_t>()->default_value(std::to_string(config.partitioning_approach_window_size)))
         ("h,help", "Print usage")
     ;
 
@@ -68,6 +69,7 @@ void parse_options(int argc, char** argv) {
     config.zipf_factor = result["zipf"].as<double>();
     config.sorted_lookups = result["sorted_lookups"].as<bool>();
     config.output_file = result["output"].as<std::string>();
+    config.partitioning_approach_window_size = result["window"].as<uint64_t>();
 
     // parse dataset type
     const auto dataset_str = result["dataset"].as<std::string>();

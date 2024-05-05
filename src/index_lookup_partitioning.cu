@@ -40,7 +40,8 @@ using namespace measuring;
 using dummy_payload_t = index_key_t; // the payload is not used
 using rel_tuple_t = Tuple<index_key_t, dummy_payload_t>;
 
-static const int num_streams = 2;
+//static const int64_t window_size = 10000;
+static const int max_parallel_streams = 2;
 static const int block_size = 128;// 64;
 static int grid_size = 0;
 //static const uint32_t radix_bits = 11;// 10;
@@ -398,7 +399,7 @@ template partitioning_approach<binary_search_type>::~partitioning_approach();
 template partitioning_approach<radix_spline_type>::~partitioning_approach();
 template partitioning_approach<no_op_type>::~partitioning_approach();
 
-
+/*
 template<class IndexType>
 void partitioning_approach<IndexType>::initialize(query_data& d) {
     const auto& config = get_experiment_config();
@@ -412,14 +413,54 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
         throw std::runtime_error("config.num_lookups >= std::numeric_limits<uint32_t>::max()");
     }
     size_t remaining = config.num_lookups;
-    size_t max_stream_portion = (config.num_lookups + num_streams) / num_streams;
+    size_t max_stream_portion = (config.num_lookups + max_parallel_streams) / max_parallel_streams;
     //printf("ALIGN_BYTES: %u\n", ALIGN_BYTES);
     max_stream_portion = (max_stream_portion + ALIGN_BYTES - 1) & -ALIGN_BYTES;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
 
     // create streams
-    for (unsigned i = 0; i < num_streams; ++i) {
+    for (unsigned i = 0; i < max_parallel_streams; ++i) {
+        size_t stream_portion = std::min(remaining, max_stream_portion);
+        remaining -= stream_portion;
+        printf("stream portion: %lu\n", stream_portion);
+        auto state = create_stream_state(d_stream_lookup_keys, stream_portion, d_stream_tids);
+        _p_impl->stream_states.push_back(std::move(state));
+
+        d_stream_lookup_keys += stream_portion;
+        d_stream_tids += stream_portion;
+    }
+}
+*/
+
+template<class IndexType>
+void partitioning_approach<IndexType>::initialize(query_data& d) {
+    const auto& config = get_experiment_config();
+    const auto& device_properties = get_device_properties(0);
+
+    if (grid_size == 0) {
+        grid_size = device_properties.multiProcessorCount;
+    }
+
+    if (config.num_lookups >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("config.num_lookups >= std::numeric_limits<uint32_t>::max()");
+    }
+
+    const auto window_size = config.partitioning_approach_window_size;
+    //printf("window_size: %lu; config.num_lookups: %lu\n", window_size, config.num_lookups);
+    constexpr size_t align_count = ALIGN_BYTES / sizeof(index_key_t);
+    constexpr size_t align_mask = ~(align_count - 1ul);
+    //printf("align_count: %lu; config.align_mask: %lu\n", align_count, align_mask);
+    size_t max_stream_portion =
+        (std::min<size_t>(window_size, config.num_lookups) + max_parallel_streams) / max_parallel_streams;
+    max_stream_portion = (max_stream_portion + align_count - 1ul) & align_mask;
+    const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
+    value_t* d_stream_tids = d.d_tids.data();
+    //printf("max_stream_portion: %lu\n", max_stream_portion);
+
+    // create streams
+    size_t remaining = config.num_lookups;
+    while (remaining > 0) {
         size_t stream_portion = std::min(remaining, max_stream_portion);
         remaining -= stream_portion;
         printf("stream portion: %lu\n", stream_portion);
@@ -437,6 +478,7 @@ template void partitioning_approach<binary_search_type>::initialize(query_data& 
 template void partitioning_approach<radix_spline_type>::initialize(query_data& d);
 template void partitioning_approach<no_op_type>::initialize(query_data& d);
 
+/*
 template<class IndexType>
 void partitioning_approach<IndexType>::run(query_data& d, measurement& m) {
     const auto& device_properties = get_device_properties(0);
@@ -446,6 +488,23 @@ void partitioning_approach<IndexType>::run(query_data& d, measurement& m) {
         run_on_stream(*state, index_structure, device_properties);
     }
     cudaDeviceSynchronize();
+}
+*/
+
+template<class IndexType>
+void partitioning_approach<IndexType>::run(query_data& d, measurement& m) {
+    const auto& device_properties = get_device_properties(0);
+
+    IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
+    for (size_t i = 0; i < _p_impl->stream_states.size();) {
+        size_t j = 0;
+        for (; j < max_parallel_streams; ++j) {
+            const auto& state = _p_impl->stream_states[i + j];
+            run_on_stream(*state, index_structure, device_properties);
+        }
+        i += j;
+        cudaDeviceSynchronize();
+    }
 }
 
 template void partitioning_approach<btree_type>::run(query_data& d, measurement& m);

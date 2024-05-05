@@ -337,7 +337,7 @@ static void create_common_experiment_description_pairs_2(std::vector<std::pair<s
     pairs.emplace_back(std::string("num_elements"), "!int64 " + std::to_string(config.num_elements));
     pairs.emplace_back(std::string("num_lookups"), "!int64 " + std::to_string(config.num_lookups));
     pairs.emplace_back(std::string("sorted_lookups"), std::to_string(config.sorted_lookups));
-        // allocators:
+    // allocators:
     pairs.emplace_back(std::string("host_allocator"), std::string(type_name<host_allocator_t<int>>::value()));
     pairs.emplace_back(std::string("device_index_allocator"), std::string(type_name<device_index_allocator<int>>::value()));
     pairs.emplace_back(std::string("indexed_allocator"), std::string(type_name<indexed_allocator_t>::value()));
@@ -351,9 +351,11 @@ static void create_common_experiment_description_pairs_2(std::vector<std::pair<s
         pairs.emplace_back(std::string("zipf_factor"), std::to_string(config.zipf_factor));
     }
 
+    // partitioning approach:
     if (config.approach == "partitioning") {
         pairs.emplace_back(std::string("partitioning_approach_ignore_bits"), std::to_string(config.partitioning_approach_ignore_bits));
         pairs.emplace_back(std::string("partitioning_approach_dynamic_bit_range"), std::to_string(config.partitioning_approach_dynamic_bit_range));
+        pairs.emplace_back(std::string("partitioning_approach_window_size"), std::to_string(config.partitioning_approach_window_size));
     }
 }
 
