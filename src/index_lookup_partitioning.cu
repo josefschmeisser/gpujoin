@@ -41,7 +41,7 @@ using dummy_payload_t = index_key_t; // the payload is not used
 using rel_tuple_t = Tuple<index_key_t, dummy_payload_t>;
 
 //static const int64_t window_size = 10000;
-static const int max_parallel_streams = 2;
+static const int parallel_streams = 2;
 static const int block_size = 128;// 64;
 static int grid_size = 0;
 //static const uint32_t radix_bits = 11;// 10;
@@ -298,7 +298,7 @@ bool validate_results(const std::vector<index_key_t>& lookup_keys, const Indexed
 }
 
 template<class IndexStructureType>
-void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties) {
+void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties, measurement& m) {
     // calculate prefix sum kernel shared memory requirement
     const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
 #ifdef DEBUG_INTERMEDIATE_STATE
@@ -371,7 +371,10 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     dump_task_assignments(state);
 #endif
 
+record_timestamp(m, "before");
     partitioned_lookup_kernel<rel_tuple_t><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
+    cudaDeviceSynchronize();
+    record_timestamp(m, "lookup");
 }
 
 template<class IndexType>
@@ -413,14 +416,14 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
         throw std::runtime_error("config.num_lookups >= std::numeric_limits<uint32_t>::max()");
     }
     size_t remaining = config.num_lookups;
-    size_t max_stream_portion = (config.num_lookups + max_parallel_streams) / max_parallel_streams;
+    size_t max_stream_portion = (config.num_lookups + parallel_streams) / parallel_streams;
     //printf("ALIGN_BYTES: %u\n", ALIGN_BYTES);
     max_stream_portion = (max_stream_portion + ALIGN_BYTES - 1) & -ALIGN_BYTES;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
 
     // create streams
-    for (unsigned i = 0; i < max_parallel_streams; ++i) {
+    for (unsigned i = 0; i < parallel_streams; ++i) {
         size_t stream_portion = std::min(remaining, max_stream_portion);
         remaining -= stream_portion;
         printf("stream portion: %lu\n", stream_portion);
@@ -451,8 +454,7 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
     constexpr size_t align_count = ALIGN_BYTES / sizeof(index_key_t);
     constexpr size_t align_mask = ~(align_count - 1ul);
     //printf("align_count: %lu; config.align_mask: %lu\n", align_count, align_mask);
-    size_t max_stream_portion =
-        (std::min<size_t>(window_size, config.num_lookups) + max_parallel_streams) / max_parallel_streams;
+    size_t max_stream_portion = std::min<size_t>(window_size, config.num_lookups);
     max_stream_portion = (max_stream_portion + align_count - 1ul) & align_mask;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
@@ -498,9 +500,9 @@ void partitioning_approach<IndexType>::run(query_data& d, measurement& m) {
     IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
     for (size_t i = 0; i < _p_impl->stream_states.size();) {
         size_t j = 0;
-        for (; j < max_parallel_streams; ++j) {
+        for (; j < parallel_streams; ++j) {
             const auto& state = _p_impl->stream_states[i + j];
-            run_on_stream(*state, index_structure, device_properties);
+            run_on_stream(*state, index_structure, device_properties, m);
         }
         i += j;
         cudaDeviceSynchronize();

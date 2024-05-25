@@ -2,10 +2,13 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iostream>
+#include <mutex>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
-#include <iostream>
+#include <thread>
 
 namespace measuring {
 
@@ -24,15 +27,19 @@ struct experiment_description {
 };
 
 struct measurement {
-    std::vector<decltype(std::chrono::high_resolution_clock::now())> timestamps;
-    std::string str_rep;
+    std::chrono::microseconds dt = {};
+    using ts_type = decltype(std::chrono::high_resolution_clock::now());
+    std::unordered_map<std::thread::id, ts_type> last_ts;
+    std::mutex m;
+    std::unordered_map<std::string, std::chrono::microseconds> groups = {};
+    std::string str_rep = {};
 };
 
 measuring_settings& get_settings();
 
 void write_out_measurement(const experiment_description& d, const measurement& m);
 
-void record_timestamp(measurement& m);
+void record_timestamp(measurement& m, const std::string& group);
 
 struct nop_validator {
     bool operator() () { return true; }
@@ -47,9 +54,9 @@ void measure(const experiment_description& d, Func func, Validator validator = n
     for (unsigned i = 0; i < get_settings().repetitions; ++i) {
         measurement m;
 
-        record_timestamp(m);
+        record_timestamp(m, "before");
         func(m);
-        record_timestamp(m);
+        record_timestamp(m, "after");
 
         if (validator()) {
             write_out_measurement(d, m);

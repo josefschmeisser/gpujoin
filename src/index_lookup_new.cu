@@ -260,7 +260,7 @@ struct hj_approach : abstract_approach {
     }
 
     void run(query_data& d, measurement& m) override {
-        record_timestamp(m);
+        record_timestamp(m, "init");
 
         const auto& config = get_experiment_config();
         const auto& device_properties = get_device_properties(0);
@@ -280,12 +280,12 @@ struct hj_approach : abstract_approach {
             d.d_tids.data()
         };
 
-        record_timestamp(m);
+        record_timestamp(m, "prepare");
         size_t num_blocks = 1 * device_properties.multiProcessorCount; // optimal on a V100
         hj_build_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
 
         cudaDeviceSynchronize();
-        record_timestamp(m);
+        record_timestamp(m, "build");
 
         num_blocks = 4 * device_properties.multiProcessorCount; // optimal on a V100
         hj_probe_kernel<index_key_t><<<num_blocks, config.block_size>>>(args);
@@ -297,7 +297,7 @@ struct hj_approach : abstract_approach {
         double avg_steps = total_steps / d_probe_side.size();
         printf("total_steps: %f avg_steps: %f\n", total_steps, avg_steps);
 */
-        record_timestamp(m);
+        record_timestamp(m, "probe");
     }
 };
 
