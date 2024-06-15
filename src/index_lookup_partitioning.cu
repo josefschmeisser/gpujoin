@@ -451,8 +451,7 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
     constexpr size_t align_count = ALIGN_BYTES / sizeof(index_key_t);
     constexpr size_t align_mask = ~(align_count - 1ul);
     //printf("align_count: %lu; config.align_mask: %lu\n", align_count, align_mask);
-    size_t max_stream_portion =
-        (std::min<size_t>(window_size, config.num_lookups) + max_parallel_streams) / max_parallel_streams;
+    size_t max_stream_portion = std::min<size_t>(window_size, config.num_lookups);
     max_stream_portion = (max_stream_portion + align_count - 1ul) & align_mask;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
