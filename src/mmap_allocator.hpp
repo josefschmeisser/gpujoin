@@ -49,6 +49,7 @@ struct mmap_allocator {
     }
 
     pointer allocate(size_type s, void const * = 0) {
+        //std::cout << "mmap_allocator allocating " << s*sizeof(T) << " bytes" << std::endl;
         using namespace std::string_literals;
 
         if (0 == s) {
