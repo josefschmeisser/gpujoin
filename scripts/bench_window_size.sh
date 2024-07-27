@@ -1,6 +1,6 @@
 #!/bin/bash
 
-declare -r output="2024-06-04_window_size.yml"
+declare -r output="2024-06-15_window_size.yml"
 
 declare -i key_size=8
 # all sizes in terms of the number of tuples
@@ -13,7 +13,7 @@ declare -i window_size=window_start_size
 declare -i initial_step=window_start_size
 
 function getStep {
-    if [ $window_size -lt $((2**22)) ]; then
+    if [ $window_size -lt $((2**24)) ]; then
         echo $((initial_step))
     else
         echo $((2**22))
