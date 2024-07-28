@@ -10,8 +10,14 @@ if(ENABLE_PERFBENCHMARKING)
     add_dependencies(tpch jevents)
 endif(ENABLE_PERFBENCHMARKING)
 
-add_executable(cuda_tpch_1 tpch_1.cu)
-target_link_libraries(cuda_tpch_1 tpch_common numa pthread)
+add_executable(cuda_tpch_01 tpch_01.cu)
+target_link_libraries(cuda_tpch_01 tpch_common numa pthread)
+
+# TODO
+#add_executable(cuda_tpch_04 tpch_04.cu)
+#set_target_properties(cuda_tpch_04 PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+#target_link_libraries(cuda_tpch_04 tpch_common numa pthread radixspline cub fast_interconnects)
+#target_compile_options(cuda_tpch_04 PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>")
 
 # index join executable
 add_executable(cuda_tpch_14 "")

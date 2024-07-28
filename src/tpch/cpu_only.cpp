@@ -164,6 +164,48 @@ order by
         o_orderpriority
 */
 void query_4(Database& db) {
+
+    std::unordered_set<int> index;
+
+    // build index
+    // TODO move out of query
+    auto& lineitem = db.lineitem;
+    for (size_t i = 0; i < lineitem.l_returnflag.size(); ++i) {
+
+    }
+
+
+
+    struct group {
+        std::string o_orderpriority;
+        uint64_t count_order;
+    };
+    unordered_map<std::string, std::unique_ptr<group>> groupBy;
+
+
+    auto& orders = db.orders;
+    for (size_t i = 0; i < orders.o_orderkey.size(); ++i) {
+        auto& t = *sorted[i];
+        if () continue;
+
+        uint16_t k = static_cast<uint16_t>(lineitem.l_returnflag[i]) << 8;
+        k |= lineitem.l_linestatus[i];
+
+        group* groupPtr;
+        auto it = groupBy.find(k);
+        if (it != groupBy.end()) {
+            groupPtr = it->second.get();
+        } else {
+            // create new group
+            auto g = std::make_unique<group>();
+            groupPtr = g.get();
+            groupBy[k] = std::move(g);
+            groupPtr->o_orderpriority = orders.o_orderpriority[i];
+            groupPtr->l_linestatus = lineitem.l_linestatus[i];
+        }
+
+    }
+
 }
 
 

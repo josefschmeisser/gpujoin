@@ -24,6 +24,7 @@ std::string tmpl_to_string(const lookup_pattern_type& v) {
             return "zipf";
         default:
             assert(false);
+            return "invalid";
     }
 }
 
