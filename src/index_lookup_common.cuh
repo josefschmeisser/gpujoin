@@ -41,14 +41,14 @@ using no_op_type = no_op_index<index_key_t, value_t, device_index_allocator, hos
 
 
 template<class T, class VectorType>
-void populate_densely(VectorType& v) {
+void generate_dense_dataset(VectorType& v) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
         std::iota(v.begin() + r.begin(), v.begin() + r.end(), r.begin());
     });
 }
 
 template<class T, class VectorType>
-void populate_uniformly(VectorType& v, size_t limit) {
+void generate_uniform_dataset(VectorType& v, size_t limit) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
 /*
         using namespace std::chrono;
@@ -71,81 +71,48 @@ inline size_t upper_limit_by_max_bits(unsigned max_bits) {
 }
 
 template<class T, class VectorType>
-void populate_uniquely_uniformly(VectorType& v, size_t upper_limit) {
-#if 0
-    // TODO: consider https://stackoverflow.com/a/6953958
+void generate_unique_uniform_dataset(VectorType& v, size_t upper_limit) {
+    static thread_local std::random_device rd;
+    std::mt19937_64 gen(rd());
 
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
-        //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
-        assert(r.size() > 0);
-
-        // create random keys
-        static thread_local std::random_device rd;
-        //std::mt19937_64 gen(r.begin());
-        std::mt19937_64 gen(rd());
-        std::uniform_int_distribution<T> key_distrib(range_begin, range_end);
+    // once the ratio becomes to low we switch methods; see: https://stackoverflow.com/a/6953958
+    double factor = static_cast<double>(upper_limit) / static_cast<double>(v.size());
+    if (factor > 2.) {
+        std::uniform_int_distribution<T> key_distrib(0, upper_limit - 1);
         std::unordered_set<T> unique;
-        unique.reserve(r.size());
+        unique.reserve(v.size());
 
-        while (unique.size() < r.size()) {
+        while (unique.size() < v.size()) {
             const auto key = key_distrib(gen);
-            if (key >= r.begin() && key < r.end()) {
+            //assert(key < upper_limit);
+            if (key >= upper_limit) continue;
+            if (unique.count(key) < 1) {
+                //std::cout << "found: " << key << std::endl;
                 unique.insert(key);
             }
         }
 
-        std::copy(unique.begin(), unique.end(), v.begin() + r.begin());
-    });
-#else
-    static thread_local std::random_device rd;
-    //std::mt19937_64 gen(r.begin());
-    std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<T> key_distrib(0, upper_limit - 1);
-    std::unordered_set<T> unique;
-    unique.reserve(v.size());
+        std::copy(unique.begin(), unique.end(), v.begin());
+    } else {
+        // TODO check: can this be allocated on the second cpu?
+        std::vector<size_t> indexes;
+        indexes.reserve(upper_limit);
+        std::iota(indexes.begin(), indexes.end(), 0);
+        //auto rng = std::default_random_engine {};
+        std::shuffle(std::begin(indexes), std::end(indexes), rd);
 
-    while (unique.size() < v.size()) {
-        const auto key = key_distrib(gen);
-        //assert(key < upper_limit);
-        if (key >= upper_limit) continue;
-        if (unique.count(key) < 1) {
-            //std::cout << "found: " << key << std::endl;
-            unique.insert(key);
-        }
+        std::copy(indexes.begin(), indexes.begin() + v.size(), v.begin());
     }
-
-    std::copy(unique.begin(), unique.end(), v.begin());
-#endif
 }
 
 template<class T, class VectorType>
-void populate_uniquely_uniformly_sorted(VectorType& v, size_t upper_limit) {
-    // TODO: consider https://stackoverflow.com/a/6953958
-#if 0
-    oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0, v.size()), [&](const oneapi::tbb::blocked_range<size_t>& r) {
-        //printf("range begin: %lu end: %lu\n", r.begin(), r.end());
-
-        // create random keys
-        static thread_local std::random_device rd;
-        //std::mt19937_64 gen(r.begin());
-        std::mt19937_64 gen(rd());
-        std::uniform_int_distribution<T> key_distrib(range_begin, range_end);
-        std::unordered_set<T> unique;
-        unique.reserve(v.size()); // TODO r.size() ?
-
-        while (unique.size() < v.size()) { // TODO r.size() ?
-            const auto key = key_distrib(gen);
-            unique.insert(key);
-        }
-
-        std::copy(unique.begin(), unique.end(), v.begin() + r.begin());
-        std::sort(v.begin() + r.begin(), v.begin() + r.end());
-    });
-#endif
+void generate_unique_uniform_sorted_dataset(VectorType& v, size_t upper_limit) {
+    generate_unique_uniform_dataset<T, VectorType>(v, upper_limit);
+    std::sort(v.begin(), v.end());
 }
 
 template<class T, class VectorType>
-void populate_with_zipfian_pattern(VectorType& v, uint64_t limit, double zipf_factor) {
+void generate_zipfian_dataset(VectorType& v, uint64_t limit, double zipf_factor) {
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, v.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         static thread_local std::random_device rd;
         // Note: using a 32 bit engine is fine as zipf_distribution uses a transformation approach.
@@ -178,10 +145,10 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     printf("generating dataset to be indexed...\n");
     switch (dt) {
         case dataset_type::dense:
-            populate_densely<KeyType, VectorType>(keys);
+            generate_dense_dataset<KeyType, VectorType>(keys);
             break;
         case dataset_type::sparse:
-            populate_uniquely_uniformly_sorted<KeyType, VectorType>(keys, upper_limit_by_max_bits(max_bits));
+            generate_unique_uniform_sorted_dataset<KeyType, VectorType>(keys, upper_limit_by_max_bits(max_bits));
             break;
         default:
             assert(false);
@@ -191,13 +158,13 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     printf("generating lookups...\n");
     switch (lookup_pattern) {
         case lookup_pattern_type::uniform:
-            populate_uniformly<uint64_t, VectorType>(lookups, keys.size());
+            generate_uniform_dataset<uint64_t, VectorType>(lookups, keys.size());
             break;
         case lookup_pattern_type::uniform_unique:
-            populate_uniquely_uniformly<uint64_t, VectorType>(lookups, keys.size());
+            generate_unique_uniform_dataset<uint64_t, VectorType>(lookups, keys.size());
             break;
         case lookup_pattern_type::zipf:
-            populate_with_zipfian_pattern<uint64_t, VectorType>(lookups, keys.size(), zipf_factor);
+            generate_zipfian_dataset<uint64_t, VectorType>(lookups, keys.size(), zipf_factor);
             break;
         default:
             assert(false);
@@ -206,7 +173,7 @@ void generate_datasets(dataset_type dt, unsigned max_bits, VectorType& keys, loo
     // map key positions into keys
     oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<uint64_t>(0ul, lookups.size()), [&](const oneapi::tbb::blocked_range<uint64_t>& r) {
         for (uint64_t i = 0; i < r.size(); ++i) {
-            assert(lookups[r.begin() + i < keys.size()]);
+            assert(lookups[r.begin() + i] < keys.size());
             lookups[r.begin() + i] = keys[lookups[r.begin() + i]];
         }
     });
