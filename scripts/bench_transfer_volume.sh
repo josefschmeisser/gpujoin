@@ -6,15 +6,14 @@ declare -r output="${name}.yml"
 declare -r nvperf_output="${name}_nvperf.json"
 declare -r nvperf_log=$(mktemp --suffix ".csv")
 
-#declare -r command_prefix="/usr/local/cuda-11.1/bin/nvprof --csv --log-file ${nvperf_log} --replay-mode kernel" \
-declare -r command_prefix="nvprof --csv --log-file ${nvperf_log} --replay-mode kernel"\
+declare -r command_prefix="/usr/local/cuda-11.1/bin/nvprof --csv --log-file ${nvperf_log} --replay-mode kernel"\
 "--aggregate-mode on --metrics nvlink_total_data_received,nvlink_user_data_received --"\
 "numactl --cpunodebind=0 "
 
 declare -i key_size=8
 # TODO adapt
-declare -i relation_r_size=$((2**26)) # 0.5GiB
-declare -i relation_s_size=$((2**26))
+declare -i relation_r_size=$((1*1024**3 / key_size))
+declare -i relation_s_size=$((1*1024**3 / key_size))
 declare -i relation_s_end_size=$((128*1024**3 / key_size)) # 128GiB / key_size
 declare -i initial_step=$((128*(10**6))) # -> ~1GiB
 
@@ -33,9 +32,9 @@ function getStep {
 function createCommand {
     # TODO distribution
     printf '%s' \
-        "echo ${command_prefix}" \
+        "${command_prefix}" \
         "./index_lookup -a $1 -i $2 -l ${relation_r_size}" \
-        " -e ${relation_s_size} --dataset dense -o ${output}"
+        " -e ${relation_s_size} --d dense -p uniform_unique -o ${output}"
 }
 
 function startEntry {
@@ -69,6 +68,10 @@ do
     echo "current S size: ${relation_s_size}; step: ${step}"
 
     runApproach "plain" "binary_search"
+    runApproach "plain" "radix_spline"
+    runApproach "plain" "harmonia"
+    runApproach "plain" "btree"
+    runApproach "hj" "no_op"
 
     relation_s_size=relation_s_size+step
 done
