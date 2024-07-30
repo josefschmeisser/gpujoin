@@ -7,15 +7,17 @@ declare -r nvperf_output="${name}_nvperf.json"
 declare -r nvperf_log=$(mktemp --suffix ".csv")
 
 declare -r command_prefix="/usr/local/cuda-11.1/bin/nvprof --csv --log-file ${nvperf_log} --replay-mode kernel"\
-"--aggregate-mode on --metrics nvlink_total_data_received,nvlink_user_data_received --"\
-"numactl --cpunodebind=0 "
+" --aggregate-mode on --metrics nvlink_total_data_received,nvlink_user_data_received --"\
+" numactl --cpunodebind=0 "
 
-declare -i key_size=8
-# TODO adapt
+declare -r key_size=8
+
 declare -i relation_r_size=$((1*1024**3 / key_size))
 declare -i relation_s_size=$((1*1024**3 / key_size))
-declare -i relation_s_end_size=$((128*1024**3 / key_size)) # 128GiB / key_size
-declare -i initial_step=$((128*(10**6))) # -> ~1GiB
+declare -i relation_s_end_size=$((32*1024**3 / key_size)) # 64GiB / key_size
+declare -i initial_step=$((1*1024**3 / key_size))
+
+#declare -i window_size=$((16*1024**2 / key_size)) # -> 16MiB
 
 function getStep {
     local s_size_gib=$((key_size * relation_s_size / 1024**3))
@@ -34,7 +36,7 @@ function createCommand {
     printf '%s' \
         "${command_prefix}" \
         "./index_lookup -a $1 -i $2 -l ${relation_r_size}" \
-        " -e ${relation_s_size} --d dense -p uniform_unique -o ${output}"
+        " -e ${relation_s_size} -d dense -p uniform_unique -o ${output}"
 }
 
 function startEntry {
@@ -47,8 +49,8 @@ function startEntry {
 }
 
 function finalizeEntry {
-    sed 's/^=.*//' ${nvperf_log}
-    sed 's/"//' ${nvperf_log}
+    sed -i '/^=.*/d' ${nvperf_log}
+    sed -i 's/\"//g' ${nvperf_log}
     cat ${nvperf_log} >> ${nvperf_output}
     echo "\" }," >> ${nvperf_output}
     echo -n > ${nvperf_log}
