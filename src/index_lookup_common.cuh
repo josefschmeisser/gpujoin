@@ -78,25 +78,27 @@ void generate_unique_uniform_dataset(VectorType& v, size_t upper_limit) {
     // once the ratio becomes to low we switch methods; see: https://stackoverflow.com/a/6953958
     double factor = static_cast<double>(upper_limit) / static_cast<double>(v.size());
     if (factor > 2.) {
-        std::uniform_int_distribution<T> key_distrib(0, upper_limit - 1);
-        std::unordered_set<T> unique;
+        std::unordered_set<
+            size_t,
+            std::hash<size_t>,
+            std::equal_to<size_t>,
+            host_allocator_t<size_t>> unique;
         unique.reserve(v.size());
 
+        std::uniform_int_distribution<size_t> key_distrib(0, upper_limit - 1);
         while (unique.size() < v.size()) {
-            const auto key = key_distrib(gen);
-            //assert(key < upper_limit);
-            if (key >= upper_limit) continue;
-            if (unique.count(key) < 1) {
-                //std::cout << "found: " << key << std::endl;
-                unique.insert(key);
+            const size_t key_idx = key_distrib(gen);
+            assert(key_idx < upper_limit);
+            if (unique.count(key_idx) < 1) {
+                unique.insert(key_idx);
             }
         }
 
         std::copy(unique.begin(), unique.end(), v.begin());
     } else {
-        // TODO check: can this be allocated on the second cpu?
-        std::vector<size_t> indexes;
+        std::vector<size_t, host_allocator_t<size_t>> indexes;
         indexes.reserve(upper_limit);
+
         std::iota(indexes.begin(), indexes.end(), 0);
         //auto rng = std::default_random_engine {};
         std::shuffle(std::begin(indexes), std::end(indexes), rd);
