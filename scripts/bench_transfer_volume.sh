@@ -50,7 +50,7 @@ function startEntry {
 
 function finalizeEntry {
     sed -i '/^=.*/d' ${nvperf_log}
-    sed -i 's/\"//g' ${nvperf_log}
+    sed -i 's/\"/\\"/g' ${nvperf_log}
     cat ${nvperf_log} >> ${nvperf_output}
     echo "\" }," >> ${nvperf_output}
     echo -n > ${nvperf_log}
