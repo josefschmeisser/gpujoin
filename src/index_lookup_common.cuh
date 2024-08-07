@@ -18,18 +18,19 @@
 #include <cub/block/block_radix_sort.cuh>
 #undef _Float16
 
-#include "utils.hpp"
-#include "zipf.hpp"
-
-#include "cuda_utils.cuh"
-#include "device_properties.hpp"
 #include "cuda_allocator.hpp"
-#include "numa_allocator.hpp"
-#include "mmap_allocator.hpp"
-#include "indexes.cuh"
+#include "cuda_utils.cuh"
 #include "device_array.hpp"
+#include "device_properties.hpp"
 #include "index_lookup_config.hpp"
 #include "index_lookup_config.tpp"
+#include "indexes.cuh"
+#include "limited_hash_set.hpp"
+#include "limited_vector.hpp"
+#include "mmap_allocator.hpp"
+#include "numa_allocator.hpp"
+#include "utils.hpp"
+#include "zipf.hpp"
 
 using namespace oneapi::tbb;
 
@@ -58,7 +59,6 @@ void generate_uniform_dataset(VectorType& v, size_t limit) {
         const size_t seed = dtn.count();
 */
         static thread_local std::random_device rd;
-        //std::mt19937_64 gen(r.begin());
         std::mt19937_64 gen(rd());
         std::uniform_int_distribution<size_t> lookup_distribution(0ul, limit - 1ul);
         std::generate(v.begin() + r.begin(), v.begin() + r.end(), [&]() { return lookup_distribution(gen); });
@@ -76,35 +76,55 @@ void generate_unique_uniform_dataset(VectorType& v, size_t upper_limit) {
     std::mt19937_64 gen(rd());
 
     // once the ratio becomes to low we switch methods; see: https://stackoverflow.com/a/6953958
-    double factor = static_cast<double>(upper_limit) / static_cast<double>(v.size());
+    double factor = 3;// static_cast<double>(upper_limit) / static_cast<double>(v.size());
     if (factor > 2.) {
-        std::unordered_set<
+        limited_hash_set<
             size_t,
             std::hash<size_t>,
-            std::equal_to<size_t>,
-            host_allocator_t<size_t>> unique;
-        unique.reserve(v.size());
-
+            host_allocator_t<size_t>>
+            unique(v.size());
+#if 0
         std::uniform_int_distribution<size_t> key_distrib(0, upper_limit - 1);
-        while (unique.size() < v.size()) {
+
+        for (size_t count = 0; count < v.size();) {
             const size_t key_idx = key_distrib(gen);
             assert(key_idx < upper_limit);
-            if (unique.count(key_idx) < 1) {
-                unique.insert(key_idx);
+            if (unique.insert(key_idx)) {
+                //printf("insert %lu;", key_idx);
+                count += 1;
             }
         }
-
+#else
+        auto task = [&](const oneapi::tbb::blocked_range<size_t>& r) {
+            static thread_local std::random_device local_rd;
+            std::mt19937_64 local_gen(local_rd());
+            std::uniform_int_distribution<size_t> key_distrib(0, upper_limit - 1);
+            for (size_t count = 0; count < r.size();) {
+                const size_t key_idx = key_distrib(local_gen);
+                assert(key_idx < upper_limit);
+                if (unique.insert(key_idx)) {
+                    count += 1;
+                }
+            }
+        };
+        oneapi::tbb::parallel_for(oneapi::tbb::blocked_range<size_t>(0ul, v.size()), task);
+#endif
         std::copy(unique.begin(), unique.end(), v.begin());
+        // note, lookups have to shuffled as std::hash<size_t> may be implemented as identity
+        std::shuffle(std::begin(v), std::end(v), rd);
     } else {
-        std::vector<size_t, host_allocator_t<size_t>> indexes;
-        indexes.reserve(upper_limit);
+        limited_vector<size_t, host_allocator_t<size_t>> indexes(upper_limit, upper_limit);
 
         std::iota(indexes.begin(), indexes.end(), 0);
-        //auto rng = std::default_random_engine {};
         std::shuffle(std::begin(indexes), std::end(indexes), rd);
 
         std::copy(indexes.begin(), indexes.begin() + v.size(), v.begin());
     }
+#if 0
+    for (auto value : v) {
+        printf("%lu; ", value);
+    }
+#endif
 }
 
 template<class T, class VectorType>
