@@ -76,7 +76,7 @@ void generate_unique_uniform_dataset(VectorType& v, size_t upper_limit) {
     std::mt19937_64 gen(rd());
 
     // once the ratio becomes to low we switch methods; see: https://stackoverflow.com/a/6953958
-    double factor = 3;// static_cast<double>(upper_limit) / static_cast<double>(v.size());
+    double factor = static_cast<double>(upper_limit) / static_cast<double>(v.size());
     if (factor > 2.) {
         limited_hash_set<
             size_t,

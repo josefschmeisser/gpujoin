@@ -67,12 +67,12 @@ public:
 
         size_t slot = HashFn{}(key) & (capacity - 1u);
         for (size_t i = 0; i < capacity; ++i) {
-            key_t prev;
-            // void __atomic_exchange (type *ptr, type *val, type *ret, int memorder)
-            __atomic_exchange(&table[slot], &key, &prev, __ATOMIC_RELAXED);
-            if (prev == key) {
+            key_t expected = empty_marker();
+            // __atomic_compare_exchange (type *ptr, type *expected, type *desired, bool weak, int success_memorder, int failure_memorder)
+            __atomic_compare_exchange(&table[slot], &expected, &key, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+            if (expected == key) {
                 return false;
-            } else if (prev == empty_marker()) {
+            } else if (expected == empty_marker()) {
                 return true;
             }
             slot = (slot + 1u) & (capacity - 1u);
