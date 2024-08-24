@@ -74,13 +74,15 @@ template<class T, class VectorType>
 void generate_unique_uniform_dataset(VectorType& v, size_t upper_limit) {
     static thread_local std::random_device rd;
     std::mt19937_64 gen(rd());
+    const auto v_size = v.size();
 
     // once the ratio becomes to low we switch methods; see: https://stackoverflow.com/a/6953958
     double factor = static_cast<double>(upper_limit) / static_cast<double>(v.size());
     if (factor > 2.) {
         limited_hash_set<
             size_t,
-            std::hash<size_t>,
+            //std::hash<size_t>,
+            murmur3_hash_fun<size_t>,
             host_allocator_t<size_t>>
             unique(v.size());
 #if 0
@@ -111,7 +113,7 @@ void generate_unique_uniform_dataset(VectorType& v, size_t upper_limit) {
 #endif
         std::copy(unique.begin(), unique.end(), v.begin());
         // note, lookups have to shuffled as std::hash<size_t> may be implemented as identity
-        std::shuffle(std::begin(v), std::end(v), rd);
+        //std::shuffle(std::begin(v), std::end(v), rd);
     } else {
         limited_vector<size_t, host_allocator_t<size_t>> indexes(upper_limit, upper_limit);
 
@@ -120,6 +122,8 @@ void generate_unique_uniform_dataset(VectorType& v, size_t upper_limit) {
 
         std::copy(indexes.begin(), indexes.begin() + v.size(), v.begin());
     }
+
+    assert(v.size() == v_size);
 #if 0
     for (auto value : v) {
         printf("%lu; ", value);

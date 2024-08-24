@@ -99,6 +99,13 @@ __host__ __device__ uint64_t murmur3_hash(const T k) {
     return ik;
 }
 
+template <class T>
+struct murmur3_hash_fun {
+    std::size_t operator()(const T& value) const noexcept {
+        return murmur3_hash<T>(value);
+    }
+};
+
 // maps integral integer types to their respective atomicCAS input types
 template <class T, class T2 = void>
 struct to_cuda_atomic_input;
