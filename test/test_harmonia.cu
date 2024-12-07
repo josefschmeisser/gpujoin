@@ -91,8 +91,10 @@ void test_harmonia_cuda_lookup(unsigned n) {
     harmonia_t tree;
     tree.construct(keys);
 
+    typename harmonia_t::memory_guard_t guard;
+    cuda_allocator<uint8_t, cuda_allocation_type::device> device_allocator;
     harmonia_t::device_handle_t device_handle;
-    tree.create_device_handle(device_handle);
+    tree.create_device_handle(device_handle, device_allocator, guard);
 
     uint32_t* d_keys;
     cudaMalloc(&d_keys, sizeof(uint32_t)*keys.size());

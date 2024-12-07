@@ -163,6 +163,8 @@ group by
 order by
         o_orderpriority
 */
+#if 0
+// TODO
 void query_4(Database& db) {
 
     std::unordered_set<int> index;
@@ -207,7 +209,7 @@ void query_4(Database& db) {
     }
 
 }
-
+#endif
 
 /*
 -- TPC-H Query 14
