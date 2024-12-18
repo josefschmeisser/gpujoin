@@ -43,6 +43,10 @@ include(lib/fast-interconnects.cmake)
 # CUB does not use NDEBUG but rather DEBUG and _DEBUG, so we define the latter here
 add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
 
+# add dependencies
+include(cmake/CPM.cmake)
+
+
 include_directories(
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src
