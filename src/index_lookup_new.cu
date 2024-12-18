@@ -1,22 +1,27 @@
-#include "device_array.hpp"
-#include "device_definitions.hpp"
-#include "index_lookup.cuh"
-
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
-#include <memory>
 
 #include <oneapi/tbb/parallel_sort.h>
+//#include <warpcore/single_value_hash_table.cuh>
+#include <warpcore/multi_value_hash_table.cuh>
 
-#include "generic_hj.cuh"
-#include "index_lookup_config.hpp"
-#include "index_lookup_common.cuh"
-#include "index_lookup_partitioning.cuh"
+#include "device_array.hpp"
+#include "device_definitions.hpp"
 #include "device_properties.hpp"
+#include "generic_hj.cuh"
+//#include "generic_hj_cuco.cuh"
+#include "generic_hj_warpcore.cuh"
+#include "index_lookup_common.cuh"
+#include "index_lookup_config.hpp"
+#include "index_lookup_partitioning.cuh"
+#include "index_lookup.cuh"
 #include "indexes.hpp"
 #include "measuring.hpp"
 
@@ -25,7 +30,6 @@
 #endif
 
 using namespace measuring;
-
 
 template<class VectorType>
 static VectorType& choose_build_side(VectorType& indexed, VectorType& lookup_keys) {
@@ -111,20 +115,12 @@ bool query_data::validate_results() {
 #ifdef ONLY_AGGREGATES
     // TODO
 #else
-    //static host_allocator_t<value_t> tids_validation_allocator;
     auto h_tids = d_tids.to_host_accessible<host_allocator_t<value_t>>();
     auto h_tids_raw = h_tids.data();
 
-    //std::cout << "h_tids: " << stringify(h_tids_raw, h_tids_raw + h_tids.size()) << std::endl;
-
     auto* actual_indexed = &indexed;
     auto* actual_lookup_keys = &lookup_keys;
-/*
-    if (config.approach == "hj") {
-        actual_indexed = &choose_build_side(indexed, lookup_keys);
-        actual_lookup_keys = &choose_probe_side(indexed, lookup_keys);
-    }
-*/
+
     // validate results
     printf("validating results...\n");
     for (size_t i = 0; i < actual_lookup_keys->size(); ++i) {
@@ -301,12 +297,68 @@ struct hj_approach : abstract_approach {
     }
 };
 
+template<class IndexType>
+struct hj_warpcore_approach : abstract_approach {
+    using hash_table_t = warpcore::MultiValueHashTable<
+        index_key_t,
+        device_size_t,
+        warpcore::defaults::empty_key<index_key_t>(), // empty sentinel
+        warpcore::defaults::tombstone_key<index_key_t>(), // tombstone sentinel
+        warpcore::defaults::probing_scheme_t<index_key_t, 8>>; // the cooperative probing scheme
+
+    std::unique_ptr<hash_table_t> ht;
+
+    ~hj_warpcore_approach() override = default;
+
+    void initialize(query_data& d) override {
+        ht = std::make_unique<hash_table_t>(d.lookup_keys.size() * 2);
+        cudaDeviceSynchronize();
+    }
+
+    void run(query_data& d, measurement& m) override {
+        record_timestamp(m);
+
+        const auto& config = get_experiment_config();
+        const auto& device_properties = get_device_properties(0);
+        auto& d_build_side = d.d_lookup_keys;
+        auto& d_probe_side = d.d_indexed;
+        //printf("build side size: %lu; probe side size: %lu\n", d_build_side.size(), d_probe_side.size());
+
+        using ref_type = hash_table_t;
+        const hj_warpcore_args<index_key_t, ref_type> args {
+            // Inputs
+            d_build_side.data(),
+            d_build_side.size(),
+            d_probe_side.data(),
+            d_probe_side.size(),
+            *ht,
+            // State and outputs
+            d.d_tids.data()
+        };
+        record_timestamp(m);
+
+        size_t num_blocks = 1 * device_properties.multiProcessorCount;
+        hj_warpcore_build_kernel<<<num_blocks, config.block_size>>>(args);
+        //hj_warpcore_build_kernel<<<num_blocks, 32>>>(args);
+        cudaDeviceSynchronize();
+        record_timestamp(m);
+
+        num_blocks = 4 * device_properties.multiProcessorCount;
+        hj_warpcore_probe_kernel<<<num_blocks, config.block_size>>>(args);
+        //hj_warpcore_probe_kernel<<<num_blocks, 32>>>(args);
+        cudaDeviceSynchronize();
+        record_timestamp(m);
+    }
+};
+
 //static const std::map<std::string, std::unique_ptr<abstract_approach_dispatcher>> approaches {
 static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>> approaches {
     { "plain", std::make_shared<approach_dispatcher<plain_approach>>() },
     { "bws", std::make_shared<approach_dispatcher<blockwise_sorting_approach>>() },
     { "partitioning", std::make_shared<approach_dispatcher<partitioning_approach>>() },
-    { "hj", std::make_shared<approach_dispatcher<hj_approach>>() }
+    { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
+    //{ "hj_cuco", std::make_shared<approach_dispatcher<hj_cuco_approach>>() },
+    { "hj_warpcore", std::make_shared<approach_dispatcher<hj_warpcore_approach>>() }
 };
 
 static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs, const query_data& qd) {

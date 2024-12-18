@@ -462,7 +462,7 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
     while (remaining > 0) {
         size_t stream_portion = std::min(remaining, max_stream_portion);
         remaining -= stream_portion;
-        printf("stream portion: %lu\n", stream_portion);
+        //printf("stream portion: %lu\n", stream_portion);
         auto state = create_stream_state(d_stream_lookup_keys, stream_portion, d_stream_tids);
         _p_impl->stream_states.push_back(std::move(state));
 

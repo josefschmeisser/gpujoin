@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 
 project(gpujoin LANGUAGES CXX CUDA)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
 set(ENABLE_PERFBENCHMARKING false)
@@ -34,11 +34,13 @@ if(ENABLE_PERFBENCHMARKING)
     add_compile_definitions(PERF_AVAILABLE=true)
 endif(ENABLE_PERFBENCHMARKING)
 
-include(lib/RadixSpline.cmake)
-include(lib/gtest.cmake)
 include(lib/cub.cmake)
 include(lib/oneTBB.cmake)
 include(lib/fast-interconnects.cmake)
+include(lib/gtest.cmake)
+include(lib/oneTBB.cmake)
+include(lib/RadixSpline.cmake)
+#include(lib/warpcore.cmake)
 
 # CUB does not use NDEBUG but rather DEBUG and _DEBUG, so we define the latter here
 add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
@@ -46,6 +48,11 @@ add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
 # add dependencies
 include(cmake/CPM.cmake)
 
+CPMAddPackage(
+  NAME warpcore
+  GITHUB_REPOSITORY sleeepyjack/warpcore
+  GIT_TAG master
+)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
@@ -71,9 +78,9 @@ add_executable(index_lookup
     src/gpu_radix_partition.cu
 )
 set_target_properties(index_lookup PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cub radixspline onetbb fast_interconnects)
+target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cuco radixspline onetbb fast_interconnects warpcore)
 # additional nvcc flags
-target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
+target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true --expt-extended-lambda --expt-relaxed-constexpr>)
 #target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas="-v">)
 #target_compile_options(index_lookup PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
 # debug flag
