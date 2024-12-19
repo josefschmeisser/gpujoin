@@ -35,7 +35,7 @@ if(ENABLE_PERFBENCHMARKING)
 endif(ENABLE_PERFBENCHMARKING)
 
 include(lib/cub.cmake)
-include(lib/oneTBB.cmake)
+#include(lib/cuco.cmake)
 include(lib/fast-interconnects.cmake)
 include(lib/gtest.cmake)
 include(lib/oneTBB.cmake)
@@ -78,7 +78,7 @@ add_executable(index_lookup
     src/gpu_radix_partition.cu
 )
 set_target_properties(index_lookup PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-target_link_libraries(index_lookup ${CUDART_LIBRARY} numa cuco radixspline onetbb fast_interconnects warpcore)
+target_link_libraries(index_lookup ${CUDART_LIBRARY} numa radixspline onetbb fast_interconnects warpcore)
 # additional nvcc flags
 target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true --expt-extended-lambda --expt-relaxed-constexpr>)
 #target_compile_options(index_lookup PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xptxas="-v">)
