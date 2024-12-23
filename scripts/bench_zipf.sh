@@ -7,8 +7,8 @@ declare -i key_size=8
 # all sizes are specified in terms of the number of tuples
 #declare -i relation_r_size=$((2**26)) # 0.5GiB
 declare -i relation_r_size=$((2**26))
-#declare -i relation_s_size=$((100*1024**3 / key_size)) # 100GiB / key_size
-declare -i relation_s_size=$((1*1024**3 / key_size)) # 100GiB / key_size
+#declare -i relation_s_size=$((1*1024**3 / key_size)) # 1GiB / key_size
+declare -i relation_s_size=$((100*1024**3 / key_size)) # 100GiB / key_size
 
 declare -i window_size=$((2**22)) # -> 32MiB
 

@@ -12,10 +12,10 @@ declare -r command_prefix="/usr/local/cuda-11.1/bin/nvprof --csv --log-file ${nv
 
 declare -r key_size=8
 
-declare -i relation_r_size=$((1*1024**3 / key_size))
-declare -i relation_s_size=$((1*1024**3 / key_size))
-declare -i relation_s_end_size=$((32*1024**3 / key_size)) # 64GiB / key_size
-declare -i initial_step=$((1*1024**3 / key_size))
+declare -i relation_r_size=$((2**26))
+declare -i relation_s_size=$((2**26))
+declare -i relation_s_end_size=$((128*1024**3 / key_size)) # 128GiB / key_size
+declare -i initial_step=$((128*(10**6))) # -> ~1GiB
 
 #declare -i window_size=$((16*1024**2 / key_size)) # -> 16MiB
 
@@ -36,7 +36,7 @@ function createCommand {
     printf '%s' \
         "${command_prefix}" \
         "./index_lookup -a $1 -i $2 -l ${relation_r_size}" \
-        " -e ${relation_s_size} -d dense -p uniform_unique -o ${output}"
+        " -e ${relation_s_size} -d dense -p uniform_unique -o ${output} -w $((2**22))"
 }
 
 function startEntry {
@@ -69,10 +69,10 @@ do
     step=$(getStep)
     echo "current S size: ${relation_s_size}; step: ${step}"
 
-    runApproach "plain" "binary_search"
-    runApproach "plain" "radix_spline"
-    runApproach "plain" "harmonia"
-    runApproach "plain" "btree"
+    runApproach "partitioning" "binary_search"
+    runApproach "partitioning" "radix_spline"
+    runApproach "partitioning" "harmonia"
+    runApproach "partitioning" "btree"
     runApproach "hj" "no_op"
 
     relation_s_size=relation_s_size+step

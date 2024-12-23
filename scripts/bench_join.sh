@@ -9,7 +9,7 @@ declare -r output="simple_join_device_only_2024-04-14.yml"
 declare -i key_size=8
 declare -i relation_r_size=$((2**26)) # 0.5GiB
 declare -i relation_s_size=$((2**26))
-declare -i relation_s_end_size=$((32*1024**3 / key_size)) # 128GiB / key_size
+declare -i relation_s_end_size=$((128*1024**3 / key_size)) # 128GiB / key_size
 declare -i initial_step=$((128*(10**6))) # -> ~1GiB
 
 function getStep {
