@@ -247,15 +247,14 @@ struct blockwise_sorting_approach : abstract_approach {
 
 template<class IndexType>
 struct hj_approach : abstract_approach {
-    std::unique_ptr<hj_ht_t> ht;
-
     ~hj_approach() override = default;
 
-    void initialize(query_data& d) override {
-        ht = std::make_unique<hj_ht_t>(d.lookup_keys.size());
-    }
+    void initialize(query_data& d) override {}
 
     void run(query_data& d, measurement& m) override {
+        record_timestamp(m);
+
+        hj_ht_t ht { d.lookup_keys.size() };
         record_timestamp(m);
 
         const auto& config = get_experiment_config();
@@ -270,7 +269,7 @@ struct hj_approach : abstract_approach {
             d_build_side.size(),
             d_probe_side.data(),
             d_probe_side.size(),
-            ht->_device_handle_inst,
+            ht._device_handle_inst,
             // State and outputs
             //d_mutable_state.data(),
             d.d_tids.data()
@@ -306,16 +305,15 @@ struct hj_warpcore_approach : abstract_approach {
         warpcore::defaults::tombstone_key<index_key_t>(), // tombstone sentinel
         warpcore::defaults::probing_scheme_t<index_key_t, 8>>; // the cooperative probing scheme
 
-    std::unique_ptr<hash_table_t> ht;
-
     ~hj_warpcore_approach() override = default;
 
-    void initialize(query_data& d) override {
-        ht = std::make_unique<hash_table_t>(d.lookup_keys.size() * 2);
-        cudaDeviceSynchronize();
-    }
+    void initialize(query_data& d) override {}
 
     void run(query_data& d, measurement& m) override {
+        record_timestamp(m);
+
+        hash_table_t ht { d.lookup_keys.size() * 2 };
+        cudaDeviceSynchronize();
         record_timestamp(m);
 
         const auto& config = get_experiment_config();
@@ -331,7 +329,7 @@ struct hj_warpcore_approach : abstract_approach {
             d_build_side.size(),
             d_probe_side.data(),
             d_probe_side.size(),
-            *ht,
+            ht,
             // State and outputs
             d.d_tids.data()
         };
