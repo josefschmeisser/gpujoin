@@ -296,6 +296,69 @@ struct hj_approach : abstract_approach {
     }
 };
 
+#if 0
+template<class IndexType>
+struct hj_cuco_approach : abstract_approach {
+    using ht_t = cuco::static_multimap<index_key_t, device_size_t>;
+    static constexpr index_key_t empty_key_sentinel     = std::numeric_limits<index_key_t>::max();
+    static constexpr device_size_t empty_value_sentinel = std::numeric_limits<device_size_t>::max();
+
+    ~hj_cuco_approach() override = default;
+
+    void initialize(query_data& d) override {}
+
+    void run(query_data& d, measurement& m) override {
+        record_timestamp(m);
+
+        ht_t ht(
+            d.lookup_keys.size() * 2,
+            cuco::empty_key{empty_key_sentinel},
+            cuco::empty_value{empty_value_sentinel});
+        record_timestamp(m);
+
+        const auto& config = get_experiment_config();
+        const auto& device_properties = get_device_properties(0);
+        auto& d_build_side = d.d_lookup_keys;
+        auto& d_probe_side = d.d_indexed;
+
+        //using ref_type = decltype(ht.ref(cuco::insert_and_find));
+        using ref_type = decltype(ht.get_device_view());
+        using ref_mutable_type = decltype(ht.get_device_mutable_view());
+        const hj_args<index_key_t, ref_type, ref_mutable_type> args {
+            // Inputs
+            d_build_side.data(),
+            d_build_side.size(),
+            d_probe_side.data(),
+            d_probe_side.size(),
+            //ht->ref(cuco::insert_and_find),
+            ht.get_device_view(),
+            ht.get_device_mutable_view(),
+            // State and outputs
+            //d_mutable_state.data(),
+            d.d_tids.data()
+        };
+
+        record_timestamp(m);
+        if (config.block_size != 128) {
+            throw 0; // TODO
+        }
+        auto constexpr cg_size = ht_t::cg_size();
+        size_t num_blocks = 1 * device_properties.multiProcessorCount;
+        //hj_build_kernel<128, cg_size><<<num_blocks, config.block_size>>>(args);
+        hj_cuco_build_kernel<128, cg_size><<<num_blocks, 128>>>(args);
+
+        cudaDeviceSynchronize();
+        record_timestamp(m);
+
+        num_blocks = 4 * device_properties.multiProcessorCount;
+        hj_cuco_probe_kernel<<<num_blocks, config.block_size>>>(args);
+        cudaDeviceSynchronize();
+
+        record_timestamp(m);
+    }
+};
+#endif
+
 template<class IndexType>
 struct hj_warpcore_approach : abstract_approach {
     using hash_table_t = warpcore::MultiValueHashTable<
