@@ -21,7 +21,6 @@ public:
         Key key;
         Value value;
     };
-    //static_assert(sizeof(entry) == sizeof(Key) + sizeof(Value));
 
     struct mutable_data {
         uint64_t counter = 0u;
@@ -34,10 +33,18 @@ public:
         mutable_data* const mutable_data_ptr = nullptr;
     } _device_handle_inst;
 
+    /**
+     * @brief Inserts the provided key-value pair into the hash table. In case
+     * there already exits an entry with an identical key, the value is
+     * replaced with the provided value.
+     * 
+     * @param handle_inst 
+     * @param key 
+     * @param value 
+     */
     __device__ static void insert(const device_handle& handle_inst, Key key, Value value) {
         device_size_t slot = murmur3_hash(key) & (handle_inst.capacity - 1u);
-        while (true) {
-            //device_size_t prev = atomicCAS(&table[slot].key, empty_marker, key);
+        for (device_size_t i = 0; i < handle_inst.capacity; ++i) {
             device_size_t prev = tmpl_atomic_cas(&handle_inst.table[slot].key, empty_marker, key);
             if (prev == empty_marker || prev == key) {
                 handle_inst.table[slot].value = value;
@@ -78,9 +85,7 @@ public:
         return table_size;
     }
 
-    linear_probing_hashtable(device_size_t occupancy_upper_bound)
-        //: _device_handle_inst{ nullptr, calculate_table_size(occupancy_upper_bound) }
-    {
+    linear_probing_hashtable(device_size_t occupancy_upper_bound) {
         const auto capacity = calculate_table_size(occupancy_upper_bound);
         entry* table;
         auto ret = cudaMalloc(&table, capacity*sizeof(entry));
