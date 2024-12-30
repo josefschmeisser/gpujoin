@@ -68,7 +68,7 @@ include_directories(
 
 add_executable(index_lookup
     src/generic_hj.cu
-    src/index_lookup_new.cu
+    src/index_lookup.cu
     src/index_lookup_partitioning.cu
     src/measuring.cpp
     src/device_properties.cpp
