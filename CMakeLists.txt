@@ -97,23 +97,6 @@ if(false)
                         >)
 endif()
 
-
-# FIXME
-if(false)
-add_executable(index_lookup_partitioning
-    src/index_lookup_partitioning_old.cu
-    src/measuring.cpp
-    src/device_properties.cpp
-    #src/harmonia.cu
-    src/indexes.cpp
-    src/index_lookup_config.cpp
-    src/gpu_radix_partition.cu
-)
-target_link_libraries(index_lookup_partitioning ${CUDART_LIBRARY} numa cub radixspline onetbb fast_interconnects)
-# additional nvcc flags
-target_compile_options(index_lookup_partitioning PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:-DNRDC>")
-endif()
-
 add_executable(bf_search src/bf_search.cpp)
 
 add_executable(random_access src/random_access.cu)
