@@ -283,7 +283,7 @@ __global__ void lookup_kernel_with_sorting_v1(const IndexStructureType index_str
 
     const unsigned iteration_count = (tile_size + ITEMS_PER_ITERATION - 1) / ITEMS_PER_ITERATION;
 
-    index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO omit this
+    index_key_t input_thread_data[ITEMS_PER_THREAD]; // TODO eliminate this
 
     for (int i = 0; i < iteration_count; ++i) {
         //if (lane_id == 0) printf("warp: %d iteration: %d first tid: %d\n", warp_id, i, tid);

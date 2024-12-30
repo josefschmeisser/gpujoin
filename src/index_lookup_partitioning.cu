@@ -40,12 +40,9 @@ using namespace measuring;
 using dummy_payload_t = index_key_t; // the payload is not used
 using rel_tuple_t = Tuple<index_key_t, dummy_payload_t>;
 
-//static const int64_t window_size = 10000;
-static const int max_parallel_streams = 2;
-static const int block_size = 128;// 64;
+static const int parallel_streams = 2;
+static const int block_size = 128;
 static int grid_size = 0;
-//static const uint32_t radix_bits = 11;// 10;
-//static const uint32_t ignore_bits = 4;//3;
 
 // 48 kiB shared memory:
 // laswwc max 8 bits
@@ -413,14 +410,14 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
         throw std::runtime_error("config.num_lookups >= std::numeric_limits<uint32_t>::max()");
     }
     size_t remaining = config.num_lookups;
-    size_t max_stream_portion = (config.num_lookups + max_parallel_streams) / max_parallel_streams;
+    size_t max_stream_portion = (config.num_lookups + parallel_streams) / parallel_streams;
     //printf("ALIGN_BYTES: %u\n", ALIGN_BYTES);
     max_stream_portion = (max_stream_portion + ALIGN_BYTES - 1) & -ALIGN_BYTES;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
 
     // create streams
-    for (unsigned i = 0; i < max_parallel_streams; ++i) {
+    for (unsigned i = 0; i < parallel_streams; ++i) {
         size_t stream_portion = std::min(remaining, max_stream_portion);
         remaining -= stream_portion;
         printf("stream portion: %lu\n", stream_portion);
@@ -446,12 +443,14 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
         throw std::runtime_error("config.num_lookups >= std::numeric_limits<uint32_t>::max()");
     }
 
-    const auto window_size = config.partitioning_approach_window_size;
+    int64_t window_size = config.partitioning_approach_window_size;
+    window_size = window_size > 0 ? window_size : std::numeric_limits<decltype(window_size)>::max();
     //printf("window_size: %lu; config.num_lookups: %lu\n", window_size, config.num_lookups);
     constexpr size_t align_count = ALIGN_BYTES / sizeof(index_key_t);
     constexpr size_t align_mask = ~(align_count - 1ul);
     //printf("align_count: %lu; config.align_mask: %lu\n", align_count, align_mask);
     size_t max_stream_portion = std::min<size_t>(window_size, config.num_lookups);
+    max_stream_portion = (max_stream_portion + parallel_streams) / parallel_streams;
     max_stream_portion = (max_stream_portion + align_count - 1ul) & align_mask;
     const index_key_t* d_stream_lookup_keys = d.d_lookup_keys.data();
     value_t* d_stream_tids = d.d_tids.data();
@@ -462,7 +461,7 @@ void partitioning_approach<IndexType>::initialize(query_data& d) {
     while (remaining > 0) {
         size_t stream_portion = std::min(remaining, max_stream_portion);
         remaining -= stream_portion;
-        //printf("stream portion: %lu\n", stream_portion);
+        printf("stream portion: %lu\n", stream_portion);
         auto state = create_stream_state(d_stream_lookup_keys, stream_portion, d_stream_tids);
         _p_impl->stream_states.push_back(std::move(state));
 
@@ -495,9 +494,11 @@ void partitioning_approach<IndexType>::run(query_data& d, measurement& m) {
     const auto& device_properties = get_device_properties(0);
 
     IndexType& index_structure = *static_cast<IndexType*>(d.index_structure.get());
-    for (size_t i = 0; i < _p_impl->stream_states.size();) {
+    const size_t window_count = _p_impl->stream_states.size();
+    for (size_t i = 0; i < window_count;) {
+        const size_t stream_count = std::min<size_t>(parallel_streams, window_count - i);
         size_t j = 0;
-        for (; j < max_parallel_streams; ++j) {
+        for (; j < stream_count; ++j) {
             const auto& state = _p_impl->stream_states[i + j];
             run_on_stream(*state, index_structure, device_properties);
         }
