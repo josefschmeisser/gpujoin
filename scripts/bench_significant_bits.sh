@@ -1,6 +1,5 @@
 #!/bin/bash
 
-#lookup_count=$((2**10))
 declare -i index_size=0
 maxbits=( 12 14 16 18 20 22 24 )
 for i in "${maxbits[@]}"
