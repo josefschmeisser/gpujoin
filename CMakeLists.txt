@@ -29,22 +29,6 @@ message(STATUS "CUDA target architectures: ${CMAKE_CUDA_FLAGS}")
 # TODO cmake 3.17: use FindCUDAToolkit()
 find_library(CUDART_LIBRARY cudart ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
 
-if(ENABLE_PERFBENCHMARKING)
-    include(lib/jevents.cmake)
-    add_compile_definitions(PERF_AVAILABLE=true)
-endif(ENABLE_PERFBENCHMARKING)
-
-include(lib/cub.cmake)
-#include(lib/cuco.cmake)
-include(lib/fast-interconnects.cmake)
-include(lib/gtest.cmake)
-include(lib/oneTBB.cmake)
-include(lib/RadixSpline.cmake)
-#include(lib/warpcore.cmake)
-
-# CUB does not use NDEBUG but rather DEBUG and _DEBUG, so we define the latter here
-add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
-
 # add dependencies
 include(cmake/CPM.cmake)
 
@@ -53,6 +37,22 @@ CPMAddPackage(
   GITHUB_REPOSITORY sleeepyjack/warpcore
   GIT_TAG master
 )
+
+if(ENABLE_PERFBENCHMARKING)
+    include(cmake/lib/jevents.cmake)
+    add_compile_definitions(PERF_AVAILABLE=true)
+endif(ENABLE_PERFBENCHMARKING)
+
+include(cmake/lib/cub.cmake)
+#include(cmake/lib/cuco.cmake)
+include(cmake/lib/fast-interconnects.cmake)
+include(cmake/lib/gtest.cmake)
+include(cmake/lib/oneTBB.cmake)
+include(cmake/lib/RadixSpline.cmake)
+#include(cmake/lib/warpcore.cmake)
+
+# CUB does not use NDEBUG but rather DEBUG and _DEBUG, so we define the latter here
+add_compile_options("$<$<CONFIG:Debug>:-D_DEBUG>")
 
 include_directories(
     ${CMAKE_SOURCE_DIR}
