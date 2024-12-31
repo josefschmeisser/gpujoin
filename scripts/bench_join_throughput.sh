@@ -1,10 +1,6 @@
 #!/bin/bash
 
-#declare -r output="simple_join_msb.yml"
-#declare -r output="simple_join_hj_aggregates_only_50_percent_ht_device_only_2.yml"
-#declare -r output="simple_join_harmonia.yml"
-#declare -r output="simple_join_1gb_hj.yml"
-declare -r output="simple_join_device_only_2024-04-14.yml"
+declare -r output="simple_join.yml"
 
 declare -i key_size=8
 declare -i relation_r_size=$((2**26)) # 0.5GiB

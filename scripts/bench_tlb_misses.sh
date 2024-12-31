@@ -1,6 +1,6 @@
 #!/bin/bash
 
-declare -r name="simple_join_tlb_misses_partitioning"
+declare -r name="simple_join_tlb_misses"
 
 declare -r output="${name}.yml"
 declare -r perf_output="${name}_perf.json"
@@ -32,23 +32,24 @@ do
     step=$(getStep)
     echo "current S size: ${relation_s_size}; step: ${step}"
 
-    #eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"binary_search\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
-    #eval "${command_prefix} ./index_lookup -a plain -i binary_search -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
-    #eval "echo \"\\\" },\" >> ${perf_output}"
+    # plain
+    eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"binary_search\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
+    eval "${command_prefix} ./index_lookup -a plain -i binary_search -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
+    eval "echo \"\\\" },\" >> ${perf_output}"
 
-    #eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"radix_spline\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
-    #eval "${command_prefix} ./index_lookup -a plain -i radix_spline -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
-    #eval "echo \"\\\" },\" >> ${perf_output}"
+    eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"radix_spline\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
+    eval "${command_prefix} ./index_lookup -a plain -i radix_spline -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
+    eval "echo \"\\\" },\" >> ${perf_output}"
 
-    #eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"harmonia\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
-    #eval "${command_prefix} ./index_lookup -a plain -i harmonia -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
-    #eval "echo \"\\\" },\" >> ${perf_output}"
+    eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"harmonia\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
+    eval "${command_prefix} ./index_lookup -a plain -i harmonia -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
+    eval "echo \"\\\" },\" >> ${perf_output}"
 
-    #eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"btree\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
-    #eval "${command_prefix} ./index_lookup -a plain -i btree -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
-    #eval "echo \"\\\" },\" >> ${perf_output}"
+    eval "echo -n \"{ \\\"approach\\\": \\\"plain\\\", \\\"index\\\": \\\"btree\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
+    eval "${command_prefix} ./index_lookup -a plain -i btree -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
+    eval "echo \"\\\" },\" >> ${perf_output}"
 
-
+    # partitioning
     eval "echo -n \"{ \\\"approach\\\": \\\"partitioning\\\", \\\"index\\\": \\\"binary_search\\\", \\\"num_lookups\\\": ${relation_r_size}, \\\"num_elements\\\": ${relation_s_size}, \\\"perf_output\\\": \\\"\" >> ${perf_output}"
     eval "${command_prefix} ./index_lookup -a partitioning -i binary_search -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
     eval "echo \"\\\" },\" >> ${perf_output}"
@@ -65,7 +66,8 @@ do
     eval "${command_prefix} ./index_lookup -a partitioning -i btree -l ${relation_r_size} -e ${relation_s_size} --dataset dense -o ${output}"
     eval "echo \"\\\" },\" >> ${perf_output}"
 
-    #eval "${command_prefix} ./index_lookup -a hj -i no_op -l ${relation_r_size} -e ${relation_s_size} --dataset dense -p uniform_unique -o ${output}"
+    # hash join
+    eval "${command_prefix} ./index_lookup -a hj -i no_op -l ${relation_r_size} -e ${relation_s_size} --dataset dense -p uniform_unique -o ${output}"
 
     relation_s_size=relation_s_size+step
 done

@@ -1,15 +1,13 @@
 #!/bin/bash
 
-declare -r output="2024-06-15_window_size.yml"
+declare -r output="window_size.yml"
 
 declare -i key_size=8
 # all sizes in terms of the number of tuples
 declare -i relation_r_size=$((2**26)) # 0.5GiB
 declare -i relation_s_size=$((100*1024**3 / key_size)) # 100GiB / key_size
-#declare -i window_start_size=$((2**22)) # -> 32MiB
 declare -i window_start_size=$((2**18)) # -> 2MiB
 declare -i window_size=window_start_size
-#declare -i step=window_start_size
 declare -i initial_step=window_start_size
 
 function getStep {
