@@ -1,0 +1,14 @@
+name: gpujoin
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - libhwloc
+  - libnuma
+  - cuda-cudart=11.4
+  - cuda-cudart-dev=11.4
+  - cuda-nvcc=11.4
+  - c-compiler
+  - cxx-compiler
+  - gcc_linux-64=10.*
+  - sysroot_linux-64==2.34
