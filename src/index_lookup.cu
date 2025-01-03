@@ -9,6 +9,7 @@
 #include <string>
 
 #include <oneapi/tbb/parallel_sort.h>
+#include <cuda/atomic>
 //#include <warpcore/single_value_hash_table.cuh>
 #include <warpcore/multi_value_hash_table.cuh>
 
