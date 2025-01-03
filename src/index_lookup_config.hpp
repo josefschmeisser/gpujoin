@@ -7,9 +7,6 @@
 #include "numa_allocator.hpp"
 #include "mmap_allocator.hpp"
 
-// TODO check crashes
-//#define ONLY_AGGREGATES
-
 enum class dataset_type : unsigned { dense, sparse };
 
 enum class lookup_pattern_type : unsigned { uniform, uniform_unique, zipf };
@@ -47,6 +44,28 @@ using value_t = uint64_t;
 
 // allocators:
 
+#if defined(__powerpc64__)
+
+// host allocator
+//template<class T> using host_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
+template<class T> using host_allocator_t = mmap_allocator<T, huge_1gb, 0>;
+//template<class T> using host_allocator_t = std::allocator<T>;
+
+// device allocators
+//template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::device>;
+//template<class T> using device_index_allocator = cuda_allocator<T, cuda_allocation_type::zero_copy>;
+template<class T> using device_index_allocator = mmap_allocator<T, huge_1gb, 0>;
+
+//using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::device>;
+//using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
+using indexed_allocator_t = mmap_allocator<index_key_t, huge_1gb, 0>;
+
+//using lookup_keys_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::device>;
+//using lookup_keys_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
+using lookup_keys_allocator_t = mmap_allocator<index_key_t, huge_1gb, 0>;
+
+#else
+
 // host allocator
 template<class T> using host_allocator_t = cuda_allocator<T, cuda_allocation_type::zero_copy>;
 //template<class T> using host_allocator_t = mmap_allocator<T, huge_1gb, 0>;
@@ -64,6 +83,8 @@ using indexed_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::ze
 //using lookup_keys_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::device>;
 using lookup_keys_allocator_t = cuda_allocator<index_key_t, cuda_allocation_type::zero_copy>;
 //using lookup_keys_allocator_t = mmap_allocator<index_key_t, huge_1gb, 0>;
+
+#endif
 
 template<class T> using device_exclusive_allocator = cuda_allocator<T, cuda_allocation_type::device>;
 
