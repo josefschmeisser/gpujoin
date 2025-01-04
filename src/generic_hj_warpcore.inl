@@ -86,3 +86,43 @@ __global__ void hj_warpcore_probe_kernel(const ArgsType args) {
         }
     }
 }
+
+template<class ArgsType>
+__global__ void hj_warpcore_single_value_probe_kernel(const ArgsType args) {
+    namespace cg = cooperative_groups;
+
+    using key_t = typename ArgsType::key_type;
+    using index_t = typename decltype(args.map)::index_type;
+
+    auto* __restrict__ tids = args.tids;
+    const auto* __restrict__ probe_side_rel = args.probe_side_rel;
+    const auto& map = args.map;
+    auto ht_group = cg::tiled_partition<map.cg_size()>(cg::this_thread_block());
+
+    const auto limit = (args.probe_side_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
+    const auto index = blockIdx.x * blockDim.x + threadIdx.x;
+    const auto stride = blockDim.x * gridDim.x;
+    for (device_size_t i = index; i < limit; i += stride) {
+        const bool active = i < args.probe_side_size;
+        uint32_t active_mask = ht_group.ballot(active);
+
+        key_t key {};
+        if (active) {
+            key = probe_side_rel[i];
+        }
+
+        while (active_mask) {
+            const auto leader = __ffs(active_mask) - 1;
+            const auto leader_key = ht_group.shfl(key, leader);
+            size_t value;
+            auto status = map.retrieve(leader_key, value, ht_group);
+
+            // Status::none() indicates a match
+            if (status == warpcore::Status::none() && ht_group.thread_rank() == leader) {
+                tids[value] = leader_key;
+            }
+
+            active_mask ^= 1UL << leader;
+        }
+    }
+}

@@ -10,7 +10,7 @@
 
 #include <oneapi/tbb/parallel_sort.h>
 #include <cuda/atomic>
-//#include <warpcore/single_value_hash_table.cuh>
+#include <warpcore/single_value_hash_table.cuh>
 #include <warpcore/multi_value_hash_table.cuh>
 
 #include "device_array.hpp"
@@ -401,13 +401,62 @@ struct hj_warpcore_approach : abstract_approach {
 
         size_t num_blocks = 1 * device_properties.multiProcessorCount;
         hj_warpcore_build_kernel<<<num_blocks, config.block_size>>>(args);
-        //hj_warpcore_build_kernel<<<num_blocks, 32>>>(args);
         cudaDeviceSynchronize();
         record_timestamp(m);
 
         num_blocks = 4 * device_properties.multiProcessorCount;
         hj_warpcore_probe_kernel<<<num_blocks, config.block_size>>>(args);
-        //hj_warpcore_probe_kernel<<<num_blocks, 32>>>(args);
+        cudaDeviceSynchronize();
+        record_timestamp(m);
+    }
+};
+
+template<class IndexType>
+struct hj_warpcore_single_value_approach : abstract_approach {
+    using hash_table_t = warpcore::SingleValueHashTable<
+        index_key_t,
+        device_size_t,
+        warpcore::defaults::empty_key<index_key_t>(), // empty sentinel
+        warpcore::defaults::tombstone_key<index_key_t>(), // tombstone sentinel
+        warpcore::defaults::probing_scheme_t<index_key_t, 8>>; // the cooperative probing scheme
+
+    ~hj_warpcore_single_value_approach() override = default;
+
+    void initialize(query_data& d) override {}
+
+    void run(query_data& d, measurement& m) override {
+        record_timestamp(m);
+
+        hash_table_t ht { d.lookup_keys.size() * 2 };
+        cudaDeviceSynchronize();
+        record_timestamp(m);
+
+        const auto& config = get_experiment_config();
+        const auto& device_properties = get_device_properties(0);
+        auto& d_build_side = d.d_lookup_keys;
+        auto& d_probe_side = d.d_indexed;
+        //printf("build side size: %lu; probe side size: %lu\n", d_build_side.size(), d_probe_side.size());
+
+        using ref_type = hash_table_t;
+        const hj_warpcore_args<index_key_t, ref_type> args {
+            // Inputs
+            d_build_side.data(),
+            d_build_side.size(),
+            d_probe_side.data(),
+            d_probe_side.size(),
+            ht,
+            // State and outputs
+            d.d_tids.data()
+        };
+        record_timestamp(m);
+
+        size_t num_blocks = 1 * device_properties.multiProcessorCount;
+        hj_warpcore_build_kernel<<<num_blocks, config.block_size>>>(args);
+        cudaDeviceSynchronize();
+        record_timestamp(m);
+
+        num_blocks = 4 * device_properties.multiProcessorCount;
+        hj_warpcore_single_value_probe_kernel<<<num_blocks, config.block_size>>>(args);
         cudaDeviceSynchronize();
         record_timestamp(m);
     }
@@ -420,7 +469,8 @@ static const std::map<std::string, std::shared_ptr<abstract_approach_dispatcher>
     { "partitioning", std::make_shared<approach_dispatcher<partitioning_approach>>() },
     { "hj", std::make_shared<approach_dispatcher<hj_approach>>() },
     //{ "hj_cuco", std::make_shared<approach_dispatcher<hj_cuco_approach>>() },
-    { "hj_warpcore", std::make_shared<approach_dispatcher<hj_warpcore_approach>>() }
+    { "hj_warpcore", std::make_shared<approach_dispatcher<hj_warpcore_approach>>() },
+    { "hj_warpcore_sv", std::make_shared<approach_dispatcher<hj_warpcore_single_value_approach>>() }
 };
 
 static void add_index_configuration_description(std::vector<std::pair<std::string, std::string>>& pairs, const query_data& qd) {

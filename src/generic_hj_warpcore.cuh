@@ -26,4 +26,7 @@ __global__ void hj_warpcore_build_kernel(ArgsType args);
 template<class ArgsType>
 __global__ void hj_warpcore_probe_kernel(const ArgsType args);
 
+template<class ArgsType>
+__global__ void hj_warpcore_single_value_probe_kernel(const ArgsType args);
+
 #include "generic_hj_warpcore.inl"
