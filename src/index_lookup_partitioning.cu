@@ -55,7 +55,9 @@ struct PartitionedLookupArgs {
     uint32_t rel_padding_length;
     //uint64_t* rel_partition_offsets;
     unsigned long long* rel_partition_offsets;
-    uint32_t* task_assignments;
+    uint32_t* num_tasks;
+    uint32_t* task_begin;
+    uint32_t* task_end;
     uint32_t radix_bits;
     uint32_t ignore_bits;
     // Output
@@ -76,7 +78,9 @@ struct stream_state {
 
     device_array_wrapper<dummy_payload_t> d_payloads;
     device_array_wrapper<value_t> d_dst_tids;
-    device_array_wrapper<uint32_t> d_task_assignments;
+    device_array_wrapper<uint32_t> d_num_tasks;
+    device_array_wrapper<uint32_t> d_task_begin;
+    device_array_wrapper<uint32_t> d_task_end;
 
     device_array_wrapper<ScanState<unsigned long long>> d_prefix_scan_state;
 
@@ -105,7 +109,10 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
     }
 
     // allocate output arrays
-    state->d_task_assignments = create_device_array<uint32_t>(grid_size + 1); // TODO check
+    uint32_t fanout = 1U << radix_bits;
+    state->d_num_tasks = create_device_array<uint32_t>(1);
+    state->d_task_begin = create_device_array<uint32_t>(fanout + grid_size);
+    state->d_task_end = create_device_array<uint32_t>(fanout + grid_size);
 
     // see: device_exclusive_prefix_sum_initialize
     const auto prefix_scan_state_len = gpu_prefix_sum::state_size(grid_size, block_size);
@@ -153,7 +160,9 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
         static_cast<uint32_t>(state->partitioned_relation_inst.relation.size()), // TODO check
         state->partitioned_relation_inst.padding_length(),
         state->partition_offsets_inst.offsets.data(),
-        state->d_task_assignments.data(),
+        state->d_num_tasks.data(),
+        state->d_task_begin.data(),
+        state->d_task_end.data(),
         radix_bits,
         config.partitioning_approach_ignore_bits,
         //state->d_dst_tids.data()
@@ -182,74 +191,75 @@ __global__ void lookup_kernel(const IndexStructureType index_structure, device_s
     }
 }
 
-// TODO replace
 __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
     const auto fanout = 1U << args.radix_bits;
+    const auto max_tasks = gridDim.x + fanout;
 
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         const uint32_t rel_size = args.rel_length - args.rel_padding_length*fanout;
         const uint32_t avg_task_size = (rel_size + gridDim.x - 1U) / gridDim.x;
 
-        args.task_assignments[0] = 0U;
-        uint32_t task_id = 1U;
-        uint32_t task_size = 0U;
-        for (uint32_t p = 0U; p < fanout && task_id < gridDim.x; ++p) {
-            const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
-            const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
+    uint32_t task_id = 0U;
+    uint32_t partition_id = 0U;
 
-            task_size += partition_size;
-            if (task_size >= avg_task_size) {
-                args.task_assignments[task_id] = p + 1U;
-// TODO
-                task_size = 0U;
-                task_id += 1;
-            }
+    uint32_t partition_pos = args.rel_partition_offsets[partition_id];
+    uint32_t partition_end = (partition_id + 1U < fanout)
+            ? args.rel_partition_offsets[partition_id + 1U] - args.rel_padding_length
+            : args.rel_length;
+
+    while (task_id < max_tasks && partition_id < fanout) {
+        args.task_begin[task_id] = partition_pos;
+
+        if (partition_pos + avg_task_size < partition_end) {
+        args.task_end[task_id] = partition_pos + avg_task_size;
+        partition_pos += avg_task_size;
+        }
+        else {
+        args.task_end[task_id] = partition_end;
+
+        partition_id += 1U;
+        partition_pos = args.rel_partition_offsets[partition_id];
+        partition_end = (partition_id + 1U < fanout)
+                    ? args.rel_partition_offsets[partition_id + 1U] - args.rel_padding_length
+            : args.rel_length;
         }
 
-        for (uint32_t i = task_id; i <= gridDim.x; ++i) {
-            args.task_assignments[i] = fanout;
+        task_id += 1U;
+    }
+
+    *args.num_tasks = task_id;
+
+        for (uint32_t i = task_id; i < max_tasks; ++i) {
+            args.task_begin[i] = 0;
+            args.task_end[i] = 0;
         }
     }
 }
 
 template<class TupleType, class IndexStructureType>
 __global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
-    const auto fanout = 1U << args.radix_bits;
+    for (uint32_t task_id = blockIdx.x; task_id < *args.num_tasks; task_id += gridDim.x) {
+        const TupleType* __restrict__ rel_begin = reinterpret_cast<const TupleType*>(args.rel) + args.task_begin[task_id];
+        const TupleType* __restrict__ rel_end = reinterpret_cast<const TupleType*>(args.rel) + args.task_end[task_id];
+        const uint32_t rel_size = rel_end - rel_begin;
+        const uint32_t loop_limit = (rel_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
 
-    for (uint32_t p = args.task_assignments[blockIdx.x]; p < args.task_assignments[blockIdx.x + 1U]; ++p) {
-        const TupleType* __restrict__ relation = reinterpret_cast<const TupleType*>(args.rel) + args.rel_partition_offsets[p];
-
-        const uint32_t partition_upper = (p + 1U < fanout) ? args.rel_partition_offsets[p + 1U] - args.rel_padding_length : args.rel_length;
-        const uint32_t partition_size = static_cast<uint32_t>(partition_upper - args.rel_partition_offsets[p]);
-        const uint32_t loop_limit = (partition_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
-
-#if 0
-        // standard lookup implementation
-        for (uint32_t i = threadIdx.x; i < partition_size; i += blockDim.x) {
-            const TupleType tuple = relation[i];
-            const auto tid = index_structure.lookup(tuple.key);
-            args.tids[tuple.value] = tid;
-        }
-#else
         // cooperative lookup implementation
         for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
-            const bool active = i < partition_size;
-            const TupleType tuple = active ? relation[i] : TupleType();
+            const bool active = i < rel_size;
+            const TupleType tuple = active ? rel_begin[i] : TupleType();
             const auto tid = index_structure.cooperative_lookup(active, tuple.key);
             if (active) {
                 args.tids[tuple.value] = tid;
             }
         }
-#endif
     }
 }
-
 
 template<class K, class V>
 std::string tmpl_to_string(const Tuple<K, V>& tuple) {
     return std::to_string(tuple.key);
 }
-
 
 void dump_partitions(const stream_state& state) {
     const auto offsets = state.partition_offsets_inst.offsets.to_host_accessible();
@@ -271,10 +281,13 @@ void dump_partitions(const stream_state& state) {
     }
 }
 
-
 void dump_task_assignments(const stream_state& state) {
-    const auto assignment = state.d_task_assignments.to_host_accessible();
-    std::cout << "task assignment: " << stringify(assignment.data(), assignment.data() + assignment.size()) << std::endl;
+    const auto num_tasks = state.d_num_tasks.to_host_accessible();
+    const auto task_begin = state.d_task_begin.to_host_accessible();
+    const auto task_end = state.d_task_end.to_host_accessible();
+    std::cout << "num tasks: " << *num_tasks.data() << std::endl;
+    std::cout << "task begin: " << stringify(task_begin.data(), task_begin.data() + task_begin.size()) << std::endl;
+    std::cout << "task end: " << stringify(task_end.data(), task_end.data() + task_end.size()) << std::endl;
 }
 
 template<class IndexedVectorType, class ResultVectorType>
