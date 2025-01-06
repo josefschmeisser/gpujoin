@@ -23,7 +23,7 @@ while [ $(bc -l <<< "$zipf_parameter <= $zipf_parameter_end") -eq 1 ]
 do
     echo "current zipf parameter: ${zipf_parameter}; step: ${zipf_step}"
 
-    eval "${cmd} -a hj_warpcore -i no_op -z ${zipf_parameter}"
+    eval "${cmd} -a hj_warpcore -i no_op -z ${zipf_parameter} -b 512"
     eval "${cmd} -a partitioning -i binary_search -z ${zipf_parameter}"
     eval "${cmd} -a partitioning -i radix_spline -z ${zipf_parameter}"
     eval "${cmd} -a partitioning -i harmonia -z ${zipf_parameter}"
