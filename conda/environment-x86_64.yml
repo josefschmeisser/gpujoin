@@ -5,10 +5,14 @@ channels:
 dependencies:
   - libhwloc
   - libnuma
+  - cmake
   - cuda-cudart=11.4
   - cuda-cudart-dev=11.4
   - cuda-nvcc=11.4
   - c-compiler
   - cxx-compiler
   - gcc_linux-64=10.*
-  - sysroot_linux-64==2.34
+  - gxx_linux-64=10.*
+  - sysroot_linux-64==2.28
+  - tbb=2021.9.0
+  - tbb-devel=2021.9.0
