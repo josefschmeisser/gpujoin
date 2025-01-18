@@ -40,7 +40,8 @@ using value_t = uint32_t;
 */
 
 using index_key_t = uint64_t;
-using value_t = uint64_t;
+//using value_t = uint64_t;
+using value_t = index_key_t;
 
 // allocators:
 

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -8,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <oneapi/tbb/parallel_sort.h>
 #include <oneapi/tbb/parallel_sort.h>
 #include <cuda/atomic>
 #include <warpcore/single_value_hash_table.cuh>
@@ -57,10 +59,15 @@ query_data::query_data() {
     printf("generating datasets...\n");
     indexed.resize(config.num_elements);
     lookup_keys.resize(config.num_lookups);
+    ground_truth.resize(config.num_lookups);
     generate_datasets<index_key_t>(config.dataset, config.max_bits, indexed, config.lookup_pattern, config.zipf_factor, lookup_keys);
     if (config.sorted_lookups) {
         printf("sorting lookups...\n");
         oneapi::tbb::parallel_sort(lookup_keys.begin(), lookup_keys.end());
+        ground_truth.assign(lookup_keys.begin(), lookup_keys.end());
+    } else {
+        ground_truth.assign(lookup_keys.begin(), lookup_keys.end());
+        oneapi::tbb::parallel_sort(ground_truth.begin(), ground_truth.end());
     }
     //std::cout << "lookups: " << stringify(lookup_keys.begin(), lookup_keys.end()) << std::endl;
 
@@ -116,6 +123,7 @@ bool query_data::validate_results() {
 #ifdef ONLY_AGGREGATES
     // TODO
 #else
+/*
     auto h_tids = d_tids.to_host_accessible<host_allocator_t<value_t>>();
     auto h_tids_raw = h_tids.data();
 
@@ -135,6 +143,17 @@ bool query_data::validate_results() {
             return false;
         }
     }
+    printf("validation complete\n");
+*/
+
+    auto h_tids = d_tids.to_host_accessible<host_allocator_t<value_t>>();
+    auto h_tids_vector_view = h_tids.to_vector_view();
+    tbb::parallel_sort(h_tids_vector_view);
+
+    if (!std::equal(std::begin(h_tids_vector_view), std::end(h_tids_vector_view), std::begin(ground_truth))) {
+        return false;
+    }
+
     printf("validation complete\n");
 #endif
 
@@ -385,6 +404,9 @@ struct hj_warpcore_approach : abstract_approach {
         auto& d_build_side = d.d_lookup_keys;
         auto& d_probe_side = d.d_indexed;
         //printf("build side size: %lu; probe side size: %lu\n", d_build_side.size(), d_probe_side.size());
+
+        size_t init = 0;
+        cudaMemcpyToSymbol(hj_warpcore_result_count, &init, sizeof(size_t));
 
         using ref_type = hash_table_t;
         const hj_warpcore_args<index_key_t, ref_type> args {

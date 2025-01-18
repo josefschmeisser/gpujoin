@@ -11,7 +11,7 @@
 struct query_data {
     std::unique_ptr<abstract_index<index_key_t>> index_structure;
 
-    std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys;
+    std::vector<index_key_t, host_allocator_t<index_key_t>> indexed, lookup_keys, ground_truth;
 
     device_array_wrapper<index_key_t> d_indexed;
     device_array_wrapper<index_key_t> d_lookup_keys;

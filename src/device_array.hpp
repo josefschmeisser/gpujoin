@@ -9,6 +9,7 @@
 
 #include "allocator_traits.hpp"
 #include "cuda_allocator.hpp"
+#include "vector_view.hpp"
 
 template<class T>
 struct allocation_concept {
@@ -227,6 +228,10 @@ public:
         if (ret != cudaSuccess) throw std::runtime_error("cudaMemcpy failed, code: " + std::to_string(ret));
 
         return new_allocation;
+    }
+
+    vector_view<T> to_vector_view() {
+        return vector_view<T> { data(), size() };
     }
 
     template<class Allocator>
