@@ -193,7 +193,7 @@ __global__ void hj_warpcore_probe_kernel(const ArgsType args) {
         while (true) {
             straggler_mask = __ballot_sync(FULL_MASK, remaining_count > 0);
             straggler_count = __popc(straggler_mask);
-            if (straggler_count < 16) break;
+            if (straggler_count < 4) break;
 
             // inactive threads remain in this loop to facilitate the ballot operation
             if (remaining_count > 0) {
