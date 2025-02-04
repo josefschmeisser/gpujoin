@@ -41,7 +41,7 @@ using dummy_payload_t = index_key_t; // the payload is not used
 using rel_tuple_t = Tuple<index_key_t, dummy_payload_t>;
 
 static const int parallel_streams = 2;
-static const int block_size = 128;
+//static const int block_size = 128;
 static int grid_size = 0;
 
 // 48 kiB shared memory:
@@ -60,6 +60,7 @@ struct PartitionedLookupArgs {
     uint32_t* task_end;
     uint32_t radix_bits;
     uint32_t ignore_bits;
+    uint32_t block_size;
     // Output
     value_t* __restrict__ tids;
 };
@@ -94,6 +95,7 @@ struct stream_state {
 
 std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_keys, uint32_t num_lookups, value_t* d_dst_tids) {
     const auto& config = get_experiment_config();
+    const auto block_size = config.block_size;
     device_exclusive_allocator<int> device_allocator;
     auto state = std::make_unique<stream_state>();
     CubDebugExit(cudaStreamCreate(&state->stream));
@@ -165,6 +167,7 @@ std::unique_ptr<stream_state> create_stream_state(const index_key_t* d_lookup_ke
         state->d_task_end.data(),
         radix_bits,
         config.partitioning_approach_ignore_bits,
+        static_cast<uint32_t>(block_size),
         //state->d_dst_tids.data()
         d_dst_tids
     });
@@ -237,7 +240,7 @@ __global__ void partitioned_lookup_assign_tasks(PartitionedLookupArgs args) {
 }
 
 template<class TupleType, class IndexStructureType>
-__global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
+__global__ void partitioned_lookup_kernel_old(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
     for (uint32_t task_id = blockIdx.x; task_id < *args.num_tasks; task_id += gridDim.x) {
         const TupleType* __restrict__ rel_begin = reinterpret_cast<const TupleType*>(args.rel) + args.task_begin[task_id];
         const TupleType* __restrict__ rel_end = reinterpret_cast<const TupleType*>(args.rel) + args.task_end[task_id];
@@ -254,6 +257,148 @@ __global__ void partitioned_lookup_kernel(const IndexStructureType index_structu
             }
         }
     }
+}
+
+// TODO move
+__device__ size_t partitioned_lookup_result_count = 0;
+
+template<class T>
+__forceinline__ __device__ void do_flush(T* dest, T* src, uint32_t count, uint32_t thread_rank) {
+    for (uint32_t i = thread_rank; i < count; i += warpSize) {
+        dest[i] = src[i];
+    }
+}
+
+template<class TupleType, class IndexStructureType>
+__global__ void partitioned_lookup_kernel(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
+    static constexpr uint32_t size_per_warp_soft = 128; // TODO tune
+    static constexpr uint32_t size_per_warp_hard = size_per_warp_soft + 32;
+
+    const auto lane_id = threadIdx.x & (warpSize - 1);
+    const auto warp_id = threadIdx.x / warpSize;
+    const int warp_count = args.block_size / warpSize;
+
+    using key_type = decltype(TupleType::key);
+    extern __shared__ uint8_t shared_mem[];
+    size_t offset = 0;
+    uint32_t* buffer_offset = reinterpret_cast<uint32_t*>(&shared_mem[offset]);
+    offset += sizeof(uint32_t) * warp_count;
+    key_type* buffer = reinterpret_cast<key_type*>(&shared_mem[offset]);
+    //offset += sizeof(key_type) * warp_count * size_per_warp_hard;
+
+    if (lane_id == 0) {
+        buffer_offset[warp_id] = 0;
+    }
+
+    for (uint32_t task_id = blockIdx.x; task_id < *args.num_tasks; task_id += gridDim.x) {
+        const TupleType* __restrict__ rel_begin = reinterpret_cast<const TupleType*>(args.rel) + args.task_begin[task_id];
+        const TupleType* __restrict__ rel_end = reinterpret_cast<const TupleType*>(args.rel) + args.task_end[task_id];
+        const uint32_t rel_size = rel_end - rel_begin;
+        const uint32_t loop_limit = (rel_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
+
+        // cooperative lookup implementation
+        for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
+            const bool active = i < rel_size;
+            const TupleType tuple = active ? rel_begin[i] : TupleType();
+            const auto tid = index_structure.cooperative_lookup(active, tuple.key);
+
+            const bool any_active = __ballot_sync(FULL_MASK, active);
+            if (!any_active) continue;
+
+            uint32_t pos = 0;
+            if (active) {
+                pos = tmpl_atomic_add(&buffer_offset[warp_id], 1U);
+                buffer[warp_id * size_per_warp_hard + pos] = tuple.key;
+            }
+
+            const bool flush = __ballot_sync(FULL_MASK, pos >= size_per_warp_soft);
+            if (!flush) continue;
+
+            size_t global_pos;
+            if (lane_id == 0) {
+                global_pos = tmpl_atomic_add(&partitioned_lookup_result_count, static_cast<size_t>(buffer_offset[warp_id]));
+            }
+            global_pos = __shfl_sync(FULL_MASK, global_pos, 0);
+            do_flush(args.tids + global_pos, &buffer[warp_id * size_per_warp_hard], buffer_offset[warp_id], lane_id);
+            if (lane_id == 0) {
+                buffer_offset[warp_id] = 0;
+            }
+        }
+    }
+
+    __syncwarp();
+    size_t global_pos;
+    if (lane_id == 0) {
+        global_pos = tmpl_atomic_add(&partitioned_lookup_result_count, static_cast<size_t>(buffer_offset[warp_id]));
+    }
+    global_pos = __shfl_sync(FULL_MASK, global_pos, 0);
+    do_flush(args.tids + global_pos, &buffer[warp_id * size_per_warp_hard], buffer_offset[warp_id], lane_id);
+}
+
+template<class TupleType, class IndexStructureType>
+__global__ void partitioned_lookup_kernel_2(const IndexStructureType index_structure, const PartitionedLookupArgs args) {
+    static constexpr uint32_t size_per_warp = 128; // TODO tune
+
+    const auto lane_id = threadIdx.x & (warpSize - 1);
+    const auto warp_id = threadIdx.x / warpSize;
+    const int warp_count = args.block_size / warpSize;
+
+    using key_type = decltype(TupleType::key);
+    extern __shared__ uint8_t shared_mem[];
+    size_t offset = 0;
+    uint32_t* buffer_offset = reinterpret_cast<uint32_t*>(&shared_mem[offset]);
+    offset += sizeof(uint32_t) * warp_count;
+    key_type* buffer = reinterpret_cast<key_type*>(&shared_mem[offset]);
+
+    if (lane_id == 0) {
+        buffer_offset[warp_id] = 0;
+    }
+
+    for (uint32_t task_id = blockIdx.x; task_id < *args.num_tasks; task_id += gridDim.x) {
+        const TupleType* __restrict__ rel_begin = reinterpret_cast<const TupleType*>(args.rel) + args.task_begin[task_id];
+        const TupleType* __restrict__ rel_end = reinterpret_cast<const TupleType*>(args.rel) + args.task_end[task_id];
+        const uint32_t rel_size = rel_end - rel_begin;
+        const uint32_t loop_limit = (rel_size + warpSize - 1) & ~(warpSize - 1); // round to next multiple of warpSize
+
+        // cooperative lookup implementation
+        for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
+            bool active = i < rel_size;
+            const TupleType tuple = active ? rel_begin[i] : TupleType();
+            const auto tid = index_structure.cooperative_lookup(active, tuple.key);
+
+            while (__ballot_sync(FULL_MASK, active)) {
+                uint32_t pos = 0;
+                if (active) {
+                    pos = tmpl_atomic_add(&buffer_offset[warp_id], 1U);
+                    if (pos < size_per_warp) {
+                        buffer[warp_id * size_per_warp + pos] = tuple.key;
+                        active = false;
+                    }
+                }
+
+                const bool flush = __ballot_sync(FULL_MASK, pos >= size_per_warp);
+                if (flush) {
+                    size_t global_pos;
+                    if (lane_id == 0) {
+                        global_pos = tmpl_atomic_add(&partitioned_lookup_result_count, static_cast<size_t>(size_per_warp));
+                    }
+                    global_pos = __shfl_sync(FULL_MASK, global_pos, 0);
+                    do_flush(args.tids + global_pos, &buffer[warp_id * size_per_warp], size_per_warp, lane_id);
+                    if (lane_id == 0) {
+                        buffer_offset[warp_id] = 0;
+                    }
+                }
+            }
+        }
+    }
+
+    __syncwarp();
+    size_t global_pos;
+    if (lane_id == 0) {
+        global_pos = tmpl_atomic_add(&partitioned_lookup_result_count, static_cast<size_t>(buffer_offset[warp_id]));
+    }
+    global_pos = __shfl_sync(FULL_MASK, global_pos, 0);
+    do_flush(args.tids + global_pos, &buffer[warp_id * size_per_warp], buffer_offset[warp_id], lane_id);
 }
 
 template<class K, class V>
@@ -309,6 +454,9 @@ bool validate_results(const std::vector<index_key_t>& lookup_keys, const Indexed
 
 template<class IndexStructureType>
 void run_on_stream(stream_state& state, IndexStructureType& index_structure, const cudaDeviceProp& device_properties) {
+    const auto& config = get_experiment_config();
+    const auto block_size = config.block_size;
+
     // calculate prefix sum kernel shared memory requirement
     const auto required_shared_mem_bytes = ((block_size + (block_size >> LOG2_NUM_BANKS)) + gpu_prefix_sum::fanout(radix_bits)) * sizeof(uint64_t);
 #ifdef DEBUG_INTERMEDIATE_STATE
@@ -381,7 +529,9 @@ void run_on_stream(stream_state& state, IndexStructureType& index_structure, con
     dump_task_assignments(state);
 #endif
 
-    partitioned_lookup_kernel<rel_tuple_t><<<grid_size, block_size, 0, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
+    size_t init = 0;
+    cudaMemcpyToSymbol(partitioned_lookup_result_count, &init, sizeof(size_t));
+    partitioned_lookup_kernel<rel_tuple_t><<<grid_size, block_size, device_properties.sharedMemPerBlock, state.stream>>>(index_structure.device_index, *state.partitioned_lookup_args);
 }
 
 template<class IndexType>
