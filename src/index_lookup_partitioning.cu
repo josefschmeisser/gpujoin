@@ -298,9 +298,12 @@ __global__ void partitioned_lookup_kernel(const IndexStructureType index_structu
 
         // cooperative lookup implementation
         for (uint32_t i = threadIdx.x; i < loop_limit; i += blockDim.x) {
-            const bool active = i < rel_size;
+            bool active = i < rel_size;
             const TupleType tuple = active ? rel_begin[i] : TupleType();
             const auto tid = index_structure.cooperative_lookup(active, tuple.key);
+
+            static constexpr auto invalid_tid = std::numeric_limits<decltype(tid)>::max();
+            active = active && tid != invalid_tid;
 
             const bool any_active = __ballot_sync(FULL_MASK, active);
             if (!any_active) continue;
@@ -365,6 +368,9 @@ __global__ void partitioned_lookup_kernel_2(const IndexStructureType index_struc
             bool active = i < rel_size;
             const TupleType tuple = active ? rel_begin[i] : TupleType();
             const auto tid = index_structure.cooperative_lookup(active, tuple.key);
+
+            static constexpr auto invalid_tid = std::numeric_limits<decltype(tid)>::max();
+            active = active && tid != invalid_tid;
 
             while (__ballot_sync(FULL_MASK, active)) {
                 uint32_t pos = 0;
